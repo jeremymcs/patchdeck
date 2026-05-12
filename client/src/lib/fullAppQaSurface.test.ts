@@ -279,6 +279,8 @@ test("dashboard keeps the QA-tested PR, repo, feedback, and side-panel workflows
     ["dashboard error pill", "dashboard-error-pill"],
     ["dashboard errors panel", "dashboard-errors-panel"],
     ["dashboard clear issue failure", "dashboard-clear-issue-failure"],
+    ["dashboard errors roll-up toggle", "dashboard-errors-rollup-toggle"],
+    ["dashboard errors roll-up summary", "dashboard-errors-rollup-summary"],
   ] satisfies SourceExpectation[]) {
     assertHasTestId(sourceFile, label, testId);
   }
@@ -311,8 +313,11 @@ test("dashboard keeps the QA-tested PR, repo, feedback, and side-panel workflows
   assertHasStringValue(sourceFile, "drained ask copy", "Ask Agent is paused by drain mode.");
   assertHasStringValue(sourceFile, "queued drain copy", "Queued automation is paused until drain mode is disabled.");
   assertHasStringValue(sourceFile, "dashboard errors heading", "Needs attention");
+  assertHasStringValue(sourceFile, "dashboard errors roll-up label", "Roll up");
+  assertHasStringValue(sourceFile, "dashboard errors expand label", "Expand");
   assertHasExpression(sourceFile, "dashboard drain state", /\bglobalDrainMode\b/);
   assertHasExpression(sourceFile, "dashboard active error count", /\bactiveErrorCount\b/);
+  assertHasExpression(sourceFile, "dashboard errors roll-up state", /\bareErrorsRolledUp\b/);
 });
 
 test("issues page keeps the QA-tested issue monitor and work surface wired", async () => {

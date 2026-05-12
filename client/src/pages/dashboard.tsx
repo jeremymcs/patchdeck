@@ -2,7 +2,7 @@ import { memo, useEffect, useMemo, useRef, useState, type MouseEvent } from "rea
 import { Link } from "wouter";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import * as Collapsible from "@radix-ui/react-collapsible";
-import { Activity as ActivityIcon, AlertTriangle, Bot, Trash2 } from "lucide-react";
+import { Activity as ActivityIcon, AlertTriangle, Bot, ChevronDown, ChevronUp, Trash2 } from "lucide-react";
 import { queryClient, apiRequest, fetchJson } from "@/lib/queryClient";
 import type { ActivityItem, ActivitySnapshot, Config, FeedbackItem, HealingSession, LogEntry, OperatorWarning, PR, PRQuestion, RuntimeState, WatchedRepo } from "@shared/schema";
 import { AppHeader } from "@/components/AppHeader";
@@ -391,14 +391,20 @@ function DashboardErrorsPanel({
   activities,
   onClearIssueFailure,
   isClearingIssueFailure,
+  rolledUp,
+  onToggleRolledUp,
 }: {
   activities: ActivitySnapshot;
   onClearIssueFailure: (activity: ActivityItem) => void;
   isClearingIssueFailure: boolean;
+  rolledUp: boolean;
+  onToggleRolledUp: () => void;
 }) {
   if (activities.failed.length === 0) {
     return null;
   }
+
+  const latestError = activities.failed[0];
 
   return (
     <section
@@ -412,70 +418,94 @@ function DashboardErrorsPanel({
           Needs attention
           <span className="font-mono text-foreground">{activities.failed.length}</span>
         </div>
-        <div className="text-[11px] text-muted-foreground">
-          Failed jobs stay here until retried or cleared from activity.
-        </div>
-      </div>
-      <div className="grid gap-2 lg:grid-cols-2">
-        {activities.failed.slice(0, 4).map((activity) => (
-          <div
-            key={activity.id}
-            className="rounded-md border border-destructive/40 bg-background/70 px-3 py-2"
-            data-testid={`dashboard-error-${activity.id}`}
-          >
-            <div className="flex min-w-0 items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="truncate text-[13px] font-medium text-foreground">{activity.label}</div>
-                {activity.detail && (
-                  <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{activity.detail}</div>
-                )}
-              </div>
-              <div className="flex shrink-0 flex-wrap justify-end gap-2">
-                {activity.kind === "work_issue" && parseIssueTargetId(activity.targetId) && (
-                  <button
-                    type="button"
-                    onClick={() => onClearIssueFailure(activity)}
-                    disabled={isClearingIssueFailure}
-                    className="inline-flex items-center gap-1 rounded-md border border-destructive/50 px-2 py-0.5 text-[10px] uppercase tracking-wider text-destructive transition-colors hover:bg-destructive hover:text-background disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
-                    data-testid="dashboard-clear-issue-failure"
-                  >
-                    {isClearingIssueFailure ? (
-                      "Clearing"
-                    ) : (
-                      <>
-                        <Trash2 className="h-3 w-3" aria-hidden="true" />
-                        Clear
-                      </>
-                    )}
-                  </button>
-                )}
-                {activity.targetUrl && (
-                  <a
-                    href={activity.targetUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="shrink-0 rounded-md border border-destructive/50 px-2 py-0.5 text-[10px] uppercase tracking-wider text-destructive transition-colors hover:bg-destructive hover:text-background focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
-                  >
-                    Open
-                  </a>
-                )}
-              </div>
-            </div>
-            {activity.lastError && (
-              <div
-                className="mt-2 line-clamp-3 whitespace-pre-wrap break-words text-[11px] leading-4 text-destructive"
-                title={activity.lastError}
-              >
-                {activity.lastError}
-              </div>
-            )}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="text-[11px] text-muted-foreground">
+            Failed jobs stay here until retried or cleared from activity.
           </div>
-        ))}
-      </div>
-      {activities.failed.length > 4 && (
-        <div className="mt-2 text-[11px] text-muted-foreground">
-          {activities.failed.length - 4} more failed job{activities.failed.length - 4 === 1 ? "" : "s"} in activity.
+          <button
+            type="button"
+            onClick={onToggleRolledUp}
+            aria-expanded={!rolledUp}
+            data-testid="dashboard-errors-rollup-toggle"
+            className="inline-flex items-center gap-1 rounded-md border border-destructive/50 px-2 py-0.5 text-[10px] uppercase tracking-wider text-destructive transition-colors hover:bg-destructive hover:text-background focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+          >
+            {rolledUp ? <ChevronDown className="h-3 w-3" aria-hidden="true" /> : <ChevronUp className="h-3 w-3" aria-hidden="true" />}
+            {rolledUp ? "Expand" : "Roll up"}
+          </button>
         </div>
+      </div>
+      {rolledUp ? (
+        <div
+          className="truncate text-[11px] text-muted-foreground"
+          data-testid="dashboard-errors-rollup-summary"
+          title={latestError?.lastError ?? latestError?.detail ?? latestError?.label}
+        >
+          {`Latest: ${latestError.label}${latestError.detail ? ` - ${latestError.detail}` : ""}`}
+        </div>
+      ) : (
+        <>
+          <div className="grid gap-2 lg:grid-cols-2">
+            {activities.failed.slice(0, 4).map((activity) => (
+              <div
+                key={activity.id}
+                className="rounded-md border border-destructive/40 bg-background/70 px-3 py-2"
+                data-testid={`dashboard-error-${activity.id}`}
+              >
+                <div className="flex min-w-0 items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="truncate text-[13px] font-medium text-foreground">{activity.label}</div>
+                    {activity.detail && (
+                      <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{activity.detail}</div>
+                    )}
+                  </div>
+                  <div className="flex shrink-0 flex-wrap justify-end gap-2">
+                    {activity.kind === "work_issue" && parseIssueTargetId(activity.targetId) && (
+                      <button
+                        type="button"
+                        onClick={() => onClearIssueFailure(activity)}
+                        disabled={isClearingIssueFailure}
+                        className="inline-flex items-center gap-1 rounded-md border border-destructive/50 px-2 py-0.5 text-[10px] uppercase tracking-wider text-destructive transition-colors hover:bg-destructive hover:text-background disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+                        data-testid="dashboard-clear-issue-failure"
+                      >
+                        {isClearingIssueFailure ? (
+                          "Clearing"
+                        ) : (
+                          <>
+                            <Trash2 className="h-3 w-3" aria-hidden="true" />
+                            Clear
+                          </>
+                        )}
+                      </button>
+                    )}
+                    {activity.targetUrl && (
+                      <a
+                        href={activity.targetUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="shrink-0 rounded-md border border-destructive/50 px-2 py-0.5 text-[10px] uppercase tracking-wider text-destructive transition-colors hover:bg-destructive hover:text-background focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+                      >
+                        Open
+                      </a>
+                    )}
+                  </div>
+                </div>
+                {activity.lastError && (
+                  <div
+                    className="mt-2 line-clamp-3 whitespace-pre-wrap break-words text-[11px] leading-4 text-destructive"
+                    title={activity.lastError}
+                  >
+                    {activity.lastError}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+          {activities.failed.length > 4 && (
+            <div className="mt-2 text-[11px] text-muted-foreground">
+              {activities.failed.length - 4} more failed job{activities.failed.length - 4 === 1 ? "" : "s"} in activity.
+            </div>
+          )}
+        </>
       )}
     </section>
   );
@@ -1186,6 +1216,7 @@ function showMutationError(title: string, error: unknown) {
 export default function Dashboard() {
   const [selectedPRId, setSelectedPRId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<"active" | "archived">("active");
+  const [areErrorsRolledUp, setAreErrorsRolledUp] = useState(false);
 
   const { data: prs = [], isLoading } = useQuery<PR[]>({
     queryKey: ["/api/prs"],
@@ -1365,7 +1396,10 @@ export default function Dashboard() {
             {activeErrorCount > 0 && (
               <button
                 type="button"
-                onClick={scrollToDashboardErrors}
+                onClick={() => {
+                  setAreErrorsRolledUp(false);
+                  scrollToDashboardErrors();
+                }}
                 data-testid="dashboard-error-pill"
                 className="inline-flex items-center gap-1 rounded-md border border-destructive/50 bg-destructive/10 px-2 py-0.5 text-[11px] uppercase tracking-wider text-destructive transition-colors hover:bg-destructive hover:text-background focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
               >
@@ -1390,6 +1424,8 @@ export default function Dashboard() {
         activities={activities}
         onClearIssueFailure={(activity) => clearIssueFailureMutation.mutate(activity)}
         isClearingIssueFailure={clearIssueFailureMutation.isPending}
+        rolledUp={areErrorsRolledUp}
+        onToggleRolledUp={() => setAreErrorsRolledUp((current) => !current)}
       />
       <DashboardDrainBanner runtimeState={runtimeState} />
 
