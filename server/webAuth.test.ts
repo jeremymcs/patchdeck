@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import test from "node:test";
 import express from "express";
-import { configureWebAuth, readWebAuthConfig } from "./webAuth";
+import { configureWebAuth, readWebAuthConfig, type WebAuthConfig, type WebAuthConfigProvider } from "./webAuth";
 
 async function closeServer(server: Server): Promise<void> {
   server.closeAllConnections?.();
@@ -18,7 +18,7 @@ async function closeServer(server: Server): Promise<void> {
   });
 }
 
-async function createHarness(config = {
+async function createHarness(config: WebAuthConfig | WebAuthConfigProvider = {
   username: "operator",
   password: "correct horse battery staple",
   sessionSecret: "test-session-secret",
@@ -176,6 +176,49 @@ test("remote callers cannot log in when credentials are not configured", async (
       headers: remoteHeaders,
     });
     assert.equal(response.status, 403);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("remote login uses current credentials from provider", async () => {
+  const username = "operator";
+  let password = "first-password";
+  const harness = await createHarness(() => ({
+    username,
+    password,
+    sessionSecret: "test-session-secret",
+  }));
+  const remoteHeaders = { "X-Forwarded-For": "203.0.113.10" };
+
+  try {
+    password = "second-password";
+
+    const staleLogin = await fetch(`${harness.baseUrl}/api/auth/login`, {
+      method: "POST",
+      headers: {
+        ...remoteHeaders,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        username,
+        password: "first-password",
+      }),
+    });
+    assert.equal(staleLogin.status, 401);
+
+    const currentLogin = await fetch(`${harness.baseUrl}/api/auth/login`, {
+      method: "POST",
+      headers: {
+        ...remoteHeaders,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        username,
+        password,
+      }),
+    });
+    assert.equal(currentLogin.status, 200);
   } finally {
     await harness.close();
   }

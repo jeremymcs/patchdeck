@@ -35,6 +35,7 @@ function parsePositiveInt(value: unknown): number | undefined {
 }
 
 const TOKEN_MASK_PREFIX = "***";
+const WEB_PASSWORD_MASK = "********";
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -97,13 +98,18 @@ export function writeServerLogSseEvent(res: SseWritable, record: LogRecord): boo
 function resolveConfigSecrets(current: Config, updates: Partial<Config>): Partial<Config> {
   const requestedTokens = updates.githubTokens
     ?? (updates.githubToken !== undefined ? [updates.githubToken] : undefined);
+  const webPassword = updates.webPassword === WEB_PASSWORD_MASK
+    ? current.webPassword
+    : updates.webPassword;
+
   if (requestedTokens === undefined) {
-    return updates;
+    return updates.webPassword === undefined ? updates : { ...updates, webPassword };
   }
 
   const { githubToken: _legacyGithubToken, ...rest } = updates;
   return {
     ...rest,
+    ...(updates.webPassword === undefined ? {} : { webPassword }),
     githubTokens: resolveMaskedGithubTokens(current.githubTokens, requestedTokens),
   };
 }
@@ -114,6 +120,7 @@ function maskConfig(config: Config): Config {
     ...config,
     githubTokens,
     githubToken: githubTokens[0] ?? "",
+    webPassword: config.webPassword ? WEB_PASSWORD_MASK : "",
   };
 }
 

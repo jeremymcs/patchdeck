@@ -218,6 +218,49 @@ test("PATCH /api/config accepts legacy single githubToken updates", async () => 
   }
 });
 
+test("GET/PATCH /api/config masks and preserves remote access password", async () => {
+  const harness = await createHarness();
+
+  try {
+    const patchResponse = await fetch(`${harness.baseUrl}/api/config`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ webUsername: " operator ", webPassword: "s3cret" }),
+    });
+
+    assert.equal(patchResponse.status, 200);
+    const patched = await patchResponse.json() as { webUsername: string; webPassword: string };
+    assert.equal(patched.webUsername, "operator");
+    assert.equal(patched.webPassword, "********");
+
+    let stored = await harness.storage.getConfig();
+    assert.equal(stored.webUsername, "operator");
+    assert.equal(stored.webPassword, "s3cret");
+
+    const preserveResponse = await fetch(`${harness.baseUrl}/api/config`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ webPassword: "********" }),
+    });
+
+    assert.equal(preserveResponse.status, 200);
+    stored = await harness.storage.getConfig();
+    assert.equal(stored.webPassword, "s3cret");
+
+    const clearResponse = await fetch(`${harness.baseUrl}/api/config`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ webPassword: "" }),
+    });
+
+    assert.equal(clearResponse.status, 200);
+    stored = await harness.storage.getConfig();
+    assert.equal(stored.webPassword, "");
+  } finally {
+    await harness.close();
+  }
+});
+
 test("POST /api/prs/:id/questions enqueues a durable answer_pr_question job", async () => {
   const harness = await createHarness();
   const pr = await seedPR(harness.storage);

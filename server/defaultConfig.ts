@@ -2,6 +2,8 @@ import type { Config } from "@shared/schema";
 
 export const DEFAULT_CONFIG: Config = {
   githubTokens: [],
+  webUsername: "",
+  webPassword: "",
   codingAgent: "claude",
   fallbackToNextCodingAgent: false,
   maxTurns: 15,

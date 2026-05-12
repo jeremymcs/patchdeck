@@ -19,6 +19,8 @@ describe("DEFAULT_CONFIG", () => {
   it("has all required fields defined by Config type", () => {
     const requiredFields = [
       "githubTokens",
+      "webUsername",
+      "webPassword",
       "codingAgent",
       "fallbackToNextCodingAgent",
       "maxTurns",

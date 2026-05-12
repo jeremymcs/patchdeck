@@ -113,6 +113,8 @@ export default function Settings() {
   const [newGithubToken, setNewGithubToken] = useState("");
   const [showTokenInput, setShowTokenInput] = useState(false);
   const [githubCommentAppNameDraft, setGithubCommentAppNameDraft] = useState("patchdeck");
+  const [webUsernameDraft, setWebUsernameDraft] = useState("");
+  const [webPasswordDraft, setWebPasswordDraft] = useState("");
   const [addUrl, setAddUrl] = useState("");
   const [addRepo, setAddRepo] = useState("");
   const [watchScope, setWatchScope] = useState<WatchScope>("mine");
@@ -122,6 +124,11 @@ export default function Settings() {
   useEffect(() => {
     setGithubCommentAppNameDraft(githubCommentAppName);
   }, [githubCommentAppName]);
+
+  useEffect(() => {
+    setWebUsernameDraft(config?.webUsername ?? "");
+    setWebPasswordDraft(config?.webPassword ?? "");
+  }, [config?.webUsername, config?.webPassword]);
 
   const updateGithubTokens = (tokens: string[]) => {
     updateConfigMutation.mutate({ githubTokens: tokens });
@@ -762,6 +769,59 @@ export default function Settings() {
                   data-testid="checkbox-auto-create-releases"
                 />
               </label>
+            </div>
+          </section>
+
+          <section>
+            <h2 className="mb-4 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              Remote Access
+            </h2>
+            <div className="rounded-md border border-border p-4">
+              <div className="grid gap-3 md:grid-cols-[1fr_1fr_auto] md:items-end">
+                <div>
+                  <label htmlFor="settings-web-username" className="text-sm">Username</label>
+                  <input
+                    id="settings-web-username"
+                    type="text"
+                    value={webUsernameDraft}
+                    onChange={(e) => setWebUsernameDraft(e.target.value)}
+                    placeholder="operator"
+                    aria-label="Remote access username"
+                    data-testid="input-remote-access-username"
+                    className="mt-2 w-full rounded-md border border-border bg-transparent px-2 py-1 text-sm placeholder:text-muted-foreground/50 focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="settings-web-password" className="text-sm">Password</label>
+                  <input
+                    id="settings-web-password"
+                    type="password"
+                    value={webPasswordDraft}
+                    onChange={(e) => setWebPasswordDraft(e.target.value)}
+                    placeholder="not configured"
+                    aria-label="Remote access password"
+                    data-testid="input-remote-access-password"
+                    className="mt-2 w-full rounded-md border border-border bg-transparent px-2 py-1 text-sm placeholder:text-muted-foreground/50 focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() =>
+                    updateConfigMutation.mutate({
+                      webUsername: webUsernameDraft,
+                      webPassword: webPasswordDraft,
+                    })
+                  }
+                  disabled={updateConfigMutation.isPending}
+                  data-testid="button-save-remote-access"
+                  className="cursor-pointer rounded-md border border-primary bg-primary px-3 py-1 text-xs font-medium uppercase tracking-wider text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Save
+                </button>
+              </div>
+              <p className="mt-3 text-[11px] text-muted-foreground">
+                Remote network users must sign in with these credentials. Local loopback access remains open.
+              </p>
             </div>
           </section>
 

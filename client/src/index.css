@@ -219,6 +219,8 @@
 
   .issue-markdown {
     color: hsl(var(--foreground) / 0.86);
+    max-width: 100%;
+    overflow-wrap: anywhere;
     word-break: break-word;
     font-size: 12px;
     line-height: 1.7;
@@ -262,6 +264,8 @@
   .issue-markdown pre,
   .issue-markdown table {
     margin: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
   }
 
   .issue-markdown ul,
@@ -291,24 +295,32 @@
     border-radius: calc(var(--radius) - 2px);
     padding: 0.05rem 0.3rem;
     font-size: 11px;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
 
   .issue-markdown pre {
-    overflow-x: auto;
+    overflow-x: hidden;
     background: hsl(var(--muted));
     border: 1px solid hsl(var(--border));
     border-radius: var(--radius);
     padding: 0.85rem;
-    white-space: pre;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
 
   .issue-markdown pre code {
     background: transparent;
     border: 0;
     padding: 0;
+    white-space: inherit;
   }
 
   .issue-markdown table {
+    display: block;
+    overflow-x: hidden;
     width: 100%;
     border-collapse: collapse;
     font-size: 11px;
@@ -320,6 +332,8 @@
     padding: 0.4rem 0.5rem;
     text-align: left;
     vertical-align: top;
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
 
   .issue-markdown hr {
