@@ -1,5 +1,5 @@
 {
-  "name": "patchdeck",
+  "name": "@jeremymcs/patchdeck",
   "version": "1.0.0",
   "description": "Autonomous GitHub PR babysitter that watches repos, triages review feedback, and dispatches AI agents to fix code locally",
   "keywords": [
@@ -36,9 +36,13 @@
     "dist/",
     "bin/"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "dev": "NODE_ENV=development tsx server/index.ts",
     "build": "tsx script/build.ts",
+    "prepare": "npm run build",
     "prepublishOnly": "npm run build",
     "build:docs": "tailwindcss -c docs/tailwind.config.cjs -i docs/src/input.css -o docs/public/styles.css --minify",
     "build:public-docs": "tsx script/build-public-docs.ts",

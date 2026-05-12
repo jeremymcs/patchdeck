@@ -14,8 +14,14 @@ process.env.NODE_ENV = "production";
 const { logger, sanitizeString, readRingBuffer, _resetRingBufferForTests, _writeRingChunkForTests } = await import("./logger");
 
 function flushAndRead(): Promise<string> {
-  return new Promise((resolve) => {
-    setTimeout(() => resolve(fs.readFileSync(LOG_FILE, "utf8")), 50);
+  return new Promise((resolve, reject) => {
+    logger.flush((error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      setTimeout(() => resolve(fs.readFileSync(LOG_FILE, "utf8")), 10);
+    });
   });
 }
 
