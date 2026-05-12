@@ -5,6 +5,8 @@ import { configureWebAuth } from "./webAuth";
 import { createServer } from "http";
 import { childLogger, logger } from "./logger";
 import { migrateLegacyHomeIfNeeded } from "./migrateLegacyHome";
+import { acquireInstanceLock, InstanceLockError } from "./instanceLock";
+import { getCodeFactoryPaths } from "./paths";
 
 const serverLog = childLogger("server");
 
@@ -64,6 +66,16 @@ async function openDashboard(url: string) {
   // directory. Idempotent: skipped when an env override is set, when the new
   // directory already exists, or when the legacy directory is absent.
   migrateLegacyHomeIfNeeded();
+
+  try {
+    acquireInstanceLock(getCodeFactoryPaths().rootDir);
+  } catch (err) {
+    if (err instanceof InstanceLockError) {
+      console.error(err.message);
+      process.exit(1);
+    }
+    throw err;
+  }
 
   await registerRoutes(httpServer, app);
 
