@@ -285,6 +285,7 @@ test("dashboard keeps the QA-tested PR, repo, feedback, and side-panel workflows
 
   assertHasExpression(sourceFile, "feedback retry action", /\bretryMutation\b/);
   assertHasExpression(sourceFile, "feedback manual decisions", /\[\s*["']accept["']\s*,\s*["']reject["']\s*,\s*["']flag["']\s*\]/);
+  assertHasExpression(sourceFile, "dashboard error scroll action", /\bscrollToDashboardErrors\b/);
 
   for (const [label, endpoint] of [
     ["active PR API", "/api/prs"],

@@ -91,6 +91,10 @@ function parseIssueTargetId(targetId: string): { repo: string; number: number } 
   return { repo, number };
 }
 
+function scrollToDashboardErrors() {
+  document.getElementById("dashboard-errors")?.scrollIntoView({ block: "start" });
+}
+
 function getPRFeedbackFailureReason(pr: PR): string | null {
   const failedItem = pr.feedbackItems.find((item) =>
     (item.status === "failed" || item.status === "warning") && Boolean(item.statusReason),
@@ -1359,15 +1363,16 @@ export default function Dashboard() {
               <option value="claude">claude</option>
             </select>
             {activeErrorCount > 0 && (
-              <a
-                href="#dashboard-errors"
+              <button
+                type="button"
+                onClick={scrollToDashboardErrors}
                 data-testid="dashboard-error-pill"
                 className="inline-flex items-center gap-1 rounded-md border border-destructive/50 bg-destructive/10 px-2 py-0.5 text-[11px] uppercase tracking-wider text-destructive transition-colors hover:bg-destructive hover:text-background focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
               >
                 <AlertTriangle className="h-3 w-3" aria-hidden="true" />
                 errors
                 <span className="font-mono">{activeErrorCount}</span>
-              </a>
+              </button>
             )}
             <ActivityMenu
               activities={activities}
