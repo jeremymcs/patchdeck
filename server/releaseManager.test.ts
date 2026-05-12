@@ -1,0 +1,468 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import type { Octokit } from "@octokit/rest";
+import type { Config, ReleaseRun } from "@shared/schema";
+import type { ReleaseAgentPullSummary, ReleaseEvaluationDecision } from "./releaseAgent";
+import { BackgroundJobQueue, buildBackgroundJobDedupeKey } from "./backgroundJobQueue";
+import { MemStorage } from "./memoryStorage";
+import { ReleaseManager, type ReleaseGitHubService } from "./releaseManager";
+import { _resetRingBufferForTests, readRingBuffer } from "./logger";
+
+function makeConfig(overrides: Partial<Config> = {}): Config {
+  return {
+    githubTokens: [],
+    codingAgent: "claude",
+    maxTurns: 15,
+    batchWindowMs: 300000,
+    pollIntervalMs: 120000,
+    maxChangesPerRun: 20,
+    autoResolveMergeConflicts: true,
+    autoCreateReleases: true,
+    watchedRepos: [],
+    trustedReviewers: [],
+    ignoredBots: ["dependabot[bot]", "codecov[bot]", "github-actions[bot]"],
+    ...overrides,
+  };
+}
+
+function makePublishedRelease(tagName = "v1.3.0") {
+  return {
+    id: 123,
+    url: `https://github.com/jeremymcs/patchdeck/releases/tag/${tagName}`,
+    tagName,
+    name: tagName,
+  };
+}
+
+function makeMergedSummary(overrides: Partial<ReleaseAgentPullSummary> = {}): ReleaseAgentPullSummary {
+  return {
+    number: 71,
+    title: "Release automation",
+    url: "https://github.com/jeremymcs/patchdeck/pull/71",
+    author: "octocat",
+    repo: "jeremymcs/patchdeck",
+    mergedAt: "2026-03-28T15:00:00.000Z",
+    mergeSha: "abc123",
+    ...overrides,
+  };
+}
+
+function makeGitHubService(overrides: Partial<ReleaseGitHubService> = {}): ReleaseGitHubService {
+  return {
+    buildOctokit: async () => ({}) as Octokit,
+    findLatestSemverReleaseTag: async () => "v1.2.3",
+    getDefaultBranch: async () => "main",
+    bumpReleaseTag: (latestTag, bump) => {
+      if (latestTag !== "v1.2.3") {
+        throw new Error(`unexpected latest tag: ${latestTag}`);
+      }
+      if (bump === "major") return "v2.0.0";
+      if (bump === "minor") return "v1.3.0";
+      return "v1.2.4";
+    },
+    listUnreleasedMergedPulls: async () => [
+      makeMergedSummary({
+        number: 70,
+        title: "Earlier merged change",
+        mergedAt: "2026-03-28T14:00:00.000Z",
+        mergeSha: "def456",
+      }),
+      makeMergedSummary(),
+    ],
+    listMergedPullsForReleaseCandidate: async (_octokit, _repo, options) => [
+      makeMergedSummary({
+        number: 70,
+        title: "Earlier merged change",
+        mergedAt: "2026-03-28T14:00:00.000Z",
+        mergeSha: "def456",
+      }),
+      options.triggerPr,
+    ],
+    findReleaseByTag: async () => null,
+    createGitHubRelease: async (_octokit, _repo, params) => makePublishedRelease(params.tagName),
+    ...overrides,
+  };
+}
+
+function makeReleaseRun(overrides: Partial<ReleaseRun> = {}): ReleaseRun {
+  const now = "2026-03-28T18:00:00.000Z";
+  return {
+    id: "release-run-1",
+    repo: "jeremymcs/patchdeck",
+    baseBranch: "main",
+    triggerPrNumber: 74,
+    triggerPrTitle: "Retryable release",
+    triggerPrUrl: "https://github.com/jeremymcs/patchdeck/pull/74",
+    triggerMergeSha: "retry-sha",
+    triggerMergedAt: now,
+    source: "automatic",
+    status: "error",
+    decisionReason: null,
+    recommendedBump: null,
+    proposedVersion: null,
+    releaseTitle: null,
+    releaseNotes: null,
+    includedPrs: [],
+    targetSha: "retry-sha",
+    githubReleaseId: null,
+    githubReleaseUrl: null,
+    error: "temporary GitHub failure",
+    completedAt: now,
+    createdAt: now,
+    updatedAt: now,
+    ...overrides,
+  };
+}
+
+function createQueuedManager(params?: {
+  storage?: MemStorage;
+  github?: Partial<ReleaseGitHubService>;
+  evaluateRelease?: () => Promise<ReleaseEvaluationDecision>;
+}) {
+  const storage = params?.storage ?? new MemStorage();
+  const queue = new BackgroundJobQueue(storage);
+  const manager = new ReleaseManager(storage, {
+    github: makeGitHubService(params?.github),
+    evaluateRelease: params?.evaluateRelease,
+    scheduleBackgroundJob: queue.enqueue.bind(queue),
+  });
+
+  return { storage, queue, manager };
+}
+
+test("ReleaseManager enqueues a manual repo release from the latest unreleased merged PR", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig(makeConfig());
+
+  const { manager } = createQueuedManager({
+    storage,
+    github: {
+      listUnreleasedMergedPulls: async () => [
+        makeMergedSummary({
+          number: 70,
+          title: "Earlier merged change",
+          mergedAt: "2026-03-28T14:00:00.000Z",
+          mergeSha: "def456",
+        }),
+        makeMergedSummary({
+          number: 72,
+          title: "Manual release trigger",
+          url: "https://github.com/jeremymcs/patchdeck/pull/72",
+          mergedAt: "2026-03-28T16:00:00.000Z",
+          mergeSha: "manual-sha",
+        }),
+      ],
+    },
+  });
+
+  const created = await manager.enqueueManualRepoRelease("jeremymcs/patchdeck");
+  const jobs = await storage.listBackgroundJobs({
+    kind: "process_release_run",
+    status: "queued",
+  });
+
+  assert.ok(created);
+  assert.equal(created.source, "manual");
+  assert.equal(created.baseBranch, "main");
+  assert.equal(created.triggerPrNumber, 72);
+  assert.equal(created.triggerPrTitle, "Manual release trigger");
+  assert.equal(created.triggerMergeSha, "manual-sha");
+  assert.equal(created.targetSha, "manual-sha");
+  assert.equal(jobs.length, 1);
+  assert.equal(jobs[0].targetId, created.id);
+  assert.equal(jobs[0].dedupeKey, buildBackgroundJobDedupeKey("process_release_run", created.id));
+  assert.equal(await manager.waitForIdle(), true);
+});
+
+test("ReleaseManager publishes manual release runs when auto-release settings are disabled", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig(makeConfig({
+    autoCreateReleases: false,
+    watchedRepos: ["jeremymcs/patchdeck"],
+  }));
+  await storage.updateRepoSettings("jeremymcs/patchdeck", {
+    autoCreateReleases: false,
+  });
+
+  let createCalls = 0;
+  const { manager } = createQueuedManager({
+    storage,
+    github: {
+      createGitHubRelease: async (_octokit, _repo, params) => {
+        createCalls += 1;
+        assert.equal(params.tagName, "v1.2.4");
+        return makePublishedRelease(params.tagName);
+      },
+    },
+    evaluateRelease: async (): Promise<ReleaseEvaluationDecision> => ({
+      shouldRelease: true,
+      reason: "Manual release requested",
+      bump: "patch",
+      title: "Manual patch",
+      notes: "Manual release notes",
+    }),
+  });
+  const manualRun = await storage.createReleaseRun(makeReleaseRun({
+    source: "manual",
+    status: "detected",
+    error: null,
+    completedAt: null,
+  }));
+
+  const processed = await manager.processReleaseRun(manualRun.id);
+
+  assert.ok(processed);
+  assert.equal(processed.status, "published");
+  assert.equal(processed.source, "manual");
+  assert.equal(processed.githubReleaseUrl, "https://github.com/jeremymcs/patchdeck/releases/tag/v1.2.4");
+  assert.equal(createCalls, 1);
+});
+
+test("ReleaseManager publishes a manual patch release when evaluation recommends skipping", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig(makeConfig());
+
+  let releaseBody = "";
+  const { manager } = createQueuedManager({
+    storage,
+    github: {
+      createGitHubRelease: async (_octokit, _repo, params) => {
+        assert.equal(params.tagName, "v1.2.4");
+        assert.equal(params.name, "v1.2.4 - Manual release");
+        releaseBody = params.body;
+        return makePublishedRelease(params.tagName);
+      },
+    },
+    evaluateRelease: async (): Promise<ReleaseEvaluationDecision> => ({
+      shouldRelease: false,
+      reason: "Only internal cleanup",
+      bump: null,
+      title: null,
+      notes: null,
+    }),
+  });
+  const manualRun = await storage.createReleaseRun(makeReleaseRun({
+    source: "manual",
+    status: "detected",
+    error: null,
+    completedAt: null,
+  }));
+
+  const processed = await manager.processReleaseRun(manualRun.id);
+
+  assert.ok(processed);
+  assert.equal(processed.status, "published");
+  assert.equal(processed.decisionReason, "Manual release requested. Evaluator recommendation: Only internal cleanup");
+  assert.equal(processed.recommendedBump, "patch");
+  assert.match(releaseBody, /## Changes/);
+  assert.match(releaseBody, /#70 Earlier merged change/);
+  assert.match(releaseBody, /#74 Retryable release/);
+});
+
+test("ReleaseManager enqueues a durable release job and still executes the release flow", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig(makeConfig());
+
+  let createCalls = 0;
+  const { manager } = createQueuedManager({
+    storage,
+    github: {
+      createGitHubRelease: async (_octokit, _repo, params) => {
+        createCalls += 1;
+        assert.equal(params.tagName, "v1.3.0");
+        assert.equal(params.targetCommitish, "abc123");
+        return makePublishedRelease(params.tagName);
+      },
+    },
+    evaluateRelease: async (): Promise<ReleaseEvaluationDecision> => ({
+      shouldRelease: true,
+      reason: "User-facing release automation",
+      bump: "minor",
+      title: "Automated release management",
+      notes: "## Highlights\n- Adds automated releases.",
+    }),
+  });
+
+  const created = await manager.enqueueMergedPullReleaseEvaluation({
+    repo: "jeremymcs/patchdeck",
+    baseBranch: "main",
+    triggerPrNumber: 71,
+    triggerPrTitle: "Release automation",
+    triggerPrUrl: "https://github.com/jeremymcs/patchdeck/pull/71",
+    triggerMergeSha: "abc123",
+    triggerMergedAt: "2026-03-28T15:00:00.000Z",
+  });
+
+  const queuedJobs = await storage.listBackgroundJobs({
+    kind: "process_release_run",
+    status: "queued",
+  });
+  assert.equal(queuedJobs.length, 1);
+  assert.equal(queuedJobs[0].targetId, created.id);
+  assert.equal(queuedJobs[0].dedupeKey, buildBackgroundJobDedupeKey("process_release_run", created.id));
+  assert.equal(queuedJobs[0].payload.activityLabel, "Processing release for jeremymcs/patchdeck");
+  assert.equal(queuedJobs[0].payload.activityDetail, "PR #71 - Release automation");
+  assert.equal(queuedJobs[0].payload.activityTargetUrl, "https://github.com/jeremymcs/patchdeck/pull/71");
+  assert.equal(await manager.waitForIdle(), true);
+
+  const processed = await manager.processReleaseRun(created.id);
+  const stored = await storage.getReleaseRun(created.id);
+
+  assert.ok(processed);
+  assert.ok(stored);
+  assert.equal(stored.status, "published");
+  assert.equal(stored.recommendedBump, "minor");
+  assert.equal(stored.proposedVersion, "v1.3.0");
+  assert.equal(stored.githubReleaseUrl, "https://github.com/jeremymcs/patchdeck/releases/tag/v1.3.0");
+  assert.equal(stored.includedPrs.length, 2);
+  assert.equal(createCalls, 1);
+});
+
+test("ReleaseManager reuses an active release row and the durable process job", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig(makeConfig());
+
+  let evaluateCalls = 0;
+  const { manager } = createQueuedManager({
+    storage,
+    evaluateRelease: async (): Promise<ReleaseEvaluationDecision> => {
+      evaluateCalls += 1;
+      return {
+        shouldRelease: true,
+        reason: "Worth a patch release",
+        bump: "patch",
+        title: "Patch release",
+        notes: "Patch notes",
+      };
+    },
+  });
+
+  const first = await manager.enqueueMergedPullReleaseEvaluation({
+    repo: "jeremymcs/patchdeck",
+    baseBranch: "main",
+    triggerPrNumber: 73,
+    triggerPrTitle: "Bug fix",
+    triggerPrUrl: "https://github.com/jeremymcs/patchdeck/pull/73",
+    triggerMergeSha: "same-sha",
+    triggerMergedAt: "2026-03-28T17:00:00.000Z",
+  });
+  const second = await manager.enqueueMergedPullReleaseEvaluation({
+    repo: "jeremymcs/patchdeck",
+    baseBranch: "main",
+    triggerPrNumber: 73,
+    triggerPrTitle: "Bug fix",
+    triggerPrUrl: "https://github.com/jeremymcs/patchdeck/pull/73",
+    triggerMergeSha: "same-sha",
+    triggerMergedAt: "2026-03-28T17:00:00.000Z",
+  });
+
+  const jobs = await storage.listBackgroundJobs({
+    kind: "process_release_run",
+    status: "queued",
+  });
+  const runs = await storage.listReleaseRuns();
+
+  assert.equal(first.id, second.id);
+  assert.equal(runs.length, 1);
+  assert.equal(jobs.length, 1);
+  assert.equal(jobs[0].targetId, first.id);
+  assert.equal(evaluateCalls, 0);
+  assert.equal(await manager.waitForIdle(), true);
+});
+
+test("ReleaseManager skips queued runs when repo-level autoCreateReleases is disabled", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig(makeConfig({
+    watchedRepos: ["jeremymcs/patchdeck"],
+  }));
+  await storage.updateRepoSettings("jeremymcs/patchdeck", {
+    autoCreateReleases: false,
+  });
+
+  let evaluateCalls = 0;
+  const { manager } = createQueuedManager({
+    storage,
+    evaluateRelease: async (): Promise<ReleaseEvaluationDecision> => {
+      evaluateCalls += 1;
+      return {
+        shouldRelease: true,
+        reason: "Should not run",
+        bump: "patch",
+        title: "Unexpected release",
+        notes: "Should not be generated.",
+      };
+    },
+  });
+
+  const queuedRun = await storage.createReleaseRun(makeReleaseRun({
+    status: "detected",
+    error: null,
+    completedAt: null,
+  }));
+
+  const processed = await manager.processReleaseRun(queuedRun.id);
+
+  assert.ok(processed);
+  assert.equal(processed?.status, "skipped");
+  assert.equal(processed?.decisionReason, "Automatic release creation is disabled for jeremymcs/patchdeck");
+  assert.equal(evaluateCalls, 0);
+});
+
+test("ReleaseManager retryReleaseRun resets state and enqueues the durable process job", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig(makeConfig());
+
+  const queuedRun = await storage.createReleaseRun(makeReleaseRun());
+  const { manager } = createQueuedManager({ storage });
+
+  const retried = await manager.retryReleaseRun(queuedRun.id);
+  const jobs = await storage.listBackgroundJobs({
+    kind: "process_release_run",
+    status: "queued",
+  });
+  const stored = await storage.getReleaseRun(queuedRun.id);
+
+  assert.ok(retried);
+  assert.ok(stored);
+  assert.equal(retried?.status, "detected");
+  assert.equal(retried?.error, null);
+  assert.equal(retried?.completedAt, null);
+  assert.equal(stored.status, "detected");
+  assert.equal(jobs.length, 1);
+  assert.equal(jobs[0].targetId, queuedRun.id);
+  assert.equal(jobs[0].dedupeKey, buildBackgroundJobDedupeKey("process_release_run", queuedRun.id));
+  assert.equal(await manager.waitForIdle(), true);
+});
+
+test("ReleaseManager logs release job scheduling failures", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig(makeConfig());
+
+  const schedulingError = new Error("queue unavailable");
+  const manager = new ReleaseManager(storage, {
+    github: makeGitHubService(),
+    scheduleBackgroundJob: async () => {
+      throw schedulingError;
+    },
+  });
+
+  _resetRingBufferForTests();
+
+  const created = await manager.enqueueMergedPullReleaseEvaluation({
+    repo: "jeremymcs/patchdeck",
+    baseBranch: "main",
+    triggerPrNumber: 75,
+    triggerPrTitle: "Queue failure logging",
+    triggerPrUrl: "https://github.com/jeremymcs/patchdeck/pull/75",
+    triggerMergeSha: "queue-failure-sha",
+    triggerMergedAt: "2026-03-28T19:00:00.000Z",
+  });
+
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  await new Promise<void>((resolve) => setTimeout(resolve, 30));
+
+  const ring = readRingBuffer().join("\n");
+  assert.match(ring, /Failed to schedule release run/);
+  assert.match(ring, new RegExp(created.id));
+  assert.match(ring, /queue unavailable/);
+});

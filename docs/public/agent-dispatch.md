@@ -1,0 +1,74 @@
+# Agent Dispatch
+
+patchdeck dispatches local AI agents to fix accepted review feedback, failing status checks, documentation tasks, and merge conflicts. Agents run from your machine inside app-owned git worktrees.
+
+## Supported Agents
+
+| Agent | CLI Tool | Best For |
+|-------|----------|----------|
+| **Claude Code** | `claude` | Complex reasoning, multi-file refactors, architectural changes |
+| **OpenAI Codex** | `codex` | Quick fixes, single-file edits, style corrections |
+
+The global coding agent defaults to `claude`. If the configured CLI is unavailable, patchdeck falls back to the other supported CLI when it is installed. If neither `claude` nor `codex` is available, the run fails with a clear setup error.
+
+## How Dispatch Works
+
+### 1. Worktree Isolation
+
+Before an agent runs, patchdeck refreshes an app-owned repository cache and creates an isolated git worktree:
+
+```
+~/.patchdeck/repos/<owner>__<repo>/
+~/.patchdeck/worktrees/<owner>__<repo>/pr-<pr-number>-<run-id>/
+```
+
+This ensures:
+- The agent works on an **isolated copy** of the branch.
+- Your local working directory is **never touched**.
+- Multiple agents can run **in parallel** on different PRs.
+
+### 2. Agent Execution
+
+The agent receives:
+- The approved **review-comment tasks** with file, line, source URL, thread, and audit-token metadata.
+- The approved **status-check tasks** when CI/status repair is needed.
+- The approved **documentation task** summary when the docs assessment says updates are required.
+- The PR branch, base/head repository, and remote information needed to commit and push safely.
+
+If the default queued run fails, patchdeck can dispatch a code-owner fallback using the resolved coding agent. This fallback receives a broader PR-owner prompt, has a 30-minute timeout, and may inspect the latest GitHub review comments, unresolved threads, issue comments, and failing checks directly.
+
+### 3. Validation
+
+After the agent completes:
+- The agent is expected to run relevant verification and commit/push changed files to the PR branch.
+- patchdeck checks the worktree state, records logs, updates run metadata, and polls CI when needed.
+- For normal runs, GitHub follow-up replies and review-thread resolution are handled by patchdeck after the agent returns. In code-owner fallback mode, the agent may reply to GitHub feedback and resolve handled conversations directly before it returns.
+
+### 4. Commit & Push
+
+When the run succeeds, patchdeck:
+- Verifies that the branch advanced or that no changes were necessary.
+- Updates the **feedback status** and run metadata.
+- Posts reviewer-facing follow-up summaries and resolves eligible review threads.
+
+## Agent Runs in the Dashboard
+
+Every agent run is tracked in the patchdeck dashboard:
+
+- **Status** — Running, succeeded, or failed.
+- **Duration** — How long the agent took.
+- **Diff** — Exact changes the agent made.
+- **Logs** — Full agent output for debugging.
+
+## Agent Selection
+
+The active coding agent is stored in app config as `codingAgent` and can be changed from the dashboard, REST API, or MCP `update_config` tool. Agent reasoning/model behavior follows the selected CLI runtime; patchdeck does not expose a separate model-discovery or model-selection surface today.
+
+## Customization
+
+Choose the global agent used for autonomous runs:
+
+- Use the **Coding Agent** control in the dashboard to switch between Claude Code and OpenAI Codex.
+- Set `codingAgent` to `claude` or `codex` through `PATCH /api/config` or the MCP `update_config` tool.
+
+See [Configuration](./configuration.md) for all options.

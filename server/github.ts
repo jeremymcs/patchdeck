@@ -1,0 +1,2097 @@
+import { Octokit } from "@octokit/rest";
+import type { CheckSnapshot, Config, FeedbackItem } from "@shared/schema";
+import { z } from "zod";
+import { runCommand } from "./agentRunner";
+import { normalizeCheckSnapshotsFromRef } from "./ciCheckIngestor";
+import { childLogger } from "./logger";
+import { renderGitHubMarkdown } from "./markdown";
+
+const octokitLog = childLogger("octokit");
+
+const octokitLogger = {
+  debug: (msg: string, ...args: unknown[]) => octokitLog.debug({ args }, msg),
+  info: (msg: string, ...args: unknown[]) => octokitLog.info({ args }, msg),
+  warn: (msg: string, ...args: unknown[]) => {
+    if (typeof msg === "string" && /is deprecated/i.test(msg)) return;
+    octokitLog.warn({ args }, msg);
+  },
+  error: (msg: string, ...args: unknown[]) => octokitLog.error({ args }, msg),
+};
+
+export type ParsedPRUrl = {
+  owner: string;
+  repo: string;
+  number: number;
+};
+
+export type ParsedRepoSlug = {
+  owner: string;
+  repo: string;
+};
+
+export type GitHubPullSummary = {
+  number: number;
+  title: string;
+  branch: string;
+  author: string;
+  url: string;
+  repoFullName: string;
+  repoCloneUrl: string;
+  headSha: string;
+  headRef: string;
+  headRepoFullName: string;
+  headRepoCloneUrl: string;
+  baseRef: string;
+  baseSha: string;
+  mergeable: boolean | null;
+};
+
+export type GitHubIssueSummary = {
+  number: number;
+  title: string;
+  body: string | null;
+  bodyHtml: string | null;
+  url: string;
+  repoFullName: string;
+  repoCloneUrl: string;
+  author: string;
+  labels: string[];
+  assignees: string[];
+  comments: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type GitHubStatusFailure = {
+  context: string;
+  description: string;
+  targetUrl: string | null;
+};
+
+type GitHubCommitStatusResponse = {
+  state?: string | null;
+  context?: string | null;
+  description?: string | null;
+  target_url?: string | null;
+  updated_at?: string | null;
+};
+
+type GitHubCheckRunResponse = {
+  id?: number | null;
+  name?: string | null;
+  status?: string | null;
+  conclusion?: string | null;
+  html_url?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  updated_at?: string | null;
+  output?: {
+    title?: string | null;
+    summary?: string | null;
+  } | null;
+  app?: {
+    slug?: string | null;
+  } | null;
+};
+
+type GitHubActionsJobStepResponse = {
+  name?: string | null;
+  conclusion?: string | null;
+};
+
+type GitHubActionsJobResponse = {
+  steps?: GitHubActionsJobStepResponse[] | null;
+};
+
+const GITHUB_ACTIONS_JOB_ENRICHMENT_BATCH_SIZE = 4;
+
+export type GitHubPullCloseState = {
+  number: number;
+  title: string;
+  url: string;
+  author: string;
+  baseRef: string;
+  headRef: string;
+  headSha: string;
+  merged: boolean;
+  mergedAt: string | null;
+  closedAt: string | null;
+  mergeCommitSha: string | null;
+};
+
+export type ReleaseBump = "patch" | "minor" | "major";
+
+export type SemverVersion = {
+  major: number;
+  minor: number;
+  patch: number;
+};
+
+export type GitHubReleaseSummary = {
+  id: number;
+  tagName: string;
+  name: string;
+  body: string | null;
+  htmlUrl: string;
+  apiUrl: string;
+  draft: boolean;
+  prerelease: boolean;
+  targetCommitish: string | null;
+  publishedAt: string | null;
+};
+
+export type GitHubRepoTag = {
+  name: string;
+  commitSha: string | null;
+};
+
+const SEMVER_TAG_PATTERN = /^v?(\d+)\.(\d+)\.(\d+)$/;
+
+const GITHUB_API_VERSION = "2022-11-28";
+const GH_AUTH_CACHE_TTL_MS = 15000;
+const REVIEW_THREADS_QUERY = `
+  query CodeFactoryReviewThreads($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
+    repository(owner: $owner, name: $repo) {
+      pullRequest(number: $number) {
+        reviewThreads(first: 100, after: $cursor) {
+          nodes {
+            id
+            isResolved
+            comments(first: 100) {
+              nodes {
+                databaseId
+              }
+              pageInfo {
+                hasNextPage
+                endCursor
+              }
+            }
+          }
+          pageInfo {
+            hasNextPage
+            endCursor
+          }
+        }
+      }
+    }
+  }
+`;
+const REVIEW_THREAD_COMMENTS_QUERY = `
+  query CodeFactoryReviewThreadComments($threadId: ID!, $cursor: String) {
+    node(id: $threadId) {
+      ... on PullRequestReviewThread {
+        id
+        isResolved
+        comments(first: 100, after: $cursor) {
+          nodes {
+            databaseId
+          }
+          pageInfo {
+            hasNextPage
+            endCursor
+          }
+        }
+      }
+    }
+  }
+`;
+const REVIEW_THREAD_REPLY_MUTATION = `
+  mutation CodeFactoryReplyToReviewThread($threadId: ID!, $body: String!) {
+    addPullRequestReviewThreadReply(input: { pullRequestReviewThreadId: $threadId, body: $body }) {
+      comment {
+        id
+        databaseId
+      }
+    }
+  }
+`;
+const RESOLVE_REVIEW_THREAD_MUTATION = `
+  mutation CodeFactoryResolveReviewThread($threadId: ID!) {
+    resolveReviewThread(input: { threadId: $threadId }) {
+      thread {
+        id
+        isResolved
+      }
+    }
+  }
+`;
+
+const statusReplyMutationSchema = z.object({
+  addPullRequestReviewThreadReply: z.object({
+    comment: z.object({
+      databaseId: z.number().nullable().optional(),
+    }).nullable().optional(),
+  }).nullable().optional(),
+});
+
+let cachedGhAuthToken: { token: string; expiresAt: number } | null = null;
+let ghAuthFailureCooldownUntil = 0;
+
+type GitHubErrorLike = Error & {
+  status?: number;
+  response?: {
+    headers?: Record<string, string>;
+  };
+};
+
+type GitHubAuthResolutionDeps = {
+  ignoreCache?: boolean;
+  runCommandFn?: typeof runCommand;
+  nowFn?: () => number;
+};
+
+type BuildOctokitDeps = GitHubAuthResolutionDeps & {
+  requestFetch?: typeof fetch;
+};
+
+function parseGhAuthStatusToken(stdout: string): string | undefined {
+  type AccountBlock = {
+    active?: boolean;
+    token?: string;
+  };
+  let currentBlock: AccountBlock = {};
+  let activeToken: string | undefined;
+  const flushCurrentBlock = () => {
+    if (!activeToken && currentBlock.active && currentBlock.token) {
+      activeToken = currentBlock.token;
+    }
+    currentBlock = {};
+  };
+
+  for (const rawLine of stdout.split(/\r?\n/)) {
+    const line = rawLine.trimEnd();
+    if (/\bLogged in to\b.*\baccount\b/i.test(line)) {
+      flushCurrentBlock();
+      continue;
+    }
+
+    const activeMatch = line.match(/Active account:\s*(true|false)/i);
+    if (activeMatch) {
+      currentBlock.active = activeMatch[1]?.toLowerCase() === "true";
+      continue;
+    }
+
+    const tokenMatch = line.match(/Token:\s*(\S+)/);
+    if (tokenMatch?.[1]) {
+      currentBlock.token = tokenMatch[1].trim();
+    }
+  }
+
+  flushCurrentBlock();
+  return activeToken;
+}
+
+function isUnauthorized(error: unknown): boolean {
+  return (error as { status?: number } | undefined)?.status === 401;
+}
+
+async function resolveGhAuthToken(
+  deps: GitHubAuthResolutionDeps = {},
+): Promise<string | undefined> {
+  const runCommandFn = deps.runCommandFn ?? runCommand;
+  const nowFn = deps.nowFn ?? Date.now;
+  const now = nowFn();
+  const ignoreCache = deps.ignoreCache ?? false;
+
+  if (!ignoreCache) {
+    if (cachedGhAuthToken && cachedGhAuthToken.expiresAt > now) {
+      return cachedGhAuthToken.token;
+    }
+    if (ghAuthFailureCooldownUntil > now) {
+      return undefined;
+    }
+  }
+
+  const persist = (token: string): string => {
+    if (ignoreCache) return token;
+    cachedGhAuthToken = { token, expiresAt: now + GH_AUTH_CACHE_TTL_MS };
+    ghAuthFailureCooldownUntil = 0;
+    return token;
+  };
+
+  const directResult = await runCommandFn("gh", ["auth", "token"], { timeoutMs: 4000 });
+  const directToken = directResult.stdout.trim();
+  if (directResult.code === 0 && directToken) {
+    return persist(directToken);
+  }
+
+  const statusResult = await runCommandFn(
+    "gh",
+    ["auth", "status", "--hostname", "github.com", "--show-token"],
+    { timeoutMs: 4000 },
+  );
+  if (statusResult.code === 0) {
+    const statusToken = parseGhAuthStatusToken(statusResult.stdout);
+    if (statusToken) return persist(statusToken);
+  }
+
+  if (!ignoreCache) {
+    cachedGhAuthToken = null;
+    ghAuthFailureCooldownUntil = now + GH_AUTH_CACHE_TTL_MS;
+  }
+  return undefined;
+}
+
+export class GitHubIntegrationError extends Error {
+  readonly statusCode: number;
+
+  constructor(message: string, statusCode = 502) {
+    super(message);
+    this.name = "GitHubIntegrationError";
+    this.statusCode = statusCode;
+  }
+}
+
+export function parsePRUrl(url: string): ParsedPRUrl | null {
+  const match = url
+    .trim()
+    .match(/https?:\/\/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)(?:[/?#].*)?$/i);
+
+  if (!match) return null;
+
+  return {
+    owner: match[1],
+    repo: match[2],
+    number: Number.parseInt(match[3], 10),
+  };
+}
+
+export function parseRepoSlug(input: string): ParsedRepoSlug | null {
+  const trimmed = input.trim();
+  const githubMatch = trimmed.match(/https?:\/\/github\.com\/([^/]+)\/([^/]+)(?:[/?#].*)?$/i);
+  if (githubMatch) {
+    return {
+      owner: githubMatch[1],
+      repo: githubMatch[2],
+    };
+  }
+
+  const slugMatch = trimmed.match(/^([^/]+)\/([^/]+)$/);
+  if (!slugMatch) return null;
+
+  return {
+    owner: slugMatch[1],
+    repo: slugMatch[2],
+  };
+}
+
+export function formatRepoSlug(parsed: ParsedRepoSlug): string {
+  return `${parsed.owner}/${parsed.repo}`;
+}
+
+export function buildGitHubCloneUrl(repoSlug: string, authToken?: string): string {
+  const trimmedToken = authToken?.trim();
+  if (trimmedToken) {
+    return `https://x-access-token:${trimmedToken}@github.com/${repoSlug}.git`;
+  }
+
+  return `https://github.com/${repoSlug}.git`;
+}
+
+type ReviewThreadLookup = Map<number, {
+  threadId: string;
+  threadResolved: boolean;
+}>;
+type ReviewThreadCommentsConnection = {
+  nodes?: Array<{
+    databaseId?: number | null;
+  }> | null;
+  pageInfo?: {
+    hasNextPage?: boolean | null;
+    endCursor?: string | null;
+  } | null;
+};
+
+type ReviewThreadNode = {
+  id?: string | null;
+  isResolved?: boolean | null;
+  comments?: ReviewThreadCommentsConnection | null;
+};
+
+export function buildFeedbackAuditToken(feedbackId: string): string {
+  return `codefactory-feedback:${feedbackId}`;
+}
+
+const APP_COMMENT_FOOTER_PATTERN = /Posted by \[[^\]]+\]\(https:\/\/github\.com\/jeremymcs\/patchdeck\)/i;
+const AGENT_COMMAND_COMMENT_MARKER = "<!-- codefactory-agent-command -->";
+const AUDIT_TRAIL_COMMENT_PATTERN = /<!--\s*codefactory-feedback:[^>]+-->/i;
+export const APP_STATUS_COMMENT_PATTERN = /\*\*(?:Accepted|Agent running|Agent failed|Agent completed|Resolved)\*\*\s*(?:[—-]|$)/i;
+
+function classifyNonActionableAppFeedback(body: string): string | null {
+  if (body.includes(AGENT_COMMAND_COMMENT_MARKER)) {
+    return "PatchDeck agent command comment";
+  }
+
+  if (AUDIT_TRAIL_COMMENT_PATTERN.test(body)) {
+    return "PatchDeck audit trail comment";
+  }
+
+  if (APP_COMMENT_FOOTER_PATTERN.test(body)) {
+    return "PatchDeck status comment";
+  }
+
+  if (APP_STATUS_COMMENT_PATTERN.test(body)) {
+    return "PatchDeck status comment";
+  }
+
+  return null;
+}
+
+function applyIngestLifecycleDefaults(item: FeedbackItem): FeedbackItem {
+  const appReason = classifyNonActionableAppFeedback(item.body);
+  if (!appReason) {
+    return item;
+  }
+
+  return {
+    ...item,
+    decision: "reject",
+    decisionReason: appReason,
+    status: "rejected",
+    statusReason: appReason,
+  };
+}
+
+function isGitHubActionsCheckRun(run: GitHubCheckRunResponse): run is GitHubCheckRunResponse & { id: number } {
+  return run.app?.slug === "github-actions" && typeof run.id === "number";
+}
+
+function summarizeFailedGitHubActionsSteps(job: GitHubActionsJobResponse): string | null {
+  const failedStepNames = (job.steps ?? [])
+    .filter((step) => step.conclusion === "failure")
+    .map((step) => step.name?.trim())
+    .filter((name): name is string => Boolean(name));
+
+  if (failedStepNames.length === 0) {
+    return null;
+  }
+
+  return `Failed steps: ${Array.from(new Set(failedStepNames)).join(", ")}`;
+}
+
+function isGenericCheckRunFailureSummary(summary: string | null | undefined): boolean {
+  const currentSummary = summary?.trim() ?? "";
+  return (
+    currentSummary === "" ||
+    /^(?:check run(?: [a-z_]+)?|failed|failure)$/i.test(currentSummary)
+  );
+}
+
+function mergeCheckRunFailureSummary(
+  run: GitHubCheckRunResponse,
+  failedStepsSummary: string | null,
+): GitHubCheckRunResponse {
+  if (!failedStepsSummary) {
+    return run;
+  }
+
+  if (!isGenericCheckRunFailureSummary(run.output?.summary)) {
+    return run;
+  }
+
+  return {
+    ...run,
+    output: {
+      ...(run.output ?? {}),
+      summary: failedStepsSummary,
+    },
+  };
+}
+
+async function enrichCheckRunWithGitHubActionsSteps(
+  octokit: Octokit,
+  repo: ParsedRepoSlug,
+  run: GitHubCheckRunResponse,
+): Promise<GitHubCheckRunResponse> {
+  if (!isGitHubActionsCheckRun(run) || run.conclusion !== "failure") {
+    return run;
+  }
+  if (!isGenericCheckRunFailureSummary(run.output?.summary)) {
+    return run;
+  }
+
+  try {
+    const response = await octokit.request("GET /repos/{owner}/{repo}/actions/jobs/{job_id}", {
+      owner: repo.owner,
+      repo: repo.repo,
+      job_id: run.id,
+    });
+
+    return mergeCheckRunFailureSummary(
+      run,
+      summarizeFailedGitHubActionsSteps(response.data as GitHubActionsJobResponse),
+    );
+  } catch {
+    return run;
+  }
+}
+
+async function enrichCheckRunsWithGitHubActionsSteps(
+  octokit: Octokit,
+  repo: ParsedRepoSlug,
+  runs: GitHubCheckRunResponse[],
+): Promise<GitHubCheckRunResponse[]> {
+  const enrichedRuns: GitHubCheckRunResponse[] = [];
+
+  for (let index = 0; index < runs.length; index += GITHUB_ACTIONS_JOB_ENRICHMENT_BATCH_SIZE) {
+    const batch = runs.slice(index, index + GITHUB_ACTIONS_JOB_ENRICHMENT_BATCH_SIZE);
+    enrichedRuns.push(...(await Promise.all(
+      batch.map((run) => enrichCheckRunWithGitHubActionsSteps(octokit, repo, run)),
+    )));
+  }
+
+  return enrichedRuns;
+}
+
+export async function fetchCheckSnapshotsForRef(
+  octokit: Octokit,
+  repo: ParsedRepoSlug,
+  prId: string,
+  headSha: string,
+): Promise<CheckSnapshot[]> {
+  if (!headSha) return [];
+
+  const [statusResponse, checkRunsResponse] = await Promise.all([
+    withGitHubErrorHandling("commit statuses", repo, () => octokit.repos.getCombinedStatusForRef({
+      owner: repo.owner,
+      repo: repo.repo,
+      ref: headSha,
+    })),
+    withGitHubErrorHandling("check runs", repo, () => octokit.checks.listForRef({
+      owner: repo.owner,
+      repo: repo.repo,
+      ref: headSha,
+    })),
+  ]);
+
+  const checkRuns = await enrichCheckRunsWithGitHubActionsSteps(
+    octokit,
+    repo,
+    (checkRunsResponse.data.check_runs ?? []) as GitHubCheckRunResponse[],
+  );
+
+  return normalizeCheckSnapshotsFromRef({
+    prId,
+    sha: headSha,
+    statuses: (statusResponse.data.statuses ?? []) as GitHubCommitStatusResponse[],
+    checkRuns,
+  });
+}
+
+function resolveConfiguredGitHubToken(config: Config): string | undefined {
+  return [
+    ...(config.githubTokens ?? []),
+    config.githubToken ?? "",
+  ]
+    .map((token) => token.trim())
+    .find(Boolean);
+}
+
+export async function resolveGitHubAuthToken(
+  config: Config,
+  deps: GitHubAuthResolutionDeps = {},
+): Promise<string | undefined> {
+  const configuredToken = resolveConfiguredGitHubToken(config);
+  if (configuredToken) {
+    return configuredToken;
+  }
+
+  const envToken = process.env.GITHUB_TOKEN?.trim();
+  if (envToken) {
+    return envToken;
+  }
+
+  return resolveGhAuthToken(deps);
+}
+
+function formatGitHubTarget(resource: ParsedPRUrl | ParsedRepoSlug): string {
+  if ("number" in resource) {
+    return `${resource.owner}/${resource.repo}#${resource.number}`;
+  }
+
+  return `${resource.owner}/${resource.repo}`;
+}
+
+function toGitHubIntegrationError(
+  error: unknown,
+  context: string,
+  resource: ParsedPRUrl | ParsedRepoSlug,
+): GitHubIntegrationError {
+  if (error instanceof GitHubIntegrationError) {
+    return error;
+  }
+
+  const target = formatGitHubTarget(resource);
+  const status = typeof (error as GitHubErrorLike | undefined)?.status === "number"
+    ? (error as GitHubErrorLike).status!
+    : 502;
+  const authHelp = "Run `gh auth login` on this machine or set `GITHUB_TOKEN` if the repository is private.";
+
+  if (status === 401) {
+    return new GitHubIntegrationError(
+      `GitHub authentication failed while loading ${context} for ${target}. ${authHelp}`,
+      status,
+    );
+  }
+
+  if (status === 403) {
+    const headers = (error as GitHubErrorLike | undefined)?.response?.headers;
+    const rateLimitRemaining = headers?.["x-ratelimit-remaining"];
+    const lowerMessage = error instanceof Error ? error.message.toLowerCase() : "";
+    const isRateLimited = rateLimitRemaining === "0" || lowerMessage.includes("rate limit");
+
+    if (isRateLimited) {
+      return new GitHubIntegrationError(
+        `GitHub rate limit reached while loading ${context} for ${target}. Authenticate with \`gh auth login\` or set \`GITHUB_TOKEN\` to raise the limit.`,
+        status,
+      );
+    }
+
+    return new GitHubIntegrationError(
+      `GitHub denied access while loading ${context} for ${target}. ${authHelp}`,
+      status,
+    );
+  }
+
+  if (status === 404) {
+    return new GitHubIntegrationError(
+      `GitHub could not access ${target} while loading ${context}. Confirm the repository and PR exist. ${authHelp}`,
+      status,
+    );
+  }
+
+  const message = error instanceof Error ? error.message : String(error);
+  return new GitHubIntegrationError(
+    `GitHub request failed while loading ${context} for ${target}: ${message}`,
+    status,
+  );
+}
+
+function getGitHubErrorStatus(error: unknown): number | null {
+  const status = (error as GitHubErrorLike | undefined)?.status;
+  return typeof status === "number" ? status : null;
+}
+
+function getGitHubErrorCode(error: unknown): string | null {
+  const code = (error as { code?: unknown } | undefined)?.code;
+  if (typeof code === "string" && code.trim()) {
+    return code;
+  }
+
+  const causeCode = (error as { cause?: { code?: unknown } } | undefined)?.cause?.code;
+  return typeof causeCode === "string" && causeCode.trim() ? causeCode : null;
+}
+
+function isTransientGitHubError(error: unknown): boolean {
+  if (error instanceof GitHubIntegrationError) {
+    return false;
+  }
+
+  const status = getGitHubErrorStatus(error);
+  if (status !== null && [408, 500, 502, 503, 504].includes(status)) {
+    return true;
+  }
+
+  const code = getGitHubErrorCode(error);
+  if (code && /^(ECONNRESET|EAI_AGAIN|ETIMEDOUT|ESOCKETTIMEDOUT)$/i.test(code)) {
+    return true;
+  }
+
+  const message = error instanceof Error ? error.message : String(error);
+  return /\b(ECONNRESET|EAI_AGAIN|ETIMEDOUT|socket hang up|network error|fetch failed)\b/i.test(message);
+}
+
+async function withGitHubErrorHandling<T>(
+  context: string,
+  resource: ParsedPRUrl | ParsedRepoSlug,
+  request: () => Promise<T>,
+): Promise<T> {
+  const maxAttempts = 2;
+  let lastError: unknown = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return await request();
+    } catch (error) {
+      lastError = error;
+      if (attempt < maxAttempts && isTransientGitHubError(error)) {
+        continue;
+      }
+      throw toGitHubIntegrationError(error, context, resource);
+    }
+  }
+
+  throw toGitHubIntegrationError(lastError, context, resource);
+}
+
+export async function buildOctokit(
+  config: Config,
+  deps: BuildOctokitDeps = {},
+): Promise<Octokit> {
+  const envToken = process.env.GITHUB_TOKEN?.trim();
+  const configuredToken = resolveConfiguredGitHubToken(config);
+  const buildClient = (authToken?: string) => new Octokit({
+    auth: authToken,
+    log: octokitLogger,
+    request: {
+      ...(deps.requestFetch ? { fetch: deps.requestFetch } : {}),
+      headers: {
+        "X-GitHub-Api-Version": GITHUB_API_VERSION,
+      },
+    },
+  });
+
+  const primaryToken = configuredToken || envToken || (await resolveGhAuthToken(deps));
+  const octokit = buildClient(primaryToken);
+
+  if (configuredToken) {
+    let fallbackOctokit: Octokit | null = null;
+    octokit.hook.wrap("request", async (request, options) => {
+      try {
+        return await request(options);
+      } catch (error) {
+        if (!isUnauthorized(error)) throw error;
+
+        const ghAuthToken = await resolveGhAuthToken(deps);
+        if (!ghAuthToken || ghAuthToken === configuredToken) throw error;
+
+        fallbackOctokit ??= buildClient(ghAuthToken);
+        const retryOptions = { ...options };
+        const { authorization: _a, ...headers } = (retryOptions.headers ?? {}) as Record<string, string>;
+        const { hook: _h, ...requestOptions } = (retryOptions.request ?? {}) as Record<string, unknown>;
+        const requestOverride = Object.keys(requestOptions).length > 0 ? { request: requestOptions } : {};
+        return fallbackOctokit.request({ ...retryOptions, headers, ...requestOverride });
+      }
+    });
+  }
+
+  return octokit;
+}
+
+export type CodeReviewPresence = {
+  claude: boolean;
+  codex: boolean;
+  gemini: boolean;
+};
+
+export type RepoOnboardingStatus = {
+  repo: string;
+  accessible: boolean;
+  error?: string;
+  codeReviews: CodeReviewPresence;
+};
+
+export type OnboardingStatus = {
+  githubConnected: boolean;
+  githubError?: string;
+  githubUser?: string;
+  repos: RepoOnboardingStatus[];
+};
+
+type OnboardingStatusDeps = {
+  buildOctokitFn?: typeof buildOctokit;
+  resolveGitHubAuthTokenFn?: typeof resolveGitHubAuthToken;
+};
+
+export async function checkOnboardingStatus(
+  config: Config,
+  watchedRepos: string[],
+  deps: OnboardingStatusDeps = {},
+): Promise<OnboardingStatus> {
+  const buildOctokitFn = deps.buildOctokitFn ?? buildOctokit;
+  const resolveGitHubAuthTokenFn = deps.resolveGitHubAuthTokenFn ?? resolveGitHubAuthToken;
+  let octokit: Octokit;
+  let githubConnected = false;
+  let githubError: string | undefined;
+  let githubUser: string | undefined;
+
+  try {
+    octokit = await buildOctokitFn(config);
+    const auth = await resolveGitHubAuthTokenFn(config);
+    if (!auth) {
+      githubError = "No GitHub token found. Run `gh auth login` or set GITHUB_TOKEN, or enter a Personal Access Token in settings.";
+    } else {
+      const { data } = await octokit.rest.users.getAuthenticated();
+      githubConnected = true;
+      githubUser = data.login;
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    githubError = msg;
+    return { githubConnected: false, githubError, repos: [] };
+  }
+
+  const repos: RepoOnboardingStatus[] = await Promise.all(
+    watchedRepos.map(async (repoSlug): Promise<RepoOnboardingStatus> => {
+      const parsed = parseRepoSlug(repoSlug);
+      if (!parsed) {
+        return { repo: repoSlug, accessible: false, error: "Invalid repo slug", codeReviews: { claude: false, codex: false, gemini: false } };
+      }
+
+      try {
+        const { data: files } = await octokit.rest.repos.getContent({
+          owner: parsed.owner,
+          repo: parsed.repo,
+          path: ".github/workflows",
+        });
+
+        const fileList = Array.isArray(files) ? files : [];
+        const names = fileList.map((f) => ("name" in f ? f.name.toLowerCase() : ""));
+        const contentResults = await Promise.all(
+          fileList
+            .filter((f) => "name" in f && "path" in f && f.path && (f.name.endsWith(".yml") || f.name.endsWith(".yaml")))
+            .map(async (f) => {
+              try {
+                const { data: fileContent } = await octokit.rest.repos.getContent({
+                  owner: parsed.owner,
+                  repo: parsed.repo,
+                  path: f.path as string,
+                });
+                if (!Array.isArray(fileContent) && "content" in fileContent && fileContent.content) {
+                  return Buffer.from(fileContent.content, "base64").toString("utf-8");
+                }
+              } catch {
+                // Keep matching behavior: silently ignore per-file read failures.
+                return "";
+              }
+              return "";
+            }),
+        );
+        const allContent = contentResults.join("\n").toLowerCase();
+
+        const claude = names.some((n) => n.includes("claude")) || allContent.includes("claude-code-action") || allContent.includes("anthropics/claude");
+        const codex = names.some((n) => n.includes("codex")) || allContent.includes("openai/codex-action") || allContent.includes("codex-action");
+        const gemini = names.some((n) => n.includes("gemini")) || allContent.includes("gemini-code-assist") || allContent.includes("run-gemini-cli") || allContent.includes("google-github-actions/run-gemini");
+
+        return { repo: repoSlug, accessible: true, codeReviews: { claude, codex, gemini } };
+      } catch (err) {
+        const status = typeof (err as { status?: number })?.status === "number" ? (err as { status: number }).status : 0;
+        const msg = err instanceof Error ? err.message : String(err);
+        if (status === 404) {
+          // Workflows dir doesn't exist — repo is accessible but no workflows
+          return { repo: repoSlug, accessible: true, codeReviews: { claude: false, codex: false, gemini: false } };
+        }
+        return { repo: repoSlug, accessible: false, error: msg, codeReviews: { claude: false, codex: false, gemini: false } };
+      }
+    }),
+  );
+
+  return { githubConnected, githubUser, repos };
+}
+
+export type ReviewTool = "claude" | "codex";
+
+const WORKFLOW_TEMPLATES: Record<ReviewTool, { filename: string; content: string }> = {
+  claude: {
+    filename: "claude-code-review.yml",
+    content: `name: Claude Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  code-review:
+    if: github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: \${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: "Review this pull request for code quality, correctness, and security. Post your findings as review comments."
+`,
+  },
+  codex: {
+    filename: "codex-code-review.yml",
+    content: `name: Codex Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  code-review:
+    if: github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: openai/codex-action@v1
+        with:
+          openai-api-key: \${{ secrets.OPENAI_API_KEY }}
+          model: gpt-5
+          prompt: |
+            Review this pull request. Focus on:
+            - Code correctness and potential bugs
+            - Security issues
+            - Performance concerns
+            - Code style and readability
+            Post your review as GitHub PR review comments.
+`,
+  },
+};
+
+export async function installCodeReviewWorkflow(
+  config: Config,
+  repoSlug: string,
+  tool: ReviewTool,
+): Promise<{ path: string; url: string }> {
+  const parsed = parseRepoSlug(repoSlug);
+  if (!parsed) {
+    throw new GitHubIntegrationError(`Invalid repository: ${repoSlug}`, 400);
+  }
+
+  const octokit = await buildOctokit(config);
+  const template = WORKFLOW_TEMPLATES[tool];
+  const path = `.github/workflows/${template.filename}`;
+  const contentBase64 = Buffer.from(template.content).toString("base64");
+
+  // Check if file already exists to get its SHA (required for updates)
+  let existingSha: string | undefined;
+  try {
+    const { data } = await octokit.rest.repos.getContent({
+      owner: parsed.owner,
+      repo: parsed.repo,
+      path,
+    });
+    if (!Array.isArray(data) && "sha" in data) {
+      existingSha = data.sha;
+    }
+  } catch (err) {
+    const status = typeof (err as { status?: number })?.status === "number" ? (err as { status: number }).status : 0;
+    if (status !== 404) {
+      throw toGitHubIntegrationError(err, "workflow file check", parsed);
+    }
+    // 404 means file doesn't exist yet — that's fine
+  }
+
+  const commitMessage = existingSha
+    ? `ci: update ${tool} code review workflow`
+    : `ci: add ${tool} code review workflow`;
+
+  const response = await withGitHubErrorHandling("workflow file creation", parsed, () =>
+    octokit.rest.repos.createOrUpdateFileContents({
+      owner: parsed.owner,
+      repo: parsed.repo,
+      path,
+      message: commitMessage,
+      content: contentBase64,
+      ...(existingSha ? { sha: existingSha } : {}),
+    }),
+  );
+
+  return {
+    path,
+    url: response.data.content?.html_url ?? `https://github.com/${repoSlug}/blob/HEAD/${path}`,
+  };
+}
+
+export async function fetchPullSummary(
+  octokit: Octokit,
+  parsed: ParsedPRUrl,
+): Promise<GitHubPullSummary> {
+  const response = await withGitHubErrorHandling("PR metadata", parsed, () =>
+    octokit.pulls.get({
+      owner: parsed.owner,
+      repo: parsed.repo,
+      pull_number: parsed.number,
+    }),
+  );
+
+  const pull = response.data;
+  const baseRef = pull.base?.ref || pull.base?.repo?.default_branch || "";
+
+  return {
+    number: pull.number,
+    title: pull.title || `PR #${pull.number}`,
+    branch: pull.head?.ref || "unknown",
+    author: pull.user?.login || "",
+    url: pull.html_url || `https://github.com/${parsed.owner}/${parsed.repo}/pull/${pull.number}`,
+    repoFullName: pull.base?.repo?.full_name || `${parsed.owner}/${parsed.repo}`,
+    repoCloneUrl: pull.base?.repo?.clone_url || `https://github.com/${parsed.owner}/${parsed.repo}.git`,
+    headSha: pull.head?.sha || "",
+    headRef: pull.head?.ref || "",
+    headRepoFullName: pull.head?.repo?.full_name || `${parsed.owner}/${parsed.repo}`,
+    headRepoCloneUrl: pull.head?.repo?.clone_url || `https://github.com/${parsed.owner}/${parsed.repo}.git`,
+    baseRef,
+    baseSha: pull.base?.sha || "",
+    mergeable: typeof pull.mergeable === "boolean" ? pull.mergeable : null,
+  };
+}
+
+export async function fetchPullCloseState(
+  octokit: Octokit,
+  parsed: ParsedPRUrl,
+): Promise<GitHubPullCloseState> {
+  const response = await withGitHubErrorHandling("PR close state", parsed, () =>
+    octokit.pulls.get({
+      owner: parsed.owner,
+      repo: parsed.repo,
+      pull_number: parsed.number,
+    }),
+  );
+
+  const pull = response.data;
+  const baseRef = pull.base?.ref || pull.base?.repo?.default_branch || "";
+
+  return {
+    number: pull.number,
+    title: pull.title || `PR #${pull.number}`,
+    url: pull.html_url || `https://github.com/${parsed.owner}/${parsed.repo}/pull/${pull.number}`,
+    author: pull.user?.login || "unknown",
+    baseRef,
+    headRef: pull.head?.ref || "",
+    headSha: pull.head?.sha || "",
+    merged: Boolean(pull.merged_at),
+    mergedAt: pull.merged_at || null,
+    closedAt: pull.closed_at || null,
+    mergeCommitSha: pull.merge_commit_sha || null,
+  };
+}
+
+export async function fetchIssueSummary(
+  octokit: Octokit,
+  parsed: ParsedRepoSlug & { number: number },
+): Promise<GitHubIssueSummary> {
+  const response = await withGitHubErrorHandling("issue metadata", parsed, () =>
+    octokit.issues.get({
+      owner: parsed.owner,
+      repo: parsed.repo,
+      issue_number: parsed.number,
+    }),
+  );
+
+  const issue = response.data;
+  return {
+    number: issue.number,
+    title: issue.title || `Issue #${issue.number}`,
+    body: typeof issue.body === "string" ? issue.body : null,
+    bodyHtml: typeof issue.body === "string" ? renderGitHubMarkdown(issue.body) : null,
+    url: issue.html_url || `https://github.com/${parsed.owner}/${parsed.repo}/issues/${parsed.number}`,
+    repoFullName: `${parsed.owner}/${parsed.repo}`,
+    repoCloneUrl: `https://github.com/${parsed.owner}/${parsed.repo}.git`,
+    author: issue.user?.login || "",
+    labels: Array.isArray(issue.labels)
+      ? issue.labels
+          .map((label) => (typeof label === "string" ? label : label?.name ?? ""))
+          .filter((label): label is string => Boolean(label))
+      : [],
+    assignees: Array.isArray(issue.assignees)
+      ? issue.assignees
+          .map((assignee) => assignee?.login || "")
+          .filter((assignee): assignee is string => Boolean(assignee))
+      : [],
+    comments: typeof issue.comments === "number" ? issue.comments : 0,
+    createdAt: issue.created_at || new Date().toISOString(),
+    updatedAt: issue.updated_at || issue.created_at || new Date().toISOString(),
+  };
+}
+
+export function parseSemverTag(tagName: string): SemverVersion | null {
+  const match = tagName.trim().match(SEMVER_TAG_PATTERN);
+  if (!match) return null;
+
+  return {
+    major: Number.parseInt(match[1], 10),
+    minor: Number.parseInt(match[2], 10),
+    patch: Number.parseInt(match[3], 10),
+  };
+}
+
+function compareSemver(a: SemverVersion, b: SemverVersion): number {
+  if (a.major !== b.major) return a.major - b.major;
+  if (a.minor !== b.minor) return a.minor - b.minor;
+  return a.patch - b.patch;
+}
+
+function formatSemverTag(version: SemverVersion): string {
+  return `v${version.major}.${version.minor}.${version.patch}`;
+}
+
+export function selectLatestSemverTag(tagNames: string[]): string | null {
+  let winner: { tag: string; version: SemverVersion } | null = null;
+
+  for (const tag of tagNames) {
+    const parsed = parseSemverTag(tag);
+    if (!parsed) continue;
+
+    if (!winner || compareSemver(parsed, winner.version) > 0) {
+      winner = { tag, version: parsed };
+    }
+  }
+
+  return winner?.tag ?? null;
+}
+
+export function resolveNextSemverTag(
+  latestTag: string | null | undefined,
+  bump: ReleaseBump,
+): string {
+  const current = latestTag
+    ? parseSemverTag(latestTag)
+    : { major: 0, minor: 0, patch: 0 };
+
+  if (!current) {
+    throw new GitHubIntegrationError(`Cannot calculate next semver tag from invalid tag: ${latestTag}`, 400);
+  }
+
+  const next: SemverVersion = {
+    major: current.major,
+    minor: current.minor,
+    patch: current.patch,
+  };
+
+  if (bump === "major") {
+    next.major += 1;
+    next.minor = 0;
+    next.patch = 0;
+  } else if (bump === "minor") {
+    next.minor += 1;
+    next.patch = 0;
+  } else {
+    next.patch += 1;
+  }
+
+  return formatSemverTag(next);
+}
+
+function parseDateMs(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+export async function getDefaultBranchForRepo(
+  octokit: Octokit,
+  repo: ParsedRepoSlug,
+): Promise<string> {
+  const response = await withGitHubErrorHandling("repository metadata", repo, () =>
+    octokit.repos.get({
+      owner: repo.owner,
+      repo: repo.repo,
+    }),
+  );
+
+  const defaultBranch = response.data.default_branch?.trim();
+  if (!defaultBranch) {
+    throw new GitHubIntegrationError(`GitHub did not return a default branch for ${formatRepoSlug(repo)}`, 502);
+  }
+
+  return defaultBranch;
+}
+
+export async function listReleasesForRepo(
+  octokit: Octokit,
+  repo: ParsedRepoSlug,
+): Promise<GitHubReleaseSummary[]> {
+  const releases = await withGitHubErrorHandling("repository releases", repo, () =>
+    octokit.paginate(octokit.repos.listReleases, {
+      owner: repo.owner,
+      repo: repo.repo,
+      per_page: 100,
+    }),
+  );
+
+  return releases.map((release) => ({
+    id: release.id,
+    tagName: release.tag_name || "",
+    name: release.name || release.tag_name || `Release ${release.id}`,
+    body: release.body || null,
+    htmlUrl: release.html_url || "",
+    apiUrl: release.url || "",
+    draft: Boolean(release.draft),
+    prerelease: Boolean(release.prerelease),
+    targetCommitish: release.target_commitish || null,
+    publishedAt: release.published_at || null,
+  }));
+}
+
+export async function listTagsForRepo(
+  octokit: Octokit,
+  repo: ParsedRepoSlug,
+): Promise<GitHubRepoTag[]> {
+  const tags = await withGitHubErrorHandling("repository tags", repo, () =>
+    octokit.paginate(octokit.repos.listTags, {
+      owner: repo.owner,
+      repo: repo.repo,
+      per_page: 100,
+    }),
+  );
+
+  return tags.map((tag) => ({
+    name: tag.name,
+    commitSha: tag.commit?.sha || null,
+  }));
+}
+
+export async function getLatestSemverTagForRepo(
+  octokit: Octokit,
+  repo: ParsedRepoSlug,
+): Promise<string | null> {
+  const [releases, tags] = await Promise.all([
+    listReleasesForRepo(octokit, repo),
+    listTagsForRepo(octokit, repo),
+  ]);
+
+  const candidates = [
+    ...releases
+      .filter((release) => !release.draft)
+      .map((release) => release.tagName),
+    ...tags.map((tag) => tag.name),
+  ];
+
+  return selectLatestSemverTag(candidates);
+}
+
+export async function createGitHubRelease(
+  octokit: Octokit,
+  repo: ParsedRepoSlug,
+  input: {
+    tagName: string;
+    name: string;
+    body: string;
+    targetCommitish?: string | null;
+    draft?: boolean;
+    prerelease?: boolean;
+    generateReleaseNotes?: boolean;
+  },
+): Promise<GitHubReleaseSummary> {
+  const response = await withGitHubErrorHandling("release creation", repo, () =>
+    octokit.repos.createRelease({
+      owner: repo.owner,
+      repo: repo.repo,
+      tag_name: input.tagName,
+      name: input.name,
+      body: input.body,
+      target_commitish: input.targetCommitish ?? undefined,
+      draft: input.draft ?? false,
+      prerelease: input.prerelease ?? false,
+      generate_release_notes: input.generateReleaseNotes ?? false,
+    }),
+  );
+
+  const release = response.data;
+  return {
+    id: release.id,
+    tagName: release.tag_name || input.tagName,
+    name: release.name || input.name,
+    body: release.body || null,
+    htmlUrl: release.html_url || "",
+    apiUrl: release.url || "",
+    draft: Boolean(release.draft),
+    prerelease: Boolean(release.prerelease),
+    targetCommitish: release.target_commitish || null,
+    publishedAt: release.published_at || null,
+  };
+}
+
+function shouldIgnoreAuthor(
+  authorLogin: string | null | undefined,
+  ignoredBots: Set<string>,
+): boolean {
+  if (!authorLogin) {
+    return true;
+  }
+
+  const lowered = authorLogin.toLowerCase();
+  if (ignoredBots.has(lowered)) {
+    return true;
+  }
+
+  return false;
+}
+
+function addReviewThreadCommentsToLookup(
+  lookup: ReviewThreadLookup,
+  threadId: string,
+  threadResolved: boolean,
+  comments?: ReviewThreadCommentsConnection | null,
+): void {
+  for (const comment of comments?.nodes || []) {
+    if (typeof comment?.databaseId !== "number") {
+      continue;
+    }
+
+    lookup.set(comment.databaseId, {
+      threadId,
+      threadResolved,
+    });
+  }
+}
+
+async function appendPaginatedReviewThreadComments(
+  octokit: Octokit,
+  parsed: ParsedPRUrl,
+  lookup: ReviewThreadLookup,
+  thread: ReviewThreadNode,
+): Promise<void> {
+  if (!thread.id) {
+    return;
+  }
+
+  let cursor = thread.comments?.pageInfo?.hasNextPage && thread.comments.pageInfo.endCursor
+    ? thread.comments.pageInfo.endCursor
+    : null;
+  let threadResolved = Boolean(thread.isResolved);
+
+  while (cursor) {
+    const response = await withGitHubErrorHandling("review thread comments", parsed, () =>
+      octokit.graphql<{
+        node?: ReviewThreadNode | null;
+      }>(REVIEW_THREAD_COMMENTS_QUERY, {
+        threadId: thread.id,
+        cursor,
+      }),
+    );
+    const paginatedThread = response.node;
+
+    if (!paginatedThread?.id) {
+      break;
+    }
+
+    if (typeof paginatedThread.isResolved === "boolean") {
+      threadResolved = paginatedThread.isResolved;
+    }
+
+    addReviewThreadCommentsToLookup(
+      lookup,
+      paginatedThread.id,
+      threadResolved,
+      paginatedThread.comments,
+    );
+
+    const pageInfo = paginatedThread.comments?.pageInfo;
+    cursor = pageInfo?.hasNextPage && pageInfo.endCursor
+      ? pageInfo.endCursor
+      : null;
+  }
+}
+
+async function fetchReviewThreadLookup(
+  octokit: Octokit,
+  parsed: ParsedPRUrl,
+): Promise<ReviewThreadLookup> {
+  const lookup: ReviewThreadLookup = new Map();
+  let cursor: string | null = null;
+
+  while (true) {
+    const response = await withGitHubErrorHandling("review threads", parsed, () =>
+      octokit.graphql<{
+        repository?: {
+          pullRequest?: {
+            reviewThreads?: {
+              nodes?: ReviewThreadNode[];
+              pageInfo?: {
+                hasNextPage?: boolean | null;
+                endCursor?: string | null;
+              };
+            };
+          };
+        };
+      }>(REVIEW_THREADS_QUERY, {
+        owner: parsed.owner,
+        repo: parsed.repo,
+        number: parsed.number,
+        cursor,
+      }),
+    );
+
+    const reviewThreads = response.repository?.pullRequest?.reviewThreads;
+
+    for (const thread of reviewThreads?.nodes || []) {
+      if (!thread?.id) {
+        continue;
+      }
+
+      addReviewThreadCommentsToLookup(lookup, thread.id, Boolean(thread.isResolved), thread.comments);
+      await appendPaginatedReviewThreadComments(octokit, parsed, lookup, thread);
+    }
+
+    const pageInfo = reviewThreads?.pageInfo;
+    if (!pageInfo?.hasNextPage || !pageInfo.endCursor) {
+      break;
+    }
+
+    cursor = pageInfo.endCursor;
+  }
+
+  return lookup;
+}
+
+export async function replyToReviewThread(
+  octokit: Octokit,
+  parsed: ParsedPRUrl,
+  threadId: string,
+  body: string,
+): Promise<void> {
+  await withGitHubErrorHandling("review thread reply", parsed, () =>
+    octokit.graphql(REVIEW_THREAD_REPLY_MUTATION, {
+      threadId,
+      body,
+    }),
+  );
+}
+
+export async function resolveReviewThread(
+  octokit: Octokit,
+  parsed: ParsedPRUrl,
+  threadId: string,
+): Promise<void> {
+  await withGitHubErrorHandling("review thread resolution", parsed, () =>
+    octokit.graphql(RESOLVE_REVIEW_THREAD_MUTATION, {
+      threadId,
+    }),
+  );
+}
+
+export async function replyToReview(
+  octokit: Octokit,
+  parsed: ParsedPRUrl,
+  body: string,
+): Promise<void> {
+  await withGitHubErrorHandling("review follow-up", parsed, () =>
+    octokit.issues.createComment({
+      owner: parsed.owner,
+      repo: parsed.repo,
+      issue_number: parsed.number,
+      body,
+    }),
+  );
+}
+
+export async function replyToIssueComment(
+  octokit: Octokit,
+  parsed: ParsedPRUrl,
+  body: string,
+): Promise<void> {
+  await withGitHubErrorHandling("issue comment follow-up", parsed, () =>
+    octokit.issues.createComment({
+      owner: parsed.owner,
+      repo: parsed.repo,
+      issue_number: parsed.number,
+      body,
+    }),
+  );
+}
+
+export async function createIssueComment(
+  octokit: Octokit,
+  parsed: ParsedRepoSlug & { number: number },
+  body: string,
+): Promise<{ id: number | null; url: string | null }> {
+  const result = await withGitHubErrorHandling("issue comment", parsed, () =>
+    octokit.issues.createComment({
+      owner: parsed.owner,
+      repo: parsed.repo,
+      issue_number: parsed.number,
+      body,
+    }),
+  );
+
+  return {
+    id: result.data.id ?? null,
+    url: result.data.html_url ?? null,
+  };
+}
+
+export async function addLabelsToIssue(
+  octokit: Octokit,
+  parsed: ParsedRepoSlug & { number: number },
+  labels: string[],
+): Promise<void> {
+  if (labels.length === 0) {
+    return;
+  }
+
+  await withGitHubErrorHandling("issue labels", parsed, () =>
+    octokit.issues.addLabels({
+      owner: parsed.owner,
+      repo: parsed.repo,
+      issue_number: parsed.number,
+      labels,
+    }),
+  );
+}
+
+export async function postPRComment(
+  octokit: Octokit,
+  parsed: ParsedPRUrl,
+  body: string,
+): Promise<void> {
+  await withGitHubErrorHandling("PR comment", parsed, () =>
+    octokit.issues.createComment({
+      owner: parsed.owner,
+      repo: parsed.repo,
+      issue_number: parsed.number,
+      body,
+    }),
+  );
+}
+
+export async function postFollowUpForFeedbackItem(
+  octokit: Octokit,
+  parsed: ParsedPRUrl,
+  item: FeedbackItem,
+  body: string,
+  options?: { resolve?: boolean },
+): Promise<void> {
+  if (item.replyKind === "review_thread") {
+    if (!item.threadId) {
+      // Thread lookup failed (e.g. GraphQL pagination gap or timing issue).
+      // Fall back to a top-level PR comment so the audit trail is still visible.
+      const fallbackBody = item.sourceUrl
+        ? `> _Could not reply in the review thread directly ([original comment](${item.sourceUrl}))._\n\n${body}`
+        : body;
+      await replyToIssueComment(octokit, parsed, fallbackBody);
+      return;
+    }
+
+    await replyToReviewThread(octokit, parsed, item.threadId, body);
+
+    if (options?.resolve) {
+      await resolveReviewThread(octokit, parsed, item.threadId);
+    }
+    return;
+  }
+
+  if (item.replyKind === "review") {
+    await replyToReview(octokit, parsed, body);
+    return;
+  }
+
+  await replyToIssueComment(octokit, parsed, body);
+}
+
+export async function fetchFeedbackItemsForPR(
+  octokit: Octokit,
+  parsed: ParsedPRUrl,
+  config: Config,
+): Promise<FeedbackItem[]> {
+  const ignoredBots = new Set(config.ignoredBots.map((login) => login.toLowerCase()));
+
+  const [reviewComments, reviews, issueComments, reviewThreads] = await Promise.all([
+    withGitHubErrorHandling("review comments", parsed, () => octokit.paginate(octokit.pulls.listReviewComments, {
+      owner: parsed.owner,
+      repo: parsed.repo,
+      pull_number: parsed.number,
+      per_page: 100,
+    })),
+    withGitHubErrorHandling("reviews", parsed, () => octokit.paginate(octokit.pulls.listReviews, {
+      owner: parsed.owner,
+      repo: parsed.repo,
+      pull_number: parsed.number,
+      per_page: 100,
+    })),
+    withGitHubErrorHandling("issue comments", parsed, () => octokit.paginate(octokit.issues.listComments, {
+      owner: parsed.owner,
+      repo: parsed.repo,
+      issue_number: parsed.number,
+      per_page: 100,
+    })),
+    fetchReviewThreadLookup(octokit, parsed),
+  ]);
+
+  const reviewCommentItems: FeedbackItem[] = reviewComments
+    .filter((comment) => !shouldIgnoreAuthor(comment.user?.login, ignoredBots))
+    .map((comment) => {
+      const id = `gh-review-comment-${comment.id}`;
+      const thread = reviewThreads.get(comment.id);
+
+      return {
+        id,
+        author: comment.user?.login || "unknown",
+        body: comment.body || "",
+        bodyHtml: renderGitHubMarkdown(comment.body || ""),
+        replyKind: "review_thread" as const,
+        sourceId: String(comment.id),
+        sourceNodeId: comment.node_id || null,
+        sourceUrl: comment.html_url || null,
+        threadId: thread?.threadId || null,
+        threadResolved: typeof thread?.threadResolved === "boolean" ? thread.threadResolved : null,
+        auditToken: buildFeedbackAuditToken(id),
+        file: comment.path || null,
+        line: comment.line ?? comment.original_line ?? null,
+        type: "review_comment" as const,
+        createdAt: comment.created_at || new Date().toISOString(),
+        decision: null,
+        decisionReason: null,
+        action: null,
+        status: "pending" as const,
+        statusReason: null,
+      };
+    })
+    .filter((item) => item.body.trim().length > 0);
+
+  const reviewItems: FeedbackItem[] = reviews
+    .filter((review) => !shouldIgnoreAuthor(review.user?.login, ignoredBots))
+    .map((review) => {
+      const id = `gh-review-${review.id}`;
+
+      return {
+        id,
+        author: review.user?.login || "unknown",
+        body: review.body || "",
+        bodyHtml: renderGitHubMarkdown(review.body || ""),
+        replyKind: "review" as const,
+        sourceId: String(review.id),
+        sourceNodeId: review.node_id || null,
+        sourceUrl: review.html_url || null,
+        threadId: null,
+        threadResolved: null,
+        auditToken: buildFeedbackAuditToken(id),
+        file: null,
+        line: null,
+        type: "review" as const,
+        createdAt: review.submitted_at || new Date().toISOString(),
+        decision: null,
+        decisionReason: null,
+        action: null,
+        status: "pending" as const,
+        statusReason: null,
+      };
+    })
+    .filter((item) => item.body.trim().length > 0);
+
+  const issueCommentItems: FeedbackItem[] = issueComments
+    .filter((comment) => !shouldIgnoreAuthor(comment.user?.login, ignoredBots))
+    .map((comment) => {
+      const id = `gh-issue-comment-${comment.id}`;
+
+      return {
+        id,
+        author: comment.user?.login || "unknown",
+        body: comment.body || "",
+        bodyHtml: renderGitHubMarkdown(comment.body || ""),
+        replyKind: "general_comment" as const,
+        sourceId: String(comment.id),
+        sourceNodeId: comment.node_id || null,
+        sourceUrl: comment.html_url || null,
+        threadId: null,
+        threadResolved: null,
+        auditToken: buildFeedbackAuditToken(id),
+        file: null,
+        line: null,
+        type: "general_comment" as const,
+        createdAt: comment.created_at || new Date().toISOString(),
+        decision: null,
+        decisionReason: null,
+        action: null,
+        status: "pending" as const,
+        statusReason: null,
+      };
+    })
+    .filter((item) => item.body.trim().length > 0);
+
+  const combined = [...reviewCommentItems, ...reviewItems, ...issueCommentItems]
+    .map(applyIngestLifecycleDefaults);
+
+  combined.sort((a, b) => {
+    return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+  });
+
+  return combined;
+}
+
+export async function listOpenPullsForRepo(
+  octokit: Octokit,
+  repo: ParsedRepoSlug,
+): Promise<GitHubPullSummary[]> {
+  const pulls = await withGitHubErrorHandling("open pull requests", repo, () => octokit.paginate(octokit.pulls.list, {
+    owner: repo.owner,
+    repo: repo.repo,
+    state: "open",
+    sort: "updated",
+    direction: "desc",
+    per_page: 100,
+  }));
+
+  return pulls.map((pull) => ({
+    number: pull.number,
+    title: pull.title || `PR #${pull.number}`,
+    branch: pull.head?.ref || "unknown",
+    author: pull.user?.login || "",
+    url: pull.html_url || `https://github.com/${repo.owner}/${repo.repo}/pull/${pull.number}`,
+    repoFullName: pull.base?.repo?.full_name || `${repo.owner}/${repo.repo}`,
+    repoCloneUrl: pull.base?.repo?.clone_url || `https://github.com/${repo.owner}/${repo.repo}.git`,
+    headSha: pull.head?.sha || "",
+    headRef: pull.head?.ref || "",
+    headRepoFullName: pull.head?.repo?.full_name || `${repo.owner}/${repo.repo}`,
+    headRepoCloneUrl: pull.head?.repo?.clone_url || `https://github.com/${repo.owner}/${repo.repo}.git`,
+    baseRef: pull.base?.ref || pull.base?.repo?.default_branch || "",
+    baseSha: pull.base?.sha || "",
+    mergeable: null,
+  }));
+}
+
+export async function listOpenIssuesForRepo(
+  octokit: Octokit,
+  repo: ParsedRepoSlug,
+): Promise<GitHubIssueSummary[]> {
+  const issues = await withGitHubErrorHandling("open issues", repo, () => octokit.paginate(octokit.issues.listForRepo, {
+    owner: repo.owner,
+    repo: repo.repo,
+    state: "open",
+    sort: "updated",
+    direction: "desc",
+    per_page: 100,
+  }));
+
+  return issues
+    .filter((issue) => !issue.pull_request)
+    .map((issue) => ({
+      number: issue.number,
+      title: issue.title || `Issue #${issue.number}`,
+      body: typeof issue.body === "string" ? issue.body : null,
+      bodyHtml: typeof issue.body === "string" ? renderGitHubMarkdown(issue.body) : null,
+      url: issue.html_url || `https://github.com/${repo.owner}/${repo.repo}/issues/${issue.number}`,
+      repoFullName: `${repo.owner}/${repo.repo}`,
+      repoCloneUrl: `https://github.com/${repo.owner}/${repo.repo}.git`,
+      author: issue.user?.login || "",
+      labels: Array.isArray(issue.labels)
+        ? issue.labels
+            .map((label) => (typeof label === "string" ? label : label?.name ?? ""))
+            .filter((label): label is string => Boolean(label))
+        : [],
+      assignees: Array.isArray(issue.assignees)
+        ? issue.assignees
+            .map((assignee) => assignee?.login || "")
+            .filter((assignee): assignee is string => Boolean(assignee))
+        : [],
+      comments: typeof issue.comments === "number" ? issue.comments : 0,
+      createdAt: issue.created_at || new Date().toISOString(),
+      updatedAt: issue.updated_at || issue.created_at || new Date().toISOString(),
+    }));
+}
+
+export async function addReactionToComment(
+  octokit: Octokit,
+  parsed: ParsedPRUrl,
+  item: FeedbackItem,
+  content: "eyes" | "+1" | "-1" | "laugh" | "confused" | "heart" | "hooray" | "rocket",
+): Promise<void> {
+  const commentId = Number(item.sourceId);
+  if (!Number.isFinite(commentId)) return;
+
+  if (item.type === "review_comment") {
+    await withGitHubErrorHandling("reaction on review comment", parsed, () =>
+      octokit.reactions.createForPullRequestReviewComment({
+        owner: parsed.owner,
+        repo: parsed.repo,
+        comment_id: commentId,
+        content,
+      }),
+    );
+  } else if (item.type === "general_comment") {
+    await withGitHubErrorHandling("reaction on issue comment", parsed, () =>
+      octokit.reactions.createForIssueComment({
+        owner: parsed.owner,
+        repo: parsed.repo,
+        comment_id: commentId,
+        content,
+      }),
+    );
+  }
+  // Reviews don't support direct reactions — silently skip.
+}
+
+export type StatusReplyRef = {
+  commentDatabaseId: number;
+  replyKind: FeedbackItem["replyKind"];
+  body: string;
+};
+
+export async function postStatusReplyForFeedbackItem(
+  octokit: Octokit,
+  parsed: ParsedPRUrl,
+  item: FeedbackItem,
+  body: string,
+): Promise<StatusReplyRef | null> {
+  if (item.replyKind === "review_thread") {
+    if (!item.threadId) {
+      const fallbackBody = item.sourceUrl
+        ? `> _Could not post this status update in the review thread directly ([original comment](${item.sourceUrl}))._\n\n${body}`
+        : body;
+
+      const fallbackResult = await withGitHubErrorHandling("status reply fallback", parsed, () =>
+        octokit.issues.createComment({
+          owner: parsed.owner,
+          repo: parsed.repo,
+          issue_number: parsed.number,
+          body: fallbackBody,
+        }),
+      );
+
+      return {
+        commentDatabaseId: fallbackResult.data.id,
+        replyKind: "general_comment",
+        body: fallbackBody,
+      };
+    }
+
+    const result = await withGitHubErrorHandling("status reply in review thread", parsed, () =>
+      octokit.graphql(REVIEW_THREAD_REPLY_MUTATION, {
+        threadId: item.threadId,
+        body,
+      }),
+    );
+
+    const parsedResult = statusReplyMutationSchema.safeParse(result);
+    if (!parsedResult.success) {
+      throw new GitHubIntegrationError(
+        `GitHub returned an unexpected payload while creating a status reply for feedback item ${item.id} on ${formatGitHubTarget(parsed)}.`,
+        502,
+      );
+    }
+
+    const databaseId = parsedResult.data.addPullRequestReviewThreadReply?.comment?.databaseId;
+    if (typeof databaseId !== "number") return null;
+
+    return { commentDatabaseId: databaseId, replyKind: item.replyKind, body };
+  }
+
+  // For review and general_comment, post an issue comment.
+  const result = await withGitHubErrorHandling("status reply", parsed, () =>
+    octokit.issues.createComment({
+      owner: parsed.owner,
+      repo: parsed.repo,
+      issue_number: parsed.number,
+      body,
+    }),
+  );
+
+  return { commentDatabaseId: result.data.id, replyKind: item.replyKind, body };
+}
+
+/**
+ * Updates a status reply comment on GitHub and mutates the local reference object.
+ *
+ * @param octokit The Octokit instance for API calls.
+ * @param parsed The parsed information about the pull request.
+ * @param ref The reference to the status reply comment. This object's `body`
+ *   property is mutated to reflect the latest GitHub state after a successful update.
+ * @param newBody The new content for the comment body.
+ */
+export async function updateStatusReply(
+  octokit: Octokit,
+  parsed: ParsedPRUrl,
+  ref: StatusReplyRef,
+  newBody: string,
+): Promise<void> {
+  if (ref.replyKind === "review_thread") {
+    await withGitHubErrorHandling("update review comment", parsed, () =>
+      octokit.pulls.updateReviewComment({
+        owner: parsed.owner,
+        repo: parsed.repo,
+        comment_id: ref.commentDatabaseId,
+        body: newBody,
+      }),
+    );
+  } else {
+    await withGitHubErrorHandling("update issue comment", parsed, () =>
+      octokit.issues.updateComment({
+        owner: parsed.owner,
+        repo: parsed.repo,
+        comment_id: ref.commentDatabaseId,
+        body: newBody,
+      }),
+    );
+  }
+
+  ref.body = newBody;
+}
+
+export async function listFailingStatuses(
+  octokit: Octokit,
+  repo: ParsedRepoSlug,
+  headSha: string,
+): Promise<GitHubStatusFailure[]> {
+  if (!headSha) return [];
+
+  // Fetch both commit statuses AND check runs in parallel.
+  // GitHub Actions CI/CD reports results as check runs (Checks API),
+  // while some integrations use the older commit status API.
+  const [statusResponse, checkRunsResponse] = await Promise.all([
+    withGitHubErrorHandling("commit statuses", repo, () => octokit.repos.getCombinedStatusForRef({
+      owner: repo.owner,
+      repo: repo.repo,
+      ref: headSha,
+    })),
+    withGitHubErrorHandling("check runs", repo, () => octokit.checks.listForRef({
+      owner: repo.owner,
+      repo: repo.repo,
+      ref: headSha,
+    })),
+  ]);
+
+  const fromStatuses: GitHubStatusFailure[] = statusResponse.data.statuses
+    .filter((status) => status.state === "failure" || status.state === "error")
+    .map((status) => ({
+      context: status.context || "status-check",
+      description: status.description || "Failed status check",
+      targetUrl: status.target_url || null,
+    }));
+
+  const fromCheckRuns: GitHubStatusFailure[] = checkRunsResponse.data.check_runs
+    .filter((run) => run.conclusion === "failure" || run.conclusion === "timed_out" || run.conclusion === "cancelled")
+    .map((run) => ({
+      context: run.name,
+      description: run.output?.summary || run.output?.title || `Check run ${run.conclusion}`,
+      targetUrl: run.html_url || null,
+    }));
+
+  return [...fromStatuses, ...fromCheckRuns];
+}
+
+/**
+ * Returns whether all CI checks and commit statuses for a ref have settled
+ * (i.e., none are still pending/in-progress). Returns false if no checks
+ * exist yet or if the API call fails.
+ */
+export async function checkCISettled(
+  octokit: Octokit,
+  repo: ParsedRepoSlug,
+  headSha: string,
+): Promise<boolean> {
+  if (!headSha) return false;
+
+  try {
+    const [statusResp, checkResp] = await Promise.all([
+      withGitHubErrorHandling("commit statuses (settled check)", repo, () => octokit.repos.getCombinedStatusForRef({
+        owner: repo.owner,
+        repo: repo.repo,
+        ref: headSha,
+      })),
+      withGitHubErrorHandling("check runs (settled check)", repo, () => octokit.checks.listForRef({
+        owner: repo.owner,
+        repo: repo.repo,
+        ref: headSha,
+      })),
+    ]);
+
+    const hasPendingStatus = statusResp.data.statuses.some((s) => s.state === "pending");
+    const hasPendingCheck = checkResp.data.check_runs.some((r) => r.status !== "completed");
+    const hasAnyChecks = statusResp.data.statuses.length > 0 || checkResp.data.check_runs.length > 0;
+
+    return hasAnyChecks && !hasPendingStatus && !hasPendingCheck;
+  } catch {
+    return false;
+  }
+}
+
+export type MergedPRSummary = {
+  number: number;
+  title: string;
+  url: string;
+  author: string;
+  repo: string;
+  mergedAt: string;
+  mergeCommitSha: string | null;
+};
+
+function normalizeMergedPullSummary(
+  pull: {
+    number: number;
+    title: string | null;
+    html_url: string | null;
+    user?: { login?: string | null } | null;
+    merged_at: string | null;
+    merge_commit_sha?: string | null;
+  },
+  repo: ParsedRepoSlug,
+): MergedPRSummary | null {
+  if (!pull.merged_at) return null;
+
+  return {
+    number: pull.number,
+    title: pull.title || `PR #${pull.number}`,
+    url: pull.html_url || `https://github.com/${repo.owner}/${repo.repo}/pull/${pull.number}`,
+    author: pull.user?.login ?? "unknown",
+    repo: formatRepoSlug(repo),
+    mergedAt: pull.merged_at,
+    mergeCommitSha: pull.merge_commit_sha || null,
+  };
+}
+
+export async function listMergedPullsSince(
+  octokit: Octokit,
+  repo: ParsedRepoSlug,
+  options?: {
+    baseRef?: string;
+    sinceMergedAt?: string | null;
+    sinceMergeCommitSha?: string | null;
+  },
+): Promise<MergedPRSummary[]> {
+  const baseRef = options?.baseRef?.trim() || await getDefaultBranchForRepo(octokit, repo);
+  const sinceMergedAtMs = parseDateMs(options?.sinceMergedAt);
+  const sinceMergeCommitSha = options?.sinceMergeCommitSha?.trim() || null;
+
+  const pulls = await withGitHubErrorHandling("merged pull requests", repo, () =>
+    octokit.paginate(octokit.pulls.list, {
+      owner: repo.owner,
+      repo: repo.repo,
+      state: "closed",
+      base: baseRef,
+      sort: "updated",
+      direction: "desc",
+      per_page: 100,
+    }),
+  );
+
+  const merged = pulls
+    .map((pull) => normalizeMergedPullSummary(pull, repo))
+    .filter((pull): pull is MergedPRSummary => Boolean(pull))
+    .filter((pull) => {
+      if (sinceMergedAtMs === null) return true;
+      return Date.parse(pull.mergedAt) > sinceMergedAtMs;
+    });
+
+  let boundedBySha = merged;
+  if (sinceMergeCommitSha) {
+    const boundaryIndex = merged.findIndex((pull) => pull.mergeCommitSha === sinceMergeCommitSha);
+    if (boundaryIndex >= 0) {
+      boundedBySha = merged.slice(0, boundaryIndex);
+    }
+  }
+
+  return boundedBySha.sort((a, b) => Date.parse(a.mergedAt) - Date.parse(b.mergedAt));
+}
+
+export async function listUnreleasedMergedPulls(
+  octokit: Octokit,
+  repo: ParsedRepoSlug,
+  options?: {
+    baseRef?: string;
+    sinceMergedAt?: string | null;
+    sinceMergeCommitSha?: string | null;
+  },
+): Promise<MergedPRSummary[]> {
+  let boundaryMergedAt = options?.sinceMergedAt ?? null;
+  const boundaryMergeCommitSha = options?.sinceMergeCommitSha ?? null;
+
+  if (!boundaryMergedAt && !boundaryMergeCommitSha) {
+    const releases = await listReleasesForRepo(octokit, repo);
+    const latestPublished = releases
+      .filter((release) => !release.draft && release.publishedAt)
+      .sort((a, b) => Date.parse(b.publishedAt || "") - Date.parse(a.publishedAt || ""))[0];
+
+    boundaryMergedAt = latestPublished?.publishedAt ?? null;
+  }
+
+  return listMergedPullsSince(octokit, repo, {
+    baseRef: options?.baseRef,
+    sinceMergedAt: boundaryMergedAt,
+    sinceMergeCommitSha: boundaryMergeCommitSha,
+  });
+}

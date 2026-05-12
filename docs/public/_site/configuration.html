@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html class="dark" lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Configuration - patchdeck documentation" />
+  <title>Configuration | patchdeck Docs</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body class="antialiased text-sm">
+  <div class="flex min-h-screen md:h-screen md:overflow-hidden">
+    <aside class="hidden h-screen w-64 flex-shrink-0 flex-col overflow-y-auto border-r border-dark-800 bg-dark-900 md:flex" data-purpose="sidebar">
+  <div class="sticky top-0 z-10 border-b border-dark-800 bg-dark-900/95 p-4 backdrop-blur">
+    <div class="mb-4 flex items-center gap-2">
+      <svg class="h-6 w-6 text-white" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"></path></svg>
+      <span class="text-base font-semibold text-white">patchdeck</span>
+      <span class="ml-auto rounded bg-dark-700 px-1.5 py-0.5 text-[10px] text-gray-300">DOCS</span>
+    </div>
+    <div class="flex gap-4 text-sm text-gray-400">
+      <a class="flex items-center gap-1.5 transition-colors hover:text-gray-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-400 focus-visible:ring-offset-1 focus-visible:ring-offset-dark-900" href="https://github.com/jeremymcs/patchdeck" target="_blank" rel="noreferrer">
+        <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0 0 22 12.017C22 6.484 17.522 2 12 2z"></path></svg>
+        <span>GitHub</span>
+      </a>
+      <a class="flex items-center gap-1.5 transition-colors hover:text-gray-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-400 focus-visible:ring-offset-1 focus-visible:ring-offset-dark-900" href="https://github.com/jeremymcs/patchdeck/discussions" target="_blank" rel="noreferrer">
+        <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 15H9v-2h2v2zm0-4H9V7h2v6z"></path></svg>
+        <span>Community</span>
+      </a>
+    </div>
+  </div>
+
+  <nav class="flex-1 space-y-6 px-3 pb-8 pt-6">
+    <div>
+      <h4 class="mb-2 px-2 text-xs font-semibold uppercase tracking-wider text-gray-500">Getting Started</h4>
+      <ul class="space-y-0.5">
+        <li>
+  <a class="flex items-center gap-2 rounded-md px-2 py-1.5 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-400 focus-visible:ring-offset-1 focus-visible:ring-offset-dark-900 text-slate-400 hover:bg-dark-800 hover:text-slate-200" href="../../index.html">
+    <svg class="h-4 w-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12l2-2m0 0 7-7 7 7M5 10v10a1 1 0 0 0 1 1h3m10-11 2 2m-2-2v10a1 1 0 0 1-1 1h-3m-6 0a1 1 0 0 0 1-1v-4a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v4a1 1 0 0 0 1 1m-6 0h6" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+    <span>Introduction</span>
+  </a>
+</li>
+        <li>
+  <a class="flex items-center gap-2 rounded-md px-2 py-1.5 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-400 focus-visible:ring-offset-1 focus-visible:ring-offset-dark-900 text-slate-400 hover:bg-dark-800 hover:text-slate-200" href="./getting-started.html">
+    <svg class="h-4 w-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 10V3L4 14h7v7l9-11h-7z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+    <span>Quickstart</span>
+  </a>
+</li>
+<li>
+  <a class="flex items-center gap-2 rounded-md px-2 py-1.5 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-400 focus-visible:ring-offset-1 focus-visible:ring-offset-dark-900 bg-dark-800 text-white" href="./configuration.html">
+    <svg class="h-4 w-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 0 0-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 0 0-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 0 0-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 0 0-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 0 0 1.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path><path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+    <span>Configuration</span>
+  </a>
+</li>
+      </ul>
+    </div>
+
+    <div>
+      <h4 class="mb-2 px-2 text-xs font-semibold uppercase tracking-wider text-gray-500">Core Concepts</h4>
+      <ul class="space-y-0.5">
+        <li>
+  <a class="flex items-center gap-2 rounded-md px-2 py-1.5 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-400 focus-visible:ring-offset-1 focus-visible:ring-offset-dark-900 text-slate-400 hover:bg-dark-800 hover:text-slate-200" href="./pr-babysitter.html">
+    <svg class="h-4 w-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path><path d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+    <span>PR Babysitter</span>
+  </a>
+</li>
+<li>
+  <a class="flex items-center gap-2 rounded-md px-2 py-1.5 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-400 focus-visible:ring-offset-1 focus-visible:ring-offset-dark-900 text-slate-400 hover:bg-dark-800 hover:text-slate-200" href="./agent-dispatch.html">
+    <svg class="h-4 w-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 11H5m14 0a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2m14 0V9a2 2 0 0 0-2-2M5 11V9a2 2 0 0 1 2-2m0 0V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v2M7 7h10" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+    <span>Agent Dispatch</span>
+  </a>
+</li>
+<li>
+  <a class="flex items-center gap-2 rounded-md px-2 py-1.5 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-400 focus-visible:ring-offset-1 focus-visible:ring-offset-dark-900 text-slate-400 hover:bg-dark-800 hover:text-slate-200" href="./pr-questions.html">
+    <svg class="h-4 w-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-5l-5 5v-5z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+    <span>PR Q&amp;A</span>
+  </a>
+</li>
+      </ul>
+    </div>
+
+    <div>
+      <h4 class="mb-2 px-2 text-xs font-semibold uppercase tracking-wider text-gray-500">Guides</h4>
+      <ul class="space-y-0.5">
+        <li>
+  <a class="flex items-center gap-2 rounded-md px-2 py-1.5 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-400 focus-visible:ring-offset-1 focus-visible:ring-offset-dark-900 text-slate-400 hover:bg-dark-800 hover:text-slate-200" href="https://github.com/jeremymcs/patchdeck/blob/main/CONTRIBUTING.md" target="_blank" rel="noreferrer">
+    <svg class="h-4 w-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path d="M10 20 14 4m4 4 4 4-4 4M6 16l-4-4 4-4" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+    <span>Contributing</span>
+  </a>
+</li>
+        <li>
+  <a class="flex items-center gap-2 rounded-md px-2 py-1.5 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-400 focus-visible:ring-offset-1 focus-visible:ring-offset-dark-900 text-slate-400 hover:bg-dark-800 hover:text-slate-200" href="https://github.com/jeremymcs/patchdeck/blob/main/LOCAL_API.md" target="_blank" rel="noreferrer">
+    <svg class="h-4 w-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5.586a1 1 0 0 1 .707.293l5.414 5.414a1 1 0 0 1 .293.707V19a2 2 0 0 1-2 2z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+    <span>API Reference</span>
+  </a>
+</li>
+        <li>
+  <a class="flex items-center gap-2 rounded-md px-2 py-1.5 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-400 focus-visible:ring-offset-1 focus-visible:ring-offset-dark-900 text-slate-400 hover:bg-dark-800 hover:text-slate-200" href="https://github.com/jeremymcs/patchdeck/blob/main/AGENTS.md" target="_blank" rel="noreferrer">
+    <svg class="h-4 w-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6V4m0 2a2 2 0 1 0 0 4m0-4a2 2 0 1 1 0 4m-6 8a2 2 0 1 0 0-4m0 4a2 2 0 1 1 0-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 1 0 0-4m0 4a2 2 0 1 1 0-4m0 4v2m0-6V4" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+    <span>Agent Config</span>
+  </a>
+</li>
+      </ul>
+    </div>
+
+    <div>
+      <h4 class="mb-2 px-2 text-xs font-semibold uppercase tracking-wider text-gray-500">Resources</h4>
+      <ul class="space-y-0.5">
+        <li>
+  <a class="flex items-center gap-2 rounded-md px-2 py-1.5 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-400 focus-visible:ring-offset-1 focus-visible:ring-offset-dark-900 text-slate-400 hover:bg-dark-800 hover:text-slate-200" href="https://github.com/jeremymcs/patchdeck/releases" target="_blank" rel="noreferrer">
+    <svg class="h-4 w-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8v4l3 3m6-3a9 9 0 1 1-18 0 9 9 0 0 1 18 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+    <span>Changelog</span>
+  </a>
+</li>
+        <li>
+  <a class="flex items-center gap-2 rounded-md px-2 py-1.5 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-400 focus-visible:ring-offset-1 focus-visible:ring-offset-dark-900 text-slate-400 hover:bg-dark-800 hover:text-slate-200" href="https://github.com/jeremymcs/patchdeck/issues" target="_blank" rel="noreferrer">
+    <svg class="h-4 w-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+    <span>Report an Issue</span>
+  </a>
+</li>
+        <li>
+  <a class="flex items-center gap-2 rounded-md px-2 py-1.5 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-400 focus-visible:ring-offset-1 focus-visible:ring-offset-dark-900 text-slate-400 hover:bg-dark-800 hover:text-slate-200" href="https://github.com/jeremymcs/patchdeck" target="_blank" rel="noreferrer">
+    <svg class="h-4 w-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path d="M10 20 14 4m4 4 4 4-4 4M6 16l-4-4 4-4" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+    <span>Source Code</span>
+  </a>
+</li>
+      </ul>
+    </div>
+  </nav>
+</aside>
+    <main class="relative min-h-screen w-full flex-1 md:h-screen md:overflow-y-auto" data-purpose="main-content">
+      <div class="mx-auto max-w-4xl px-6 py-10 pb-28 sm:px-8 sm:py-12 sm:pb-32">
+        <div class="mb-8 border-b border-dark-800 pb-4 md:hidden">
+  <div class="flex items-center justify-between">
+    <a class="flex items-center gap-2 text-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-400" href="../../index.html">
+      <svg class="h-5 w-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"></path></svg>
+      <span class="font-semibold">patchdeck</span>
+    </a>
+    <span class="border border-dark-700 px-2 py-1 text-[10px] uppercase tracking-wider text-gray-300">Docs</span>
+  </div>
+  <details class="mt-4">
+    <summary class="cursor-pointer border border-dark-700 px-3 py-2 text-sm text-gray-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-400">Browse docs</summary>
+    <nav class="mt-2 grid gap-1">
+      <a class="block border px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-400 border-transparent text-gray-300" href="../../index.html">Introduction</a>
+      <a class="block border px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-400 border-transparent text-gray-300" href="./getting-started.html">Quickstart</a>
+<a class="block border px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-400 border-dark-700 bg-dark-800 text-white" href="./configuration.html">Configuration</a>
+<a class="block border px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-400 border-transparent text-gray-300" href="./pr-babysitter.html">PR Babysitter</a>
+<a class="block border px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-400 border-transparent text-gray-300" href="./agent-dispatch.html">Agent Dispatch</a>
+<a class="block border px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-400 border-transparent text-gray-300" href="./pr-questions.html">PR Q&amp;A</a>
+      <a class="block border px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-400 border-transparent text-gray-300" href="https://github.com/jeremymcs/patchdeck/blob/main/LOCAL_API.md" target="_blank" rel="noreferrer">API Reference</a>
+      <a class="block border px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-400 border-transparent text-gray-300" href="https://github.com/jeremymcs/patchdeck" target="_blank" rel="noreferrer">Source Code</a>
+    </nav>
+  </details>
+</div>
+        <header class="mb-12 border-b border-dark-800/60 pb-8">
+  <a class="mb-6 inline-flex items-center gap-2 text-sm text-gray-400 transition-colors hover:text-gray-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-400" href="./index.html">
+    <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 19l-7-7 7-7" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+    <span>All docs</span>
+  </a>
+  <h1 class="text-4xl font-bold tracking-normal text-white sm:text-5xl">Configuration</h1>
+  <p class="mt-4 max-w-3xl text-lg leading-relaxed text-gray-400">patchdeck is configured through environment variables and the dashboard settings page.</p>
+</header>
+
+<article class="doc-prose">
+  <h2>Environment Variables</h2>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>PORT</code></td>
+<td><code>5001</code></td>
+<td>HTTP server port</td>
+</tr>
+<tr>
+<td><code>PATCHDECK_PORT</code></td>
+<td><code>5001</code></td>
+<td>Port the MCP server connects to when the HTTP server is not on the default port</td>
+</tr>
+<tr>
+<td><code>PATCHDECK_HOME</code></td>
+<td><code>~/.patchdeck</code></td>
+<td>Data directory for state and logs</td>
+</tr>
+<tr>
+<td><code>CODEFACTORY_HOME</code></td>
+<td>—</td>
+<td>Legacy alias used only when <code>PATCHDECK_HOME</code> is not set</td>
+</tr>
+<tr>
+<td><code>CODEFACTORY_PORT</code></td>
+<td><code>5001</code></td>
+<td>Legacy port the MCP server connects to when <code>PATCHDECK_PORT</code> is not set</td>
+</tr>
+<tr>
+<td><code>DATABASE_URL</code></td>
+<td>(SQLite)</td>
+<td>PostgreSQL connection string (optional)</td>
+</tr>
+<tr>
+<td><code>GITHUB_TOKEN</code></td>
+<td>—</td>
+<td>Fallback GitHub token when no dashboard token is configured; <code>gh auth</code> is used after that</td>
+</tr>
+<tr>
+<td><code>LOG_LEVEL</code></td>
+<td><code>debug</code> in development, <code>info</code> in production</td>
+<td>Server log level: <code>trace</code>, <code>debug</code>, <code>info</code>, <code>warn</code>, <code>error</code>, or <code>fatal</code></td>
+</tr>
+<tr>
+<td><code>PATCHDECK_LOG_FILE</code></td>
+<td><code>~/.patchdeck/log/server.log</code></td>
+<td>Override the structured server log file path</td>
+</tr>
+<tr>
+<td><code>PATCHDECK_NO_LOG_FILE</code></td>
+<td>—</td>
+<td>Set to <code>1</code> to disable structured server log file output</td>
+</tr>
+</tbody></table>
+<p><code>CODEFACTORY_PORT</code> is still accepted by the MCP server as a legacy fallback, but new MCP configurations should use <code>PATCHDECK_PORT</code>.</p>
+<h2>Storage</h2>
+<h3>SQLite (Default)</h3>
+<p>By default, patchdeck stores all state in a local SQLite database:</p>
+<pre><code>~/.patchdeck/state.sqlite
+</code></pre>
+<p>No external database is required. This is ideal for single-user setups.</p>
+<h2>Activity Logs</h2>
+<p>patchdeck writes daily activity logs to:</p>
+<pre><code>~/.patchdeck/log/
+</code></pre>
+<p>These logs mirror the dashboard activity feed and are useful for debugging or auditing agent behavior.</p>
+<p>The server also writes structured runtime logs to <code>~/.patchdeck/log/server.log</code> by default. Use <code>LOG_LEVEL</code>, <code>PATCHDECK_LOG_FILE</code>, or <code>PATCHDECK_NO_LOG_FILE=1</code> to tune file output.</p>
+<p>CLI flags can override the same logging settings for a single run:</p>
+<pre><code>patchdeck --quiet
+patchdeck --verbose
+patchdeck --log-level warn
+patchdeck --log-level=trace
+patchdeck --log-file /tmp/patchdeck.log
+patchdeck --no-log-file
+</code></pre>
+<p>The dashboard also exposes a server log viewer at <code>/logs</code>. It shows recent structured server logs from the in-memory ring buffer, supports level/source/search filtering, and tails new log records live while the page is open. The live tail uses Server-Sent Events over the local HTTP server, so keep access local and avoid putting the dashboard behind buffering proxies.</p>
+<h2>Dashboard Settings</h2>
+<p>The settings page in the dashboard provides a UI for:</p>
+<ul>
+<li><strong>GitHub token management</strong> — Add, remove, and reorder saved tokens before falling back to <code>GITHUB_TOKEN</code> or <code>gh auth</code>.</li>
+<li><strong>Agent selection</strong> — Choose whether autonomous runs use Claude Code or OpenAI Codex. If the default run fails and a code-owner fallback is launched, the fallback uses the same resolved agent; enabling <strong>Fallback to next coding agent</strong> lets patchdeck resolve that fallback to the other local CLI when needed.</li>
+<li><strong>Babysitter tuning</strong> — Control polling, batching, merge-conflict handling, release automation, and automatic docs assessment.</li>
+<li><strong>Runtime drain mode</strong> — Pause new background automation and manual agent-triggering actions while allowing in-flight work to finish. During drain mode, the dashboard disables Run now/apply, feedback retry, Ask Agent, manual Release, and release retry actions; matching API calls return <code>409</code> instead of queueing new agent work.</li>
+<li><strong>Ignored bots</strong> — Add or remove bot logins whose comments and reviews should be ignored.</li>
+<li><strong>PR comment branding</strong> — Toggle whether agent-authored GitHub PR comments link back to patchdeck and include the <code>Posted by patchdeck</code> footer.</li>
+<li><strong>GitHub progress replies</strong> — Toggle whether the babysitter posts public Accepted/running/completed status replies while working through review comments.</li>
+<li><strong>CI healing</strong> — Enable autonomous CI repair and tune retry/session limits.</li>
+<li><strong>Deployment healing</strong> — Not yet exposed in the dashboard; use <code>PATCH /api/config</code> for the deployment-healing keys listed below.</li>
+<li><strong>Theme</strong> — Toggle between light and dark mode.</li>
+</ul>
+<h3>Agent Health and Drain Mode</h3>
+<p>Drain mode is reserved for failures that need operator action. patchdeck enables it when the selected agent is deterministically unavailable, such as a missing CLI, auth failure, or unsupported agent setting.</p>
+<p>Transient agent health failures, including health-check timeouts, do not enable drain mode. Affected PRs log <code>Automation skipped</code>, leave existing queued or running feedback state intact, and can be retried on the next poll or manual run.</p>
+<h2>Repository Watch Settings</h2>
+<p>Watched repositories also have repo-level settings exposed in the dashboard&#39;s repository list and through <code>GET /api/repos/settings</code> plus <code>PATCH /api/repos/settings</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Setting</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>ownPrsOnly</code></td>
+<td><code>true</code></td>
+<td>Auto-discover only PRs authored by the authenticated GitHub user for that repo. This appears in the dashboard as <strong>My PRs only</strong>.</td>
+</tr>
+<tr>
+<td><code>ownPrsOnly</code></td>
+<td><code>false</code></td>
+<td>Auto-discover all open PRs in that repo. This appears in the dashboard as <strong>My PRs + teammates</strong>.</td>
+</tr>
+<tr>
+<td><code>autoCreateReleases</code></td>
+<td><code>false</code></td>
+<td>Keep automatic release publishing opt-in for the repo. Enable it when merged PRs should publish GitHub releases automatically after the rest of the release prerequisites are met.</td>
+</tr>
+</tbody></table>
+<p>New watched repos default to <strong>My PRs only</strong> with automatic release publishing disabled. If you want team-wide tracking for a repository, switch it to <strong>My PRs + teammates</strong> in the dashboard or patch <code>ownPrsOnly: false</code> through <code>/api/repos/settings</code>.</p>
+<p>PRs added directly by URL stay tracked regardless of a repo&#39;s <code>ownPrsOnly</code> setting.</p>
+<h2>Manual Repository Releases</h2>
+<p>Each watched repository row in the dashboard includes a <strong>Release</strong> button. Pressing it queues a manual release run for the latest unreleased merged PR in that repository, using the same release evaluation, version bump, notes, and GitHub publishing flow as automatic release creation.</p>
+<p>Manual release runs are allowed even when <code>autoCreateReleases</code> is disabled, so you can keep automatic publishing off and still publish releases on demand. If the repository has no unreleased merged PRs, the API returns <code>409</code> and no release run is created.</p>
+<p>Runtime drain mode also blocks manual release creation and release retries until drain mode is disabled. Release work already in flight is allowed to finish.</p>
+<h2>App Update Banner</h2>
+<p>On builds where <code>APP_VERSION</code> is a stable semver string, the dashboard calls
+<code>GET /api/app-update</code> and compares the running version to the latest stable
+GitHub release for <code>jeremymcs/patchdeck</code>. When a newer release exists, the
+dashboard shows an update banner with a link to the matching release page and
+step-by-step npm update instructions:</p>
+<ol>
+<li>Stop the running <code>patchdeck</code> process.</li>
+<li>Run <code>npm install -g patchdeck@latest</code>.</li>
+<li>Start <code>patchdeck</code> again.</li>
+</ol>
+<p>Selecting <code>dismiss for now</code> stores a release-scoped key in browser
+<code>sessionStorage</code>, so the banner stays hidden only for the current browser
+session and only for that specific <code>latestVersion</code>. Opening a new browser
+session or publishing a newer release makes the banner eligible to appear
+again. If the app is running a non-semver build such as <code>dev</code>, or if the
+release check fails, the banner stays hidden and the API falls back quietly.</p>
+<h2>PR Comment Branding</h2>
+<p>Agent-authored GitHub PR comments posted by the babysitter — follow-up replies on review threads, agent-command acknowledgements, status updates, and CI alerts — are branded as patchdeck. Each comment references the app name and, by default, appends a <code>Posted by [patchdeck](https://github.com/jeremymcs/patchdeck)</code> footer that links back to this repository.</p>
+<table>
+<thead>
+<tr>
+<th>Setting</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>Repository links in PR comments</code></td>
+<td><code>true</code></td>
+<td>When enabled, babysitter comments render the app name as a Markdown link to the patchdeck repo and append the <code>Posted by patchdeck</code> footer. When disabled, comments reference <code>patchdeck</code> as plain text and omit the footer.</td>
+</tr>
+<tr>
+<td><code>GitHub progress replies</code></td>
+<td><code>false</code></td>
+<td>When enabled, the babysitter posts public status replies on accepted review feedback as it moves from queued to running, completed, and resolved. When disabled, it still posts the final follow-up reply without intermediate public progress updates.</td>
+</tr>
+</tbody></table>
+<p>These toggles are available in the dashboard settings page and as <code>includeRepositoryLinksInGitHubComments</code> plus <code>postGitHubProgressReplies</code> (booleans) in <code>GET /api/config</code>, <code>PATCH /api/config</code>, and the MCP <code>update_config</code> tool. Turning repository links off is useful for private forks or environments where operators do not want outgoing PR comments to link to the upstream patchdeck repository.</p>
+<h2>CI Healing Settings</h2>
+<p>patchdeck can track failing CI checks as first-class healing sessions and, when enabled, dispatch bounded repair attempts in isolated worktrees.</p>
+<table>
+<thead>
+<tr>
+<th>Setting</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>Automatic CI healing</code></td>
+<td><code>false</code></td>
+<td>Enables healable CI failure classification and autonomous repair attempts</td>
+</tr>
+<tr>
+<td><code>Max healing attempts per session</code></td>
+<td><code>3</code></td>
+<td>Caps total repair attempts for one healing session</td>
+</tr>
+<tr>
+<td><code>Max healing attempts per fingerprint</code></td>
+<td><code>2</code></td>
+<td>Prevents retry loops on the same normalized failure fingerprint</td>
+</tr>
+<tr>
+<td><code>Max concurrent healing runs</code></td>
+<td><code>1</code></td>
+<td>Limits how many healing repairs can execute at once</td>
+</tr>
+<tr>
+<td><code>Healing cooldown (ms)</code></td>
+<td><code>300000</code></td>
+<td>Backoff window before a cooldowned session can retry</td>
+</tr>
+</tbody></table>
+<p>The dashboard shows healing state on each tracked PR, while the local API exposes <code>GET /api/healing-sessions</code> and <code>GET /api/healing-sessions/:id</code> for external tooling.</p>
+<h2>Deployment Healing Settings</h2>
+<p>patchdeck can monitor merged PRs for failed Vercel or Railway deployments and open a follow-up fix PR when the deployment breaks after merge.</p>
+<p>A repository is eligible only when platform detection finds one of these markers in the app-owned repo cache:</p>
+<ul>
+<li><strong>Vercel</strong> — <code>vercel.json</code>, <code>.vercel/project.json</code>, or a <code>package.json</code> script containing <code>vercel</code></li>
+<li><strong>Railway</strong> — <code>railway.toml</code>, <code>railway.json</code>, or <code>nixpacks.toml</code></li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Setting</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>Automatic deployment healing</code></td>
+<td><code>false</code></td>
+<td>Queue post-merge deployment monitoring for detected Vercel or Railway repositories</td>
+</tr>
+<tr>
+<td><code>Deployment check delay (ms)</code></td>
+<td><code>60000</code></td>
+<td>Wait after merge before the first deployment status check</td>
+</tr>
+<tr>
+<td><code>Deployment check timeout (ms)</code></td>
+<td><code>600000</code></td>
+<td>Maximum time to wait for the deployment to reach <code>ready</code> or <code>error</code> before escalation</td>
+</tr>
+<tr>
+<td><code>Deployment check poll interval (ms)</code></td>
+<td><code>15000</code></td>
+<td>Poll cadence while the deployment is still building or deploying</td>
+</tr>
+</tbody></table>
+<p>These values map to <code>autoHealDeployments</code>, <code>deploymentCheckDelayMs</code>, <code>deploymentCheckTimeoutMs</code>, and <code>deploymentCheckPollIntervalMs</code> in <code>GET /api/config</code> and <code>PATCH /api/config</code>.</p>
+<p>Deployment healing also requires the matching platform CLI on the machine running patchdeck:</p>
+<ul>
+<li>Install and authenticate <code>vercel</code> to heal Vercel deployments.</li>
+<li>Install and authenticate <code>railway</code> to heal Railway deployments.</li>
+</ul>
+<p>Deployment session history is exposed through <code>GET /api/deployment-healing-sessions</code>, <code>GET /api/deployment-healing-sessions/:id</code>, and the matching MCP read tools. The dashboard settings page and MCP <code>update_config</code> tool do not yet expose these deployment-healing knobs; use <code>PATCH /api/config</code> for them.</p>
+<h2>Build &amp; Deploy</h2>
+<h3>Development</h3>
+<pre><code class="language-bash">npm run dev          # Start dev server with hot reload
+</code></pre>
+<h3>Production</h3>
+<pre><code class="language-bash">npm run build        # Bundle client and server
+npm run start        # Run production server
+</code></pre>
+<h3>Desktop App</h3>
+<pre><code class="language-bash">npm run tauri:dev    # Tauri dev build
+npm run tauri:build  # Tauri production build
+</code></pre>
+
+</article>
+      </div>
+      <div class="mx-auto mt-16 flex w-full max-w-4xl justify-end px-6 pb-8 sm:px-8">
+  <a class="flex w-full min-w-[220px] flex-col items-end border border-dark-700 bg-dark-800 px-6 py-4 text-white transition-colors hover:bg-dark-700 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-brand-400 focus-visible:ring-offset-1 focus-visible:ring-offset-dark-900 sm:w-auto" href="./pr-babysitter.html">
+    <span class="mb-1 text-xs font-semibold uppercase tracking-wider text-gray-300">Next</span>
+    <span class="flex items-center gap-2 text-lg font-medium">
+      PR Babysitter
+      <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 5l7 7m0 0-7 7m7-7H3" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+    </span>
+  </a>
+</div>
+    </main>
+  </div>
+</body>
+</html>

@@ -1,0 +1,2022 @@
+import { EventEmitter } from "node:events";
+import type {
+  ActivityItem,
+  ActivitySnapshot,
+  BackgroundJob,
+  Config,
+  Issue,
+  IssueEvaluation,
+  DeploymentHealingSession,
+  HealingSession,
+  LogEntry,
+  OperatorWarning,
+  PR,
+  PRQuestion,
+  ReleaseRun,
+  ReleaseSocialPost,
+  RepoGitHubReleases,
+  RuntimeState,
+  SocialChangelog,
+  StartReleaseSocialPostRequest,
+  WatchedRepo,
+} from "@shared/schema";
+import { z } from "zod";
+import { addPRSchema, askQuestionSchema } from "@shared/schema";
+import type { IStorage } from "./storage";
+import { getDefaultStorage } from "./storage";
+import { PRBabysitter } from "./babysitter";
+import { detectAgentUnavailability, type AgentUnavailabilityKind } from "./agentRunner";
+import { applyEvaluationDecision, applyFlagDecision } from "./feedbackLifecycle";
+import { applyManualFeedbackDecision } from "./manualFeedback";
+import { childLogger } from "./logger";
+import { renderGitHubMarkdown } from "./markdown";
+import { generateReleaseSocialPost } from "./releaseSocialPostAgent";
+import { randomUUID } from "node:crypto";
+
+const log = childLogger("runtime");
+import { createBackgroundJobHandlers } from "./backgroundJobHandlers";
+import { BackgroundJobDispatcher } from "./backgroundJobDispatcher";
+import { BackgroundJobQueue, buildBackgroundJobDedupeKey } from "./backgroundJobQueue";
+import { buildActivityPayload, readActivityPayload } from "./activityPayload";
+import { createWatcherScheduler, type WatcherScheduler } from "./watcherScheduler";
+import { ReleaseManager } from "./releaseManager";
+import type { ReleaseAgentPullSummary } from "./releaseAgent";
+import { DeploymentHealingManager } from "./deploymentHealingManager";
+import {
+  buildOctokit,
+  checkOnboardingStatus,
+  createGitHubRelease,
+  fetchIssueSummary,
+  fetchPullSummary,
+  formatRepoSlug,
+  getDefaultBranchForRepo,
+  getLatestSemverTagForRepo,
+  GitHubIntegrationError,
+  installCodeReviewWorkflow,
+  listOpenIssuesForRepo,
+  listReleasesForRepo,
+  listUnreleasedMergedPulls,
+  type MergedPRSummary,
+  parsePRUrl,
+  parseRepoSlug,
+  resolveNextSemverTag,
+} from "./github";
+
+export class AppRuntimeError extends Error {
+  readonly statusCode: number;
+
+  constructor(statusCode: number, message: string) {
+    super(message);
+    this.name = "AppRuntimeError";
+    this.statusCode = statusCode;
+  }
+}
+
+export type AppRuntimeDependencies = {
+  storage?: IStorage;
+  backgroundJobQueue?: BackgroundJobQueue;
+  backgroundJobDispatcher?: BackgroundJobDispatcher;
+  releaseManager?: ReleaseManager;
+  deploymentHealingManager?: DeploymentHealingManager;
+  babysitter?: PRBabysitter;
+  watcherScheduler?: WatcherScheduler;
+  startBackgroundServices?: boolean;
+  startWatcher?: boolean;
+};
+
+export type RuntimeSnapshot = RuntimeState & {
+  activeRuns: number;
+};
+
+export type DrainModeParams = {
+  enabled: boolean;
+  reason?: string;
+  waitForIdle?: boolean;
+  timeoutMs?: number;
+};
+
+export type AppRuntime = {
+  start(): Promise<void>;
+  stop(): void;
+  subscribe(listener: () => void): () => void;
+  getRuntimeSnapshot(): Promise<RuntimeSnapshot>;
+  setDrainMode(input: DrainModeParams): Promise<RuntimeSnapshot & { drained?: boolean }>;
+  listActivities(): Promise<ActivitySnapshot>;
+  clearFailedActivities(): Promise<{ cleared: number }>;
+  listRepos(): Promise<string[]>;
+  listRepoSettings(): Promise<WatchedRepo[]>;
+  addRepo(repoInput: string): Promise<{ repo: string }>;
+  removeRepo(repoInput: string, mode?: "soft" | "hard"): Promise<{ ok: true; repo: string; mode: "soft" | "hard"; removedPrs: number }>;
+  updateRepoSettings(repoInput: string, updates: Partial<Omit<WatchedRepo, "repo">>): Promise<WatchedRepo>;
+  syncRepos(): Promise<{ ok: true }>;
+  createManualRelease(repoInput: string): Promise<ReleaseRun>;
+  listPRs(view?: "active" | "archived"): Promise<PR[]>;
+  getPR(id: string): Promise<PR | null>;
+  addPR(url: string): Promise<PR>;
+  removePR(id: string): Promise<{ ok: true }>;
+  setWatchEnabled(id: string, enabled: boolean): Promise<PR>;
+  setPRWatchEnabled(id: string, enabled: boolean): Promise<PR>;
+  fetchPRFeedback(id: string): Promise<PR>;
+  triagePR(id: string): Promise<PR>;
+  applyPR(id: string): Promise<PR>;
+  queueBabysit(id: string): Promise<PR>;
+  babysitPR(id: string): Promise<PR>;
+  setFeedbackDecision(prId: string, feedbackId: string, decision: "accept" | "reject" | "flag"): Promise<PR>;
+  retryFeedback(prId: string, feedbackId: string): Promise<PR>;
+  listPRQuestions(prId: string): Promise<PRQuestion[]>;
+  askQuestion(prId: string, question: string): Promise<PRQuestion>;
+  listLogs(prId?: string): Promise<LogEntry[]>;
+  getOnboardingStatus(): Promise<unknown>;
+  installReviewWorkflow(repo: string, tool: "claude" | "codex"): Promise<unknown>;
+  listHealingSessions(): Promise<HealingSession[]>;
+  getHealingSession(id: string): Promise<HealingSession>;
+  listDeploymentHealingSessions(repo?: string): Promise<DeploymentHealingSession[]>;
+  getDeploymentHealingSession(id: string): Promise<DeploymentHealingSession>;
+  getConfig(): Promise<Config>;
+  updateConfig(updates: Partial<Config>): Promise<Config>;
+  listSocialChangelogs(): Promise<SocialChangelog[]>;
+  getSocialChangelog(id: string): Promise<SocialChangelog>;
+  listReleaseRuns(): Promise<ReleaseRun[]>;
+  getReleaseRun(id: string): Promise<ReleaseRun>;
+  retryReleaseRun(id: string): Promise<ReleaseRun>;
+  listGitHubReleases(): Promise<RepoGitHubReleases[]>;
+  startReleaseSocialPost(request: StartReleaseSocialPostRequest): Promise<ReleaseSocialPost>;
+  getReleaseSocialPost(jobId: string): Promise<ReleaseSocialPost>;
+  listIssues(): Promise<Issue[]>;
+  getIssue(repo: string, number: number): Promise<Issue>;
+  evaluateIssue(repo: string, number: number): Promise<Issue>;
+  workIssue(repo: string, number: number): Promise<Issue>;
+};
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function assertFound<T>(value: T | undefined, message: string): T {
+  if (value === undefined) {
+    throw new AppRuntimeError(404, message);
+  }
+
+  return value;
+}
+
+function fallbackJobLabel(job: BackgroundJob): string {
+  switch (job.kind) {
+    case "sync_watched_repos":
+      return "Sync watched repositories";
+    case "babysit_pr":
+      return "Babysitting PR";
+    case "process_release_run":
+      return "Processing release";
+    case "answer_pr_question":
+      return "Answering PR question";
+    case "evaluate_issue":
+      return "Evaluating issue";
+    case "work_issue":
+      return "Working issue";
+    case "generate_social_changelog":
+      return "Social changelog generation removed";
+    case "heal_deployment":
+      return "Healing deployment";
+  }
+}
+
+type ActivityDescription = Pick<ActivityItem, "label" | "detail" | "targetUrl">;
+
+type ActivityDescriptionContext = {
+  prsById: Map<string, PR>;
+  releaseRunsById: Map<string, ReleaseRun>;
+  socialChangelogsById: Map<string, SocialChangelog>;
+  deploymentHealingSessionsByTarget: Map<string, DeploymentHealingSession>;
+};
+
+function readJobStringPayload(job: BackgroundJob, key: string): string | null {
+  const value = job.payload[key];
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+function formatIssueTargetId(repo: string, number: number): string {
+  return `${repo}#${number}`;
+}
+
+const AUTO_WORK_READY_LABELS = new Set([
+  "ready-for-agent",
+  "ready-to-work",
+  "agent-ready",
+  "ready",
+]);
+const AUTO_WORK_BLOCKED_LABELS = new Set([
+  "blocked",
+  "question",
+  "needs-maintainer-review",
+  "needs-maintainer-input",
+  "needs-author-feedback",
+  "needs-discussion",
+  "wontfix",
+  "duplicate",
+  "invalid",
+  "not-planned",
+]);
+
+function normalizeIssueLabel(label: string): string {
+  return label.trim().toLowerCase();
+}
+
+export function getIssueAutoWorkEligibility(
+  issue: Pick<Issue, "labels">,
+  evaluation?: Pick<IssueEvaluation, "status" | "summary" | "safetyFlags"> | null,
+): {
+  autoWorkEligible: boolean;
+  autoWorkBlockedReason: string | null;
+} {
+  const labels = issue.labels.map(normalizeIssueLabel).filter(Boolean);
+  const blockedLabel = labels.find((label) => AUTO_WORK_BLOCKED_LABELS.has(label));
+  if (blockedLabel) {
+    return {
+      autoWorkEligible: false,
+      autoWorkBlockedReason: `blocked by label: ${blockedLabel}`,
+    };
+  }
+
+  if (!labels.some((label) => AUTO_WORK_READY_LABELS.has(label))) {
+    return {
+      autoWorkEligible: false,
+      autoWorkBlockedReason: "missing ready-for-agent label",
+    };
+  }
+
+  if (!evaluation) {
+    return {
+      autoWorkEligible: false,
+      autoWorkBlockedReason: "missing app evaluation",
+    };
+  }
+
+  if (evaluation.status !== "approved") {
+    return {
+      autoWorkEligible: false,
+      autoWorkBlockedReason: evaluation.summary || `evaluation ${evaluation.status.replace("_", " ")}`,
+    };
+  }
+
+  if (evaluation.safetyFlags.length > 0) {
+    return {
+      autoWorkEligible: false,
+      autoWorkBlockedReason: `safety flags: ${evaluation.safetyFlags.join(", ")}`,
+    };
+  }
+
+  return {
+    autoWorkEligible: true,
+    autoWorkBlockedReason: null,
+  };
+}
+
+function getLatestBackgroundJob(jobs: BackgroundJob[]): BackgroundJob | undefined {
+  return jobs
+    .slice()
+    .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())[0];
+}
+
+function issueWorkStatusFromJobs(jobs: BackgroundJob[]): { workStatus: Issue["workStatus"]; workJobId: string | null; lastError: string | null } {
+  const latest = getLatestBackgroundJob(jobs);
+
+  if (!latest) {
+    return {
+      workStatus: "idle",
+      workJobId: null,
+      lastError: null,
+    };
+  }
+
+  if (latest.status === "leased") {
+    return {
+      workStatus: "in_progress",
+      workJobId: latest.id,
+      lastError: null,
+    };
+  }
+
+  if (latest.status === "queued") {
+    return {
+      workStatus: "queued",
+      workJobId: latest.id,
+      lastError: null,
+    };
+  }
+
+  if (latest.status === "failed") {
+    return {
+      workStatus: "failed",
+      workJobId: latest.id,
+      lastError: latest.lastError,
+    };
+  }
+
+  return {
+    workStatus: "idle",
+    workJobId: null,
+    lastError: null,
+  };
+}
+
+export function issueWorkAttemptCountFromJobs(jobs: Array<Pick<BackgroundJob, "attemptCount">>): number {
+  return jobs.reduce((total, job) => total + job.attemptCount + 1, 0);
+}
+
+function issueWorkStageFromLogs(
+  logs: LogEntry[],
+  fallback: Issue["workStatus"],
+): NonNullable<Issue["workStage"]> {
+  for (let index = logs.length - 1; index >= 0; index -= 1) {
+    const stage = logs[index]?.metadata?.stage;
+    if (
+      stage === "queued"
+      || stage === "started"
+      || stage === "working"
+      || stage === "verifying"
+      || stage === "opening_pr"
+      || stage === "completed"
+      || stage === "failed"
+    ) {
+      return stage;
+    }
+  }
+
+  if (fallback === "queued") return "queued";
+  if (fallback === "in_progress") return "working";
+  if (fallback === "failed") return "failed";
+  return "idle";
+}
+
+export function issueWorkPrFromLogs(
+  logs: LogEntry[],
+  repo: string,
+): { workPrNumber: number; workPrUrl: string } | null {
+  for (let index = logs.length - 1; index >= 0; index -= 1) {
+    const entry = logs[index];
+    const metadata = entry?.metadata;
+    if (!metadata) {
+      const legacyMatch = entry?.message.match(/Opened PR #(\d+) for issue #(\d+)/);
+      if (!legacyMatch) {
+        continue;
+      }
+
+      const prNumber = Number(legacyMatch[1]);
+      if (!Number.isFinite(prNumber)) {
+        continue;
+      }
+
+      return {
+        workPrNumber: prNumber,
+        workPrUrl: `https://github.com/${repo}/pull/${prNumber}`,
+      };
+    }
+
+    const prNumber = metadata.prNumber;
+    const prUrl = metadata.prUrl;
+    if (typeof prNumber === "number" && Number.isFinite(prNumber)) {
+      if (typeof prUrl === "string" && prUrl.trim()) {
+        return {
+          workPrNumber: prNumber,
+          workPrUrl: prUrl,
+        };
+      }
+
+      return {
+        workPrNumber: prNumber,
+        workPrUrl: `https://github.com/${repo}/pull/${prNumber}`,
+      };
+    }
+  }
+
+  return null;
+}
+
+type AgentLabel = "Claude" | "Codex";
+
+type AgentAvailabilityFailure = {
+  agentLabel: AgentLabel;
+  kind: AgentUnavailabilityKind;
+  fixSteps: string[];
+};
+
+function buildCliMissingFixSteps(agentLabel: AgentLabel, command: "claude" | "codex"): string[] {
+  return [
+    `Install the ${agentLabel === "Claude" ? "Claude Code" : "Codex"} CLI on this machine.`,
+    `If ${agentLabel} is already installed, make sure patchdeck can find it on PATH. The app checks its process PATH, then \`$SHELL -lc "command -v ${command}"\`.`,
+    "For nvm installs, add the active Node bin directory to a login-shell startup file such as ~/.zprofile; for example: export PATH=\"$HOME/.nvm/versions/node/<version>/bin:$PATH\".",
+    `Verify with \`command -v ${command}\` and \`$SHELL -lc "command -v ${command}"\`.`,
+    "Restart patchdeck after installing.",
+    "Rerun the babysitter for this PR.",
+  ];
+}
+
+const AGENT_FIX_STEPS: Record<AgentLabel, Record<AgentUnavailabilityKind, string[]>> = {
+  Claude: {
+    auth: [
+      "Run `claude auth login` on this machine.",
+      "Restart patchdeck if it was launched before you refreshed credentials.",
+      "Rerun the babysitter for this PR.",
+    ],
+    cli_missing: buildCliMissingFixSteps("Claude", "claude"),
+    unknown_agent: [
+      "Open Settings and choose a supported coding agent.",
+      "Restart patchdeck if the agent setting was changed outside the app.",
+      "Rerun the babysitter for this PR.",
+    ],
+  },
+  Codex: {
+    auth: [
+      "Run `codex login` on this machine.",
+      "Check ownership and permissions for ~/.codex, especially ~/.codex/sessions, so patchdeck can access Codex session files.",
+      "Restart patchdeck if it was launched before you refreshed credentials.",
+      "Rerun the babysitter for this PR.",
+    ],
+    cli_missing: buildCliMissingFixSteps("Codex", "codex"),
+    unknown_agent: [
+      "Open Settings and choose a supported coding agent.",
+      "Restart patchdeck if the agent setting was changed outside the app.",
+      "Rerun the babysitter for this PR.",
+    ],
+  },
+};
+
+function buildAgentAvailabilityFailure(
+  agentLabel: AgentLabel,
+  kind: AgentUnavailabilityKind,
+): AgentAvailabilityFailure {
+  return {
+    agentLabel,
+    kind,
+    fixSteps: AGENT_FIX_STEPS[agentLabel][kind],
+  };
+}
+
+function detectAgentLabelFromError(error: string): AgentLabel | null {
+  const lower = error.toLowerCase();
+  if (lower.includes("claude evaluation failed") || lower.includes("claude apply failed")) {
+    return "Claude";
+  }
+  if (lower.includes("codex evaluation failed") || lower.includes("codex apply failed")) {
+    return "Codex";
+  }
+  return null;
+}
+
+function classifyAgentAvailabilityFailure(job: BackgroundJob): AgentAvailabilityFailure | null {
+  if (job.kind !== "babysit_pr" || !job.lastError) {
+    return null;
+  }
+
+  const kind = detectAgentUnavailability(job.lastError);
+  if (!kind) {
+    return null;
+  }
+
+  const agentLabel = detectAgentLabelFromError(job.lastError);
+  if (agentLabel) {
+    return buildAgentAvailabilityFailure(agentLabel, kind);
+  }
+
+  const preferredAgent = readJobStringPayload(job, "preferredAgent");
+  if (preferredAgent === "claude") {
+    return buildAgentAvailabilityFailure("Claude", kind);
+  }
+  if (preferredAgent === "codex") {
+    return buildAgentAvailabilityFailure("Codex", kind);
+  }
+
+  return null;
+}
+
+export function mapMergedPullsToReleaseSummaries(pulls: MergedPRSummary[]): ReleaseAgentPullSummary[] {
+  return pulls.flatMap((pull) => {
+    const mergeSha = pull.mergeCommitSha?.trim();
+    if (!mergeSha) {
+      return [];
+    }
+
+    return [{
+      number: pull.number,
+      title: pull.title,
+      url: pull.url,
+      author: pull.author,
+      repo: pull.repo,
+      mergedAt: pull.mergedAt,
+      mergeSha,
+    }];
+  });
+}
+
+export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): AppRuntime {
+  const storage = dependencies.storage ?? getDefaultStorage();
+  const events = new EventEmitter();
+  const socialPostJobs = new Map<string, ReleaseSocialPost>();
+  const backgroundJobQueue = dependencies.backgroundJobQueue ?? new BackgroundJobQueue(storage);
+  // eslint-disable-next-line prefer-const -- circular dep: closure references this before it can be initialized
+  let backgroundJobDispatcher!: BackgroundJobDispatcher;
+
+  const scheduleBackgroundJob = async (...args: Parameters<BackgroundJobQueue["enqueue"]>) => {
+    const job = await backgroundJobQueue.enqueue(...args);
+    backgroundJobDispatcher.wake();
+    return job;
+  };
+
+  const deploymentHealingManager = dependencies.deploymentHealingManager ?? new DeploymentHealingManager(storage);
+  const releaseManager = dependencies.releaseManager ?? new ReleaseManager(storage, {
+    github: {
+      buildOctokit,
+      getDefaultBranch: getDefaultBranchForRepo,
+      findLatestSemverReleaseTag: getLatestSemverTagForRepo,
+      bumpReleaseTag: resolveNextSemverTag,
+      listUnreleasedMergedPulls: async (octokit, repo, options) => {
+        const merged = await listUnreleasedMergedPulls(octokit, repo, {
+          baseRef: options.baseBranch,
+        });
+
+        return mapMergedPullsToReleaseSummaries(merged);
+      },
+      listMergedPullsForReleaseCandidate: async (octokit, repo, options) => {
+        const merged = await listUnreleasedMergedPulls(octokit, repo, {
+          baseRef: options.baseBranch,
+        });
+        const cutoffMs = Date.parse(options.untilMergedAt);
+
+        return mapMergedPullsToReleaseSummaries(
+          merged.filter((pull) => !Number.isFinite(cutoffMs) || Date.parse(pull.mergedAt) <= cutoffMs),
+        );
+      },
+      findReleaseByTag: async (octokit, repo, tagName) => {
+        const releases = await listReleasesForRepo(octokit, repo);
+        const existing = releases.find((release) => !release.draft && release.tagName === tagName);
+        if (!existing) {
+          return null;
+        }
+
+        return {
+          id: existing.id,
+          url: existing.htmlUrl,
+          tagName: existing.tagName,
+          name: existing.name,
+        };
+      },
+      createGitHubRelease: async (octokit, repo, params) => {
+        const created = await createGitHubRelease(octokit, repo, {
+          tagName: params.tagName,
+          targetCommitish: params.targetCommitish,
+          name: params.name,
+          body: params.body,
+        });
+
+        return {
+          id: created.id,
+          url: created.htmlUrl,
+          tagName: created.tagName,
+          name: created.name,
+        };
+      },
+    },
+    scheduleBackgroundJob,
+  });
+
+  const babysitter = dependencies.babysitter ?? new PRBabysitter(
+    storage,
+    undefined,
+    undefined,
+    releaseManager,
+    scheduleBackgroundJob,
+    deploymentHealingManager,
+  );
+
+  backgroundJobDispatcher = dependencies.backgroundJobDispatcher ?? new BackgroundJobDispatcher({
+    storage,
+    queue: backgroundJobQueue,
+    handlers: createBackgroundJobHandlers({
+      storage,
+      babysitter,
+      releaseManager,
+      deploymentHealingManager,
+    }),
+    onReclaimedJobs: (jobs) => {
+      for (const job of jobs) {
+        if (job.kind !== "babysit_pr") {
+          continue;
+        }
+
+        void storage.addLog(job.targetId, "warn", `Reclaimed expired background job ${job.id} for PR ${job.targetId}`, {
+          phase: "background.job",
+          metadata: {
+            jobId: job.id,
+            kind: job.kind,
+            leaseOwner: job.leaseOwner,
+            leaseExpiresAt: job.leaseExpiresAt,
+            attemptCount: job.attemptCount,
+          },
+        }).catch((error) => {
+          log.warn(
+            { err: error instanceof Error ? error.message : String(error) },
+            "Failed to log reclaimed background job",
+          );
+        });
+      }
+    },
+  });
+
+  let watcherTimer: NodeJS.Timeout | null = null;
+  let watcherIntervalMs = 0;
+  const watcherScheduler = dependencies.watcherScheduler ?? createWatcherScheduler(
+    async () => {
+      await scheduleBackgroundJob(
+        "sync_watched_repos",
+        "runtime:1",
+        buildBackgroundJobDedupeKey("sync_watched_repos", "runtime:1"),
+      );
+      await queueAutomaticIssueWorkInternal();
+    },
+    (error) => {
+      log.warn(
+        { err: error instanceof Error ? error.message : String(error) },
+        "Repository babysitter watcher failed",
+      );
+    },
+  );
+  const runWatcher = watcherScheduler.run;
+
+  const startBackgroundServices = dependencies.startBackgroundServices ?? true;
+  const startWatcher = dependencies.startWatcher ?? startBackgroundServices;
+  let started = false;
+
+  const notifyChange = () => {
+    events.emit("change");
+  };
+
+  type IssueWorkQueueSource = "manual" | "automatic";
+  type IssueEvaluationQueueSource = "manual" | "automatic";
+
+  async function queueIssueEvaluationInternal(
+    repoInput: string,
+    number: number,
+    source: IssueEvaluationQueueSource,
+  ): Promise<Issue> {
+    const parsedRepo = parseRepoSlug(repoInput);
+    if (!parsedRepo) {
+      throw new AppRuntimeError(400, "Invalid repository. Use owner/repo or https://github.com/owner/repo");
+    }
+
+    const canonical = formatRepoSlug(parsedRepo);
+    const config = await storage.getConfig();
+    if (!config.watchedRepos.includes(canonical)) {
+      throw new AppRuntimeError(404, `Repository ${canonical} is not being watched`);
+    }
+
+    const runtimeState = await storage.getRuntimeState();
+    if (runtimeState.drainMode) {
+      await rejectManualRunDuringDrain(runtimeState, {
+        logMessageBase: "Manual issue evaluation blocked because drain mode is enabled",
+        metadata: { repo: canonical, issueNumber: number },
+      });
+    }
+
+    const octokit = await buildOctokit(config);
+    const issue = await fetchIssueSummary(octokit, { ...parsedRepo, number });
+    const targetId = formatIssueTargetId(issue.repoFullName, issue.number);
+    const job = await scheduleBackgroundJob(
+      "evaluate_issue",
+      targetId,
+      buildBackgroundJobDedupeKey("evaluate_issue", targetId),
+      {
+        repo: issue.repoFullName,
+        issueNumber: issue.number,
+        issueTitle: issue.title,
+        issueUrl: issue.url,
+        ...buildActivityPayload({
+          label: `Evaluating issue #${issue.number}`,
+          detail: `${issue.repoFullName} - ${issue.title}`,
+          targetUrl: issue.url,
+        }),
+      },
+    );
+
+    await storage.addLog(targetId, "info", `${source === "automatic" ? "Queued automatic issue evaluation" : "Queued manual issue evaluation"} for ${issue.repoFullName}#${issue.number}`, {
+      metadata: {
+        repo: issue.repoFullName,
+        issueNumber: issue.number,
+        jobId: job.id,
+        stage: "queued_evaluation",
+      },
+    });
+
+    notifyChange();
+    return applyIssueWorkState(issue);
+  }
+
+  async function queueIssueWorkInternal(
+    repoInput: string,
+    number: number,
+    source: IssueWorkQueueSource,
+  ): Promise<Issue> {
+    const parsedRepo = parseRepoSlug(repoInput);
+    if (!parsedRepo) {
+      throw new AppRuntimeError(400, "Invalid repository. Use owner/repo or https://github.com/owner/repo");
+    }
+
+    const canonical = formatRepoSlug(parsedRepo);
+    const config = await storage.getConfig();
+    if (!config.watchedRepos.includes(canonical)) {
+      throw new AppRuntimeError(404, `Repository ${canonical} is not being watched`);
+    }
+
+    const runtimeState = await storage.getRuntimeState();
+    if (runtimeState.drainMode) {
+      await rejectManualRunDuringDrain(runtimeState, {
+        logMessageBase: "Manual issue work blocked because drain mode is enabled",
+        metadata: { repo: canonical, issueNumber: number },
+      });
+    }
+
+    const octokit = await buildOctokit(config);
+    const issue = await fetchIssueSummary(octokit, { ...parsedRepo, number });
+    const baseBranch = await getDefaultBranchForRepo(octokit, parsedRepo);
+    const targetId = formatIssueTargetId(issue.repoFullName, issue.number);
+
+    const job = await scheduleBackgroundJob(
+      "work_issue",
+      targetId,
+      buildBackgroundJobDedupeKey("work_issue", targetId),
+      {
+        repo: issue.repoFullName,
+        issueNumber: issue.number,
+        issueTitle: issue.title,
+        issueUrl: issue.url,
+        baseBranch,
+        ...buildActivityPayload({
+          label: `Working issue #${issue.number}`,
+          detail: `${issue.repoFullName} - ${issue.title}`,
+          targetUrl: issue.url,
+        }),
+      },
+    );
+
+    await storage.addLog(targetId, "info", `${source === "automatic" ? "Queued automatic issue work" : "Queued manual issue work"} for ${issue.repoFullName}#${issue.number}`, {
+      metadata: {
+        repo: issue.repoFullName,
+        issueNumber: issue.number,
+        jobId: job.id,
+        stage: "queued",
+      },
+    });
+
+    notifyChange();
+    return {
+      ...issue,
+      id: targetId,
+      repo: issue.repoFullName,
+      workStatus: "queued" as const,
+      workStage: "queued",
+      workJobId: job.id,
+      workAttemptCount: job.attemptCount + 1,
+      workQueuedAt: job.createdAt,
+      workCompletedAt: null,
+      lastError: null,
+      workPrNumber: null,
+      workPrUrl: null,
+      workPrMergeable: null,
+    };
+  }
+
+  async function applyIssueWorkState(
+    issue: Awaited<ReturnType<typeof fetchIssueSummary>>,
+    options: { includePrMergeability?: boolean; issueJobs?: BackgroundJob[] } = {},
+  ): Promise<Issue> {
+    const targetId = formatIssueTargetId(issue.repoFullName, issue.number);
+    const issueJobs = options.issueJobs ?? await storage.listBackgroundJobs({ kind: "work_issue", targetId });
+    const latestJob = getLatestBackgroundJob(issueJobs);
+    const workState = issueWorkStatusFromJobs(issueJobs);
+    const workLogs = latestJob ? await storage.getLogs(targetId) : [];
+    const evaluation = await storage.getIssueEvaluation(targetId);
+    const readyPr = latestJob?.status === "completed"
+      ? issueWorkPrFromLogs(workLogs, issue.repoFullName)
+      : null;
+    const workStage = issueWorkStageFromLogs(workLogs, workState.workStatus);
+    let workPrMergeable: boolean | null = null;
+    const autoWork = getIssueAutoWorkEligibility({
+      labels: issue.labels,
+    }, evaluation);
+
+    if (options.includePrMergeability && readyPr) {
+      const parsedPr = parsePRUrl(readyPr.workPrUrl);
+      if (parsedPr) {
+        try {
+          const config = await storage.getConfig();
+          const octokit = await buildOctokit(config);
+          const pull = await fetchPullSummary(octokit, parsedPr);
+          workPrMergeable = pull.mergeable;
+        } catch (error) {
+          log.warn(
+            { err: error instanceof Error ? error.message : String(error), repo: issue.repoFullName, prNumber: readyPr.workPrNumber },
+            "Failed to refresh issue work PR mergeability",
+          );
+        }
+      }
+    }
+
+    return {
+      ...issue,
+      id: targetId,
+      repo: issue.repoFullName,
+      workStatus: workState.workStatus,
+      workStage,
+      workJobId: workState.workJobId,
+      workAttemptCount: issueWorkAttemptCountFromJobs(issueJobs),
+      workQueuedAt: latestJob?.createdAt ?? null,
+      workCompletedAt: latestJob?.completedAt ?? null,
+      lastError: workState.lastError,
+      workPrNumber: readyPr?.workPrNumber ?? null,
+      workPrUrl: readyPr?.workPrUrl ?? null,
+      workPrMergeable,
+      autoWorkEligible: autoWork.autoWorkEligible,
+      autoWorkBlockedReason: autoWork.autoWorkBlockedReason,
+      evaluationStatus: evaluation?.status ?? null,
+      evaluationSummary: evaluation?.summary ?? null,
+      evaluationConfidence: evaluation?.confidence ?? null,
+      evaluationSafetyFlags: evaluation?.safetyFlags ?? [],
+      evaluationRecommendedLabels: evaluation?.recommendedLabels ?? [],
+      evaluationUpdatedAt: evaluation?.updatedAt ?? null,
+    };
+  }
+
+  async function listIssuesInternal(): Promise<Issue[]> {
+    const config = await storage.getConfig();
+    if (config.watchedRepos.length === 0) {
+      return [];
+    }
+
+    const octokit = await buildOctokit(config);
+    const perRepoIssues = await Promise.all(
+      config.watchedRepos.map(async (repoSlug) => {
+        const parsed = parseRepoSlug(repoSlug);
+        if (!parsed) {
+          return [];
+        }
+
+        return listOpenIssuesForRepo(octokit, parsed);
+      }),
+    );
+    const workJobs = await storage.listBackgroundJobs({ kind: "work_issue" });
+    const workJobsByTarget = new Map<string, BackgroundJob[]>();
+
+    for (const job of workJobs) {
+      const existing = workJobsByTarget.get(job.targetId) ?? [];
+      existing.push(job);
+      workJobsByTarget.set(job.targetId, existing);
+    }
+
+    const issuesWithWorkLinks = await Promise.all(perRepoIssues.flat().map((issue) => {
+      const targetId = formatIssueTargetId(issue.repoFullName, issue.number);
+      return applyIssueWorkState(issue, { issueJobs: workJobsByTarget.get(targetId) ?? [] });
+    }));
+
+    return issuesWithWorkLinks
+      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+  }
+
+  async function getIssueInternal(repoInput: string, number: number): Promise<Issue> {
+    const parsedRepo = parseRepoSlug(repoInput);
+    if (!parsedRepo) {
+      throw new AppRuntimeError(400, "Invalid repository. Use owner/repo or https://github.com/owner/repo");
+    }
+
+    const canonical = formatRepoSlug(parsedRepo);
+    const config = await storage.getConfig();
+    if (!config.watchedRepos.includes(canonical)) {
+      throw new AppRuntimeError(404, `Repository ${canonical} is not being watched`);
+    }
+
+    const octokit = await buildOctokit(config);
+    const issue = await fetchIssueSummary(octokit, { ...parsedRepo, number });
+    return applyIssueWorkState(issue, { includePrMergeability: true });
+  }
+
+  async function queueAutomaticIssueWorkInternal(): Promise<void> {
+    const [runtimeState, config, repoSettings, issues, evaluationJobs] = await Promise.all([
+      storage.getRuntimeState(),
+      storage.getConfig(),
+      storage.listRepoSettings(),
+      listIssuesInternal(),
+      storage.listBackgroundJobs({ kind: "evaluate_issue" }),
+    ]);
+
+    if (runtimeState.drainMode) {
+      return;
+    }
+
+    if (config.autoIssues === false) {
+      return;
+    }
+
+    const autoRepos = repoSettings.filter((repo) => repo.issueAutoWork).map((repo) => repo.repo);
+    if (autoRepos.length === 0) {
+      return;
+    }
+
+    const activeEvaluationTargets = new Set(
+      evaluationJobs
+        .filter((job) => job.status === "queued" || job.status === "leased")
+        .map((job) => job.targetId),
+    );
+
+    for (const repo of autoRepos) {
+      const repoIssues = issues.filter((issue) => issue.repo === repo);
+      if (repoIssues.some((issue) => issue.workStatus === "queued" || issue.workStatus === "in_progress")) {
+        continue;
+      }
+
+      const nextIssue = repoIssues.find((issue) =>
+        issue.workStatus === "idle"
+        && !issue.workPrUrl
+        && issue.autoWorkEligible
+      );
+      if (nextIssue) {
+        try {
+          await queueIssueWorkInternal(nextIssue.repo, nextIssue.number, "automatic");
+        } catch (error) {
+          log.warn(
+            { err: error instanceof Error ? error.message : String(error), repo, issueNumber: nextIssue.number },
+            "Automatic issue work queue failed",
+          );
+        }
+        continue;
+      }
+
+      const nextEvaluationIssue = repoIssues.find((issue) =>
+        issue.workStatus === "idle"
+        && !issue.workPrUrl
+        && !issue.evaluationStatus
+        && !activeEvaluationTargets.has(issue.id)
+      );
+      if (!nextEvaluationIssue) {
+        continue;
+      }
+
+      try {
+        await queueIssueEvaluationInternal(nextEvaluationIssue.repo, nextEvaluationIssue.number, "automatic");
+      } catch (error) {
+        log.warn(
+          { err: error instanceof Error ? error.message : String(error), repo, issueNumber: nextEvaluationIssue.number },
+          "Automatic issue evaluation queue failed",
+        );
+      }
+    }
+  }
+
+  const getRuntimeSnapshot = async (): Promise<RuntimeSnapshot> => {
+    const state = await storage.getRuntimeState();
+    return {
+      ...state,
+      activeRuns: backgroundJobDispatcher.getActiveRunCount(),
+    };
+  };
+
+  const buildActivityDescriptionContext = async (jobs: BackgroundJob[]): Promise<ActivityDescriptionContext> => {
+    const prIds = new Set<string>();
+    const releaseRunIds = new Set<string>();
+    const socialChangelogIds = new Set<string>();
+    const deploymentHealingTargets = new Set<string>();
+
+    for (const job of jobs) {
+      if (job.kind === "babysit_pr") {
+        prIds.add(job.targetId);
+      } else if (job.kind === "answer_pr_question") {
+        const prId = readJobStringPayload(job, "prId");
+        if (prId) {
+          prIds.add(prId);
+        }
+      } else if (job.kind === "process_release_run") {
+        releaseRunIds.add(job.targetId);
+      } else if (job.kind === "generate_social_changelog") {
+        socialChangelogIds.add(job.targetId);
+      } else if (job.kind === "heal_deployment") {
+        deploymentHealingTargets.add(job.targetId);
+      }
+    }
+
+    const [activePrs, archivedPrs, releaseRuns, socialChangelogs, deploymentHealingSessions] = await Promise.all([
+      prIds.size > 0 ? storage.getPRs() : Promise.resolve([]),
+      prIds.size > 0 ? storage.getArchivedPRs() : Promise.resolve([]),
+      releaseRunIds.size > 0 ? storage.listReleaseRuns() : Promise.resolve([]),
+      socialChangelogIds.size > 0 ? storage.getSocialChangelogs() : Promise.resolve([]),
+      deploymentHealingTargets.size > 0 ? storage.listDeploymentHealingSessions() : Promise.resolve([]),
+    ]);
+
+    const deploymentHealingSessionsByTarget = new Map<string, DeploymentHealingSession>();
+    for (const session of deploymentHealingSessions) {
+      deploymentHealingSessionsByTarget.set(session.id, session);
+      deploymentHealingSessionsByTarget.set(`${session.repo}:${session.mergeSha}`, session);
+    }
+
+    return {
+      prsById: new Map([...activePrs, ...archivedPrs].map((pr) => [pr.id, pr])),
+      releaseRunsById: new Map(releaseRuns.map((run) => [run.id, run])),
+      socialChangelogsById: new Map(socialChangelogs.map((changelog) => [changelog.id, changelog])),
+      deploymentHealingSessionsByTarget,
+    };
+  };
+
+  const describeActivityJob = (job: BackgroundJob, context: ActivityDescriptionContext): ActivityDescription => {
+    const payloadDescription = readActivityPayload(job.payload);
+    if (payloadDescription) {
+      return payloadDescription;
+    }
+
+    if (job.kind === "sync_watched_repos") {
+      return {
+        label: "Sync watched repositories",
+        detail: null,
+        targetUrl: null,
+      };
+    }
+
+    if (job.kind === "babysit_pr") {
+      const pr = context.prsById.get(job.targetId);
+      if (pr) {
+        return {
+          label: `Babysitting PR #${pr.number}`,
+          detail: `${pr.repo} - ${pr.title}`,
+          targetUrl: pr.url,
+        };
+      }
+    }
+
+    if (job.kind === "answer_pr_question") {
+      const prId = readJobStringPayload(job, "prId");
+      const pr = prId ? context.prsById.get(prId) : undefined;
+      if (pr) {
+        return {
+          label: `Answering question for PR #${pr.number}`,
+          detail: `${pr.repo} - ${pr.title}`,
+          targetUrl: pr.url,
+        };
+      }
+    }
+
+    if (job.kind === "process_release_run") {
+      const run = context.releaseRunsById.get(job.targetId);
+      if (run) {
+        return {
+          label: `Processing release for ${run.repo}`,
+          detail: `PR #${run.triggerPrNumber} - ${run.triggerPrTitle}`,
+          targetUrl: run.triggerPrUrl,
+        };
+      }
+    }
+
+    if (job.kind === "generate_social_changelog") {
+      const changelog = context.socialChangelogsById.get(job.targetId);
+      if (changelog) {
+        return {
+          label: "Social changelog generation removed",
+          detail: `${changelog.date} - ${changelog.triggerCount} merged PRs`,
+          targetUrl: null,
+        };
+      }
+    }
+
+    if (job.kind === "heal_deployment") {
+      const session = context.deploymentHealingSessionsByTarget.get(job.targetId);
+      if (session) {
+        return {
+          label: `Healing ${session.platform} deployment`,
+          detail: `${session.repo} PR #${session.triggerPrNumber} - ${session.triggerPrTitle}`,
+          targetUrl: session.triggerPrUrl,
+        };
+      }
+    }
+
+    return {
+      label: fallbackJobLabel(job),
+      detail: job.targetId,
+      targetUrl: null,
+    };
+  };
+
+  const mapActivityJob = (job: BackgroundJob, context: ActivityDescriptionContext): ActivityItem => {
+    const description = describeActivityJob(job, context);
+    return {
+      id: job.id,
+      kind: job.kind,
+      status: job.status === "leased" ? "in_progress" : job.status === "failed" ? "failed" : "queued",
+      label: description.label,
+      detail: description.detail,
+      targetId: job.targetId,
+      targetUrl: description.targetUrl,
+      queuedAt: job.createdAt,
+      availableAt: job.availableAt,
+      startedAt: job.heartbeatAt,
+      updatedAt: job.updatedAt,
+      attemptCount: job.attemptCount,
+      lastError: job.lastError,
+    };
+  };
+
+  const isFailedActivityForArchivedPR = (job: BackgroundJob, context: ActivityDescriptionContext): boolean => {
+    if (job.kind === "babysit_pr") {
+      return context.prsById.get(job.targetId)?.status === "archived";
+    }
+
+    if (job.kind === "answer_pr_question") {
+      const prId = readJobStringPayload(job, "prId");
+      return prId ? context.prsById.get(prId)?.status === "archived" : false;
+    }
+
+    return false;
+  };
+
+  const mapOperatorWarning = (job: BackgroundJob, context: ActivityDescriptionContext): OperatorWarning | null => {
+    const failure = classifyAgentAvailabilityFailure(job);
+    if (!failure) {
+      return null;
+    }
+
+    const pr = context.prsById.get(job.targetId);
+    if (!pr || pr.status !== "error") {
+      return null;
+    }
+
+    const titleSuffix = failure.kind === "auth" ? "authentication failed" : "CLI not installed";
+    const reason = failure.kind === "auth"
+      ? "local agent credentials are invalid or expired"
+      : "the agent CLI is not installed on this machine";
+
+    return {
+      id: job.id,
+      severity: "warning",
+      title: `${failure.agentLabel} ${titleSuffix}`,
+      message: `Babysitter could not run ${failure.agentLabel} for PR #${pr.number} in ${pr.repo} because ${reason}.`,
+      fixSteps: failure.fixSteps,
+      targetId: job.targetId,
+      targetUrl: pr.url,
+      createdAt: job.createdAt,
+      updatedAt: job.updatedAt,
+    };
+  };
+
+  const waitForBackgroundIdle = async (timeoutMs: number): Promise<boolean> => {
+    const [dispatcherIdle, babysitterIdle, releaseIdle] = await Promise.all([
+      backgroundJobDispatcher.waitForIdle(timeoutMs),
+      babysitter.waitForIdle(timeoutMs),
+      releaseManager.waitForIdle(timeoutMs),
+    ]);
+
+    return dispatcherIdle && babysitterIdle && releaseIdle;
+  };
+
+  const refreshWatcherSchedule = async () => {
+    const config = await storage.getConfig();
+    const interval = Math.max(10_000, config.pollIntervalMs || 120_000);
+
+    if (watcherTimer && watcherIntervalMs === interval) {
+      return;
+    }
+
+    if (watcherTimer) {
+      clearInterval(watcherTimer);
+      watcherTimer = null;
+    }
+
+    watcherIntervalMs = interval;
+    watcherTimer = setInterval(() => {
+      void runWatcher();
+    }, interval);
+  };
+
+  const queueBabysitWithAgent = async (pr: PR, preferredAgent: Config["codingAgent"]) => {
+    await scheduleBackgroundJob(
+      "babysit_pr",
+      pr.id,
+      buildBackgroundJobDedupeKey("babysit_pr", pr.id),
+      {
+        preferredAgent,
+        ...buildActivityPayload({
+          label: `Babysitting PR #${pr.number}`,
+          detail: `${pr.repo} - ${pr.title}`,
+          targetUrl: pr.url,
+        }),
+      },
+    );
+  };
+
+  const buildManualDrainBlockMessage = (runtimeState: RuntimeState): string => {
+    const base = "Drain mode is enabled. Manual runs are blocked until drain mode is disabled.";
+    return runtimeState.drainReason ? `${base} Reason: ${runtimeState.drainReason}` : base;
+  };
+
+  const rejectManualRunDuringDrain = async (
+    runtimeState: RuntimeState,
+    options: {
+      pr?: PR;
+      logMessageBase?: string;
+      metadata?: Record<string, unknown>;
+    } = {},
+  ): Promise<never> => {
+    const message = buildManualDrainBlockMessage(runtimeState);
+    const logMessageBase = options.logMessageBase ?? "Manual run blocked because drain mode is enabled";
+    const logMessage = runtimeState.drainReason
+      ? `${logMessageBase}. Reason: ${runtimeState.drainReason}`
+      : `${logMessageBase}.`;
+    const metadata = {
+      drainReason: runtimeState.drainReason,
+      drainRequestedAt: runtimeState.drainRequestedAt,
+      ...options.metadata,
+    };
+
+    if (options.pr) {
+      await storage.addLog(options.pr.id, "warn", logMessage, {
+        phase: "run",
+        metadata,
+      });
+      notifyChange();
+    } else {
+      log.warn(metadata, logMessageBase);
+    }
+
+    throw new AppRuntimeError(409, message);
+  };
+
+  const runtime: AppRuntime = {
+    async start() {
+      if (started) {
+        return;
+      }
+
+      started = true;
+
+      if (startBackgroundServices) {
+        await backgroundJobDispatcher.start();
+      }
+
+      if (startWatcher) {
+        await refreshWatcherSchedule();
+        void babysitter.resumeInterruptedRuns();
+        void runWatcher();
+      }
+    },
+
+    stop() {
+      started = false;
+      backgroundJobDispatcher.stop();
+      if (watcherTimer) {
+        clearInterval(watcherTimer);
+        watcherTimer = null;
+      }
+    },
+
+    subscribe(listener) {
+      events.on("change", listener);
+      return () => {
+        events.off("change", listener);
+      };
+    },
+
+    getRuntimeSnapshot,
+
+    async listActivities() {
+      const [failedJobs, leasedJobs, queuedJobs] = await Promise.all([
+        storage.listBackgroundJobs({ status: "failed" }),
+        storage.listBackgroundJobs({ status: "leased" }),
+        storage.listBackgroundJobs({ status: "queued" }),
+      ]);
+
+      const descriptionContext = await buildActivityDescriptionContext([...failedJobs, ...leasedJobs, ...queuedJobs]);
+      const visibleFailedJobs = failedJobs.filter((job) => !isFailedActivityForArchivedPR(job, descriptionContext));
+      const failedWarningJobs = visibleFailedJobs.filter((job) => classifyAgentAvailabilityFailure(job));
+      const failed = visibleFailedJobs.map((job) => mapActivityJob(job, descriptionContext));
+      const inProgress = leasedJobs.map((job) => mapActivityJob(job, descriptionContext));
+      const queued = queuedJobs.map((job) => mapActivityJob(job, descriptionContext));
+      const warnings = failedWarningJobs
+        .map((job) => mapOperatorWarning(job, descriptionContext))
+        .filter((warning): warning is OperatorWarning => Boolean(warning))
+        .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
+        .slice(0, 5);
+
+      return {
+        failed,
+        inProgress,
+        queued,
+        warnings,
+        generatedAt: new Date().toISOString(),
+      };
+    },
+
+    async clearFailedActivities() {
+      const cleared = await storage.clearFailedBackgroundJobs();
+      if (cleared > 0) {
+        notifyChange();
+      }
+      return { cleared };
+    },
+
+    async setDrainMode(input) {
+      const updated = await storage.updateRuntimeState({
+        drainMode: input.enabled,
+        drainRequestedAt: input.enabled ? new Date().toISOString() : null,
+        drainReason: input.enabled ? input.reason ?? null : null,
+      });
+
+      if (input.enabled) {
+        log.warn({
+          drainRequestedAt: updated.drainRequestedAt,
+          drainReason: updated.drainReason,
+          waitForIdle: Boolean(input.waitForIdle),
+        }, "Drain mode enabled");
+      } else {
+        log.info("Drain mode disabled");
+      }
+
+      if (input.enabled && input.waitForIdle) {
+        const drained = await waitForBackgroundIdle(input.timeoutMs ?? 120_000);
+        const snapshot = await getRuntimeSnapshot();
+        notifyChange();
+        return {
+          ...updated,
+          ...snapshot,
+          drained,
+        };
+      }
+
+      const snapshot = await getRuntimeSnapshot();
+      notifyChange();
+      return {
+        ...updated,
+        ...snapshot,
+      };
+    },
+
+    async listRepos() {
+      const config = await storage.getConfig();
+      const prs = await storage.getPRs();
+
+      return Array.from(new Set([
+        ...config.watchedRepos,
+        ...prs.map((pr) => pr.repo),
+      ])).sort((a, b) => a.localeCompare(b));
+    },
+
+    async listRepoSettings() {
+      return storage.listRepoSettings();
+    },
+
+    async addRepo(repoInput) {
+      const parsedRepo = parseRepoSlug(repoInput);
+      if (!parsedRepo) {
+        throw new AppRuntimeError(400, "Invalid repository. Use owner/repo or https://github.com/owner/repo");
+      }
+
+      const canonical = formatRepoSlug(parsedRepo);
+      const config = await storage.getConfig();
+      if (!config.watchedRepos.includes(canonical)) {
+        await storage.updateConfig({
+          watchedRepos: [...config.watchedRepos, canonical].sort((a, b) => a.localeCompare(b)),
+        });
+      }
+
+      void runWatcher();
+      notifyChange();
+      return { repo: canonical };
+    },
+
+    async removeRepo(repoInput, mode = "soft") {
+      const parsedRepo = parseRepoSlug(repoInput);
+      if (!parsedRepo) {
+        throw new AppRuntimeError(400, "Invalid repository. Use owner/repo or https://github.com/owner/repo");
+      }
+
+      const canonical = formatRepoSlug(parsedRepo);
+      const config = await storage.getConfig();
+      let removedPrs = 0;
+      if (config.watchedRepos.includes(canonical)) {
+        await storage.updateConfig({
+          watchedRepos: config.watchedRepos.filter((repo) => repo !== canonical),
+        });
+      }
+
+      if (mode === "hard") {
+        const prs = [
+          ...await storage.getPRs(),
+          ...await storage.getArchivedPRs(),
+        ].filter((pr) => pr.repo === canonical);
+        for (const pr of prs) {
+          if (await storage.removePR(pr.id)) {
+            removedPrs += 1;
+          }
+        }
+      }
+
+      notifyChange();
+      return { ok: true, repo: canonical, mode, removedPrs };
+    },
+
+    async updateRepoSettings(repoInput, updates) {
+      const parsedRepo = parseRepoSlug(repoInput);
+      if (!parsedRepo) {
+        throw new AppRuntimeError(400, "Invalid repository. Use owner/repo or https://github.com/owner/repo");
+      }
+
+      const canonical = formatRepoSlug(parsedRepo);
+      const updated = await storage.updateRepoSettings(canonical, updates);
+      notifyChange();
+      if (updates.issueAutoWork === true) {
+        void queueAutomaticIssueWorkInternal().catch((error) => {
+          log.warn(
+            { err: error instanceof Error ? error.message : String(error), repo: canonical },
+            "Failed to queue automatic issue work after repo settings update",
+          );
+        });
+      }
+      return updated;
+    },
+
+    async syncRepos() {
+      await watcherScheduler.runAndReportErrors();
+      notifyChange();
+      return { ok: true as const };
+    },
+
+    async createManualRelease(repoInput) {
+      const parsedRepo = parseRepoSlug(repoInput);
+      if (!parsedRepo) {
+        throw new AppRuntimeError(400, "Invalid repository. Use owner/repo or https://github.com/owner/repo");
+      }
+
+      const canonical = formatRepoSlug(parsedRepo);
+      const runtimeState = await storage.getRuntimeState();
+      if (runtimeState.drainMode) {
+        await rejectManualRunDuringDrain(runtimeState, {
+          logMessageBase: "Manual release run blocked because drain mode is enabled",
+          metadata: { repo: canonical },
+        });
+      }
+
+      const release = await releaseManager.enqueueManualRepoRelease(canonical);
+      if (!release) {
+        throw new AppRuntimeError(409, `No unreleased merged pull requests found for ${canonical}`);
+      }
+
+      notifyChange();
+      return release;
+    },
+
+    async listIssues() {
+      return listIssuesInternal();
+    },
+
+    async getIssue(repoInput, number) {
+      return getIssueInternal(repoInput, number);
+    },
+
+    async evaluateIssue(repoInput, number) {
+      return queueIssueEvaluationInternal(repoInput, number, "manual");
+    },
+
+    async workIssue(repoInput, number) {
+      return queueIssueWorkInternal(repoInput, number, "manual");
+    },
+
+    async listPRs(view = "active") {
+      if (view === "archived") {
+        return storage.getArchivedPRs();
+      }
+
+      return storage.getPRs();
+    },
+
+    async getPR(id) {
+      return (await storage.getPR(id)) ?? null;
+    },
+
+    async addPR(url) {
+      let parsedUrl: string;
+      try {
+        ({ url: parsedUrl } = addPRSchema.parse({ url }));
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          throw new AppRuntimeError(400, error.errors[0]?.message ?? "Invalid PR URL");
+        }
+        throw error;
+      }
+      const parsed = parsePRUrl(parsedUrl);
+
+      if (!parsed) {
+        throw new AppRuntimeError(400, "Invalid GitHub PR URL. Expected: https://github.com/owner/repo/pull/123");
+      }
+
+      const repoSlug = `${parsed.owner}/${parsed.repo}`;
+      const existing = await storage.getPRByRepoAndNumber(repoSlug, parsed.number);
+      if (existing) {
+        return existing;
+      }
+
+      const config = await storage.getConfig();
+      const octokit = await buildOctokit(config);
+      const summary = await fetchPullSummary(octokit, parsed);
+
+      const pr = await storage.addPR({
+        number: parsed.number,
+        title: summary.title,
+        repo: repoSlug,
+        branch: summary.branch,
+        author: summary.author,
+        url: summary.url,
+        status: "watching",
+        feedbackItems: [],
+        accepted: 0,
+        rejected: 0,
+        flagged: 0,
+        testsPassed: null,
+        lintPassed: null,
+        lastChecked: null,
+      });
+
+      await storage.addLog(pr.id, "info", `Registered PR #${parsed.number} from ${repoSlug}`);
+      await storage.addLog(pr.id, "info", `Repository ${repoSlug} added to auto-babysit watch list`);
+
+      if (!config.watchedRepos.includes(repoSlug)) {
+        await storage.updateConfig({
+          watchedRepos: [...config.watchedRepos, repoSlug].sort((a, b) => a.localeCompare(b)),
+        });
+      }
+
+      await queueBabysitWithAgent(pr, config.codingAgent);
+      notifyChange();
+      return pr;
+    },
+
+    async removePR(id) {
+      const removed = await storage.removePR(id);
+      if (!removed) {
+        throw new AppRuntimeError(404, "PR not found");
+      }
+
+      notifyChange();
+      return { ok: true as const };
+    },
+
+    async setPRWatchEnabled(id, enabled) {
+      const pr = assertFound(await storage.getPR(id), "PR not found");
+      const updated = await storage.updatePR(pr.id, { watchEnabled: enabled });
+      const next = assertFound(updated, "PR not found");
+
+      if (pr.watchEnabled !== enabled) {
+        await storage.addLog(pr.id, "info", enabled ? "Background watch resumed" : "Background watch paused");
+        if (enabled) {
+          void runWatcher();
+        }
+      }
+
+      notifyChange();
+      return next;
+    },
+
+    async setWatchEnabled(id, enabled) {
+      return runtime.setPRWatchEnabled(id, enabled);
+    },
+
+    async fetchPRFeedback(id) {
+      const pr = assertFound(await storage.getPR(id), "PR not found");
+
+      await storage.updatePR(pr.id, { status: "processing", lastChecked: new Date().toISOString() });
+      await storage.addLog(pr.id, "info", "Syncing GitHub comments/reviews...");
+
+      try {
+        const updated = await babysitter.syncFeedbackForPR(pr.id);
+        notifyChange();
+        return updated;
+      } catch (error) {
+        const message = getErrorMessage(error);
+        await storage.updatePR(pr.id, { status: "error", lastChecked: new Date().toISOString() });
+        await storage.addLog(pr.id, "error", `Fetch failed: ${message}`);
+        throw error;
+      }
+    },
+
+    async triagePR(id) {
+      const pr = assertFound(await storage.getPR(id), "PR not found");
+
+      await storage.updatePR(pr.id, { status: "processing" });
+      await storage.addLog(pr.id, "info", "Triaging feedback...");
+
+      const triaged = pr.feedbackItems.map((item) => {
+        if (item.decision) {
+          return item;
+        }
+
+        const body = item.body.toLowerCase();
+        if (body.includes("lgtm") || body.includes("looks good")) {
+          return applyEvaluationDecision(item, false, "Acknowledgement, no code change requested");
+        }
+
+        if (
+          body.includes("please")
+          || body.includes("should")
+          || body.includes("fix")
+          || body.includes("error")
+          || body.includes("fail")
+        ) {
+          return { ...applyEvaluationDecision(item, true, "Likely actionable request"), action: item.body };
+        }
+
+        return applyFlagDecision(item, "Unclear actionability, flagged for manual review");
+      });
+
+      const accepted = triaged.filter((item) => item.decision === "accept").length;
+      const rejected = triaged.filter((item) => item.decision === "reject").length;
+      const flagged = triaged.filter((item) => item.decision === "flag").length;
+
+      const updated = await storage.updatePR(pr.id, {
+        feedbackItems: triaged,
+        accepted,
+        rejected,
+        flagged,
+        status: "watching",
+      });
+
+      await storage.addLog(pr.id, "info", `Triage complete: ${accepted} accept, ${rejected} reject, ${flagged} flag`);
+      notifyChange();
+      return assertFound(updated, "PR not found");
+    },
+
+    async applyPR(id) {
+      const pr = assertFound(await storage.getPR(id), "PR not found");
+      const runtime = await storage.getRuntimeState();
+      if (runtime.drainMode) {
+        await rejectManualRunDuringDrain(runtime, {
+          pr,
+          logMessageBase: "Manual babysitter run blocked because drain mode is enabled",
+        });
+      }
+
+      const config = await storage.getConfig();
+      await storage.updatePR(pr.id, { status: "processing" });
+      await storage.addLog(pr.id, "info", `Launching autonomous babysitter run using ${config.codingAgent}`);
+      await queueBabysitWithAgent(pr, config.codingAgent);
+
+      const updated = await storage.getPR(pr.id);
+      notifyChange();
+      return assertFound(updated, "PR disappeared after apply run");
+    },
+
+    async babysitPR(id) {
+      const pr = assertFound(await storage.getPR(id), "PR not found");
+      const runtime = await storage.getRuntimeState();
+      if (runtime.drainMode) {
+        await rejectManualRunDuringDrain(runtime, {
+          pr,
+          logMessageBase: "Manual babysitter run blocked because drain mode is enabled",
+        });
+      }
+
+      const config = await storage.getConfig();
+      await storage.addLog(pr.id, "info", `Manual babysitter trigger using ${config.codingAgent}`);
+      await queueBabysitWithAgent(pr, config.codingAgent);
+
+      const updated = await storage.getPR(pr.id);
+      notifyChange();
+      return assertFound(updated, "PR disappeared after babysit run");
+    },
+
+    async queueBabysit(id) {
+      return runtime.babysitPR(id);
+    },
+
+    async setFeedbackDecision(prId, feedbackId, decision) {
+      const pr = assertFound(await storage.getPR(prId), "PR not found");
+      const updated = await applyManualFeedbackDecision({
+        storage,
+        pr,
+        feedbackId,
+        decision,
+      });
+      notifyChange();
+      return assertFound(updated, "PR not found");
+    },
+
+    async retryFeedback(prId, feedbackId) {
+      const pr = assertFound(await storage.getPR(prId), "PR not found");
+      const item = pr.feedbackItems.find((candidate) => candidate.id === feedbackId);
+      if (!item) {
+        throw new AppRuntimeError(404, "Feedback item not found");
+      }
+
+      if (item.status !== "failed" && item.status !== "warning") {
+        throw new AppRuntimeError(400, "Only failed or warning items can be retried");
+      }
+
+      const runtimeState = await storage.getRuntimeState();
+      if (runtimeState.drainMode) {
+        await rejectManualRunDuringDrain(runtimeState, {
+          pr,
+          logMessageBase: "Manual feedback retry blocked because drain mode is enabled",
+          metadata: { feedbackId },
+        });
+      }
+
+      const result = await babysitter.retryFeedbackItem(prId, feedbackId);
+      if (result.kind === "pr_not_found") {
+        throw new AppRuntimeError(404, "PR not found");
+      }
+
+      if (result.kind === "feedback_not_found") {
+        throw new AppRuntimeError(404, "Feedback item not found");
+      }
+
+      if (result.kind === "feedback_not_retryable") {
+        throw new AppRuntimeError(400, "Only failed or warning items can be retried");
+      }
+
+      await storage.addLog(prId, "info", `Feedback item ${feedbackId} queued for retry`);
+      const config = await storage.getConfig();
+      await queueBabysitWithAgent(result.updated, config.codingAgent);
+      notifyChange();
+      return result.updated;
+    },
+
+    async listPRQuestions(prId) {
+      assertFound(await storage.getPR(prId), "PR not found");
+      return storage.getQuestions(prId);
+    },
+
+    async askQuestion(prId, question) {
+      const pr = assertFound(await storage.getPR(prId), "PR not found");
+      let parsed: { question: string };
+      try {
+        parsed = askQuestionSchema.parse({ question });
+      } catch (error) {
+        if (error instanceof z.ZodError) {
+          throw new AppRuntimeError(400, error.errors[0]?.message ?? "Invalid question");
+        }
+        throw error;
+      }
+
+      const runtimeState = await storage.getRuntimeState();
+      if (runtimeState.drainMode) {
+        await rejectManualRunDuringDrain(runtimeState, {
+          pr,
+          logMessageBase: "Manual question run blocked because drain mode is enabled",
+        });
+      }
+
+      const entry = await storage.addQuestion(prId, parsed.question);
+      try {
+        await scheduleBackgroundJob(
+          "answer_pr_question",
+          entry.id,
+          buildBackgroundJobDedupeKey("answer_pr_question", entry.id),
+          {
+            prId,
+            ...buildActivityPayload({
+              label: `Answering question for PR #${pr.number}`,
+              detail: `${pr.repo} - ${pr.title}`,
+              targetUrl: pr.url,
+            }),
+          },
+        );
+      } catch (error) {
+        const message = getErrorMessage(error);
+        await storage.updateQuestion(entry.id, {
+          status: "error",
+          error: message.trim().slice(0, 2_000),
+        });
+        throw error;
+      }
+
+      notifyChange();
+      return entry;
+    },
+
+    async listLogs(prId) {
+      return storage.getLogs(prId);
+    },
+
+    async getOnboardingStatus() {
+      const config = await storage.getConfig();
+      return checkOnboardingStatus(config, config.watchedRepos);
+    },
+
+    async installReviewWorkflow(repo, tool) {
+      const config = await storage.getConfig();
+      return installCodeReviewWorkflow(config, repo, tool);
+    },
+
+    async listHealingSessions() {
+      return storage.listHealingSessions();
+    },
+
+    async getHealingSession(id) {
+      return assertFound(await storage.getHealingSession(id), "Healing session not found");
+    },
+
+    async listDeploymentHealingSessions(repo) {
+      return storage.listDeploymentHealingSessions(repo ? { repo } : undefined);
+    },
+
+    async getDeploymentHealingSession(id) {
+      return assertFound(
+        await storage.getDeploymentHealingSession(id),
+        "Deployment healing session not found",
+      );
+    },
+
+    async getConfig() {
+      return storage.getConfig();
+    },
+
+    async updateConfig(updates) {
+      const updated = await storage.updateConfig(updates);
+      if (startWatcher && started) {
+        await refreshWatcherSchedule();
+      }
+      notifyChange();
+      return updated;
+    },
+
+    async listSocialChangelogs() {
+      return storage.getSocialChangelogs();
+    },
+
+    async getSocialChangelog(id) {
+      return assertFound(await storage.getSocialChangelog(id), "Changelog not found");
+    },
+
+    async listReleaseRuns() {
+      return storage.listReleaseRuns();
+    },
+
+    async getReleaseRun(id) {
+      return assertFound(await storage.getReleaseRun(id), "Release run not found");
+    },
+
+    async retryReleaseRun(id) {
+      const existing = assertFound(await storage.getReleaseRun(id), "Release run not found");
+      const runtimeState = await storage.getRuntimeState();
+      if (runtimeState.drainMode) {
+        await rejectManualRunDuringDrain(runtimeState, {
+          logMessageBase: "Manual release retry blocked because drain mode is enabled",
+          metadata: {
+            releaseRunId: id,
+            repo: existing.repo,
+          },
+        });
+      }
+
+      const release = await releaseManager.retryReleaseRun(id);
+      if (!release) {
+        throw new AppRuntimeError(404, "Release run not found");
+      }
+
+      notifyChange();
+      return release;
+    },
+
+    async listGitHubReleases() {
+      const config = await storage.getConfig();
+      if (config.watchedRepos.length === 0) {
+        return [];
+      }
+
+      const octokit = await buildOctokit(config);
+      const perRepo = await Promise.all(
+        config.watchedRepos.map(async (repoSlug): Promise<RepoGitHubReleases | null> => {
+          const parsed = parseRepoSlug(repoSlug);
+          if (!parsed) {
+            return null;
+          }
+
+          try {
+            const summaries = await listReleasesForRepo(octokit, parsed);
+            return {
+              repo: repoSlug,
+              releases: summaries.map((release) => ({
+                id: release.id,
+                tagName: release.tagName,
+                name: release.name,
+                body: release.body,
+                bodyHtml: release.body ? renderGitHubMarkdown(release.body) : null,
+                htmlUrl: release.htmlUrl,
+                draft: release.draft,
+                prerelease: release.prerelease,
+                publishedAt: release.publishedAt,
+              })),
+            };
+          } catch (error) {
+            log.warn(
+              { err: error instanceof Error ? error.message : String(error), repo: repoSlug },
+              "Failed to fetch GitHub releases for repo",
+            );
+            return { repo: repoSlug, releases: [] };
+          }
+        }),
+      );
+
+      return perRepo.filter((entry): entry is RepoGitHubReleases => entry !== null);
+    },
+
+    async startReleaseSocialPost(request) {
+      const config = await storage.getConfig();
+      const preferredAgent = config.codingAgent ?? "codex";
+
+      let input;
+      if (request.kind === "internal") {
+        const run = assertFound(await storage.getReleaseRun(request.releaseRunId), "Release run not found");
+        input = {
+          repo: run.repo,
+          tagName: run.proposedVersion ?? `run-${run.id.slice(0, 8)}`,
+          releaseName: run.releaseTitle,
+          notes: run.releaseNotes,
+          source: "internal" as const,
+          publishedAt: run.completedAt,
+          includedPrs: run.includedPrs.map((pr) => ({
+            number: pr.number,
+            title: pr.title,
+            author: pr.author,
+          })),
+        };
+      } else {
+        const parsed = parseRepoSlug(request.repo);
+        if (!parsed) {
+          throw new AppRuntimeError(400, "Invalid repository slug");
+        }
+        const octokit = await buildOctokit(config);
+        const releases = await listReleasesForRepo(octokit, parsed);
+        const found = releases.find((r) => r.id === request.githubReleaseId);
+        if (!found) {
+          throw new AppRuntimeError(404, "GitHub release not found");
+        }
+        input = {
+          repo: request.repo,
+          tagName: found.tagName,
+          releaseName: found.name,
+          notes: found.body,
+          source: "github" as const,
+          publishedAt: found.publishedAt,
+          includedPrs: [],
+        };
+      }
+
+      const jobId = randomUUID();
+      const job: ReleaseSocialPost = {
+        jobId,
+        status: "generating",
+        twitter: null,
+        linkedin: null,
+        raw: null,
+        error: null,
+        startedAt: new Date().toISOString(),
+        completedAt: null,
+      };
+      socialPostJobs.set(jobId, job);
+
+      void (async () => {
+        try {
+          const output = await generateReleaseSocialPost({ input, preferredAgent });
+          socialPostJobs.set(jobId, {
+            ...job,
+            status: "done",
+            twitter: output.twitter,
+            linkedin: output.linkedin,
+            raw: output.raw,
+            completedAt: new Date().toISOString(),
+          });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          log.warn({ err: message, jobId }, "Release social post generation failed");
+          socialPostJobs.set(jobId, {
+            ...job,
+            status: "error",
+            error: message.slice(0, 2000),
+            completedAt: new Date().toISOString(),
+          });
+        }
+      })();
+
+      return job;
+    },
+
+    async getReleaseSocialPost(jobId) {
+      const job = socialPostJobs.get(jobId);
+      if (!job) {
+        throw new AppRuntimeError(404, "Social post job not found");
+      }
+      return job;
+    },
+  };
+
+  return runtime;
+}
+
+export function isAppRuntimeError(error: unknown): error is AppRuntimeError {
+  return error instanceof AppRuntimeError;
+}
+
+export function isGitHubAwareError(error: unknown): error is GitHubIntegrationError | AppRuntimeError {
+  return error instanceof GitHubIntegrationError || error instanceof AppRuntimeError;
+}

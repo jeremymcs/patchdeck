@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1024" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#262C42"/>
+      <stop offset="1" stop-color="#0F1118"/>
+    </linearGradient>
+    <linearGradient id="cable" x1="218" y1="284" x2="806" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#A5B0FF"/>
+      <stop offset="1" stop-color="#5560E6"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Squircle background (macOS-style continuous corner) -->
+  <path
+    d="M 230 36
+       C 110 36 36 110 36 230
+       L 36 794
+       C 36 914 110 988 230 988
+       L 794 988
+       C 914 988 988 914 988 794
+       L 988 230
+       C 988 110 914 36 794 36
+       Z"
+    fill="url(#bg)"/>
+
+  <!-- Patch cable (drawn first so jacks render on top) -->
+  <path
+    d="M 218 284 Q 512 488 806 512"
+    stroke="url(#cable)"
+    stroke-width="40"
+    stroke-linecap="round"
+    fill="none"/>
+
+  <!-- 3x3 grid of jacks; two are "plugged" (filled) -->
+  <circle cx="218" cy="284" r="58" fill="#A5B0FF"/>
+  <circle cx="512" cy="284" r="40" stroke="#8088AB" stroke-width="22"/>
+  <circle cx="806" cy="284" r="40" stroke="#8088AB" stroke-width="22"/>
+
+  <circle cx="218" cy="512" r="40" stroke="#8088AB" stroke-width="22"/>
+  <circle cx="512" cy="512" r="40" stroke="#8088AB" stroke-width="22"/>
+  <circle cx="806" cy="512" r="58" fill="#A5B0FF"/>
+
+  <circle cx="218" cy="740" r="40" stroke="#8088AB" stroke-width="22"/>
+  <circle cx="512" cy="740" r="40" stroke="#8088AB" stroke-width="22"/>
+  <circle cx="806" cy="740" r="40" stroke="#8088AB" stroke-width="22"/>
+</svg>

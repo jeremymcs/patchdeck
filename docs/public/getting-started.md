@@ -1,0 +1,75 @@
+# Getting Started
+
+Welcome to patchdeck — the autonomous PR babysitter that watches the repositories and pull requests you choose, triages review feedback, and dispatches AI agents to fix code.
+
+## Prerequisites
+
+- **Node.js 22+** — [Download](https://nodejs.org/)
+- **Git** — installed and configured
+- **GitHub auth** — `gh auth login`, `GITHUB_TOKEN`, or one or more saved dashboard tokens
+- **Local AI agent CLI** — either `claude` or `codex` installed and authenticated
+
+## Installation
+
+Install from npm:
+
+```bash
+npm install -g patchdeck
+```
+
+## Quick Start
+
+### 1. Launch the dashboard
+
+```bash
+patchdeck
+```
+
+This starts the web dashboard at [http://localhost:5001](http://localhost:5001) and opens it in your browser.
+
+### Run from source
+
+If you prefer to run from source instead:
+
+```bash
+git clone https://github.com/jeremymcs/patchdeck.git
+cd patchdeck
+npm install
+npm run dev
+```
+
+### 2. Connect a GitHub repository
+
+1. In the dashboard, click **Add Repository**.
+2. Choose the repository discovery scope:
+   - **My PRs only** keeps the repo on the default scope and auto-discovers only PRs authored by your authenticated GitHub account.
+   - **My PRs + teammates** switches the repo to team-wide discovery and auto-discovers every open PR in that repository.
+3. Add a direct PR URL when you want to track one pull request regardless of the repo's discovery scope.
+4. Add GitHub credentials through the dashboard settings if you are not using `gh auth login` or `GITHUB_TOKEN`.
+
+### 3. Watch patchdeck work
+
+Once connected, patchdeck will:
+
+- **Monitor** matching open pull requests in real time based on each watched repo's scope.
+- **Sync** review comments and change requests.
+- **Triage** feedback into actionable tasks.
+- **Dispatch** AI agents (Claude Code or OpenAI Codex) to fix issues.
+- **Push** the fixes back to the PR branch.
+
+PRs added directly by URL are always tracked, even if the repo stays on **My PRs only**.
+
+## Desktop App
+
+patchdeck is also available as a native desktop application powered by Tauri:
+
+```bash
+npm run tauri:dev    # Development
+npm run tauri:build  # Production build
+```
+
+## Next Steps
+
+- [PR Babysitter](./pr-babysitter.md) — Learn how autonomous PR monitoring works.
+- [Agent Dispatch](./agent-dispatch.md) — Understand how AI agents are dispatched to fix code.
+- [Configuration](./configuration.md) — Customize patchdeck for your workflow.
