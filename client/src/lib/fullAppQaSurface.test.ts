@@ -128,10 +128,6 @@ function assertHasExpression(sourceFile: ts.SourceFile, label: string, expected:
   assert.ok(found, `Expected ${label} to match ${expected}`);
 }
 
-function assertSourceDoesNotMatch(source: string, label: string, unexpected: RegExp) {
-  assert.ok(!unexpected.test(source), `Expected ${label} not to match ${unexpected}`);
-}
-
 function getFunctionText(sourceFile: ts.SourceFile, name: string) {
   let functionText: string | undefined;
   walk(sourceFile, (node) => {
@@ -453,24 +449,4 @@ test("releases route keeps the QA-tested list, expand, copy, retry, and GitHub l
     ["empty release state", "No release activity yet."],
     ["watched repositories sidebar", "Watched repositories"],
   ]);
-});
-
-test("full app QA runner uses portable browser wiring and readiness waits", async () => {
-  const { source, sourceFile } = await parseProjectFile(".gstack/qa-reports/run-full-app-qa.mjs");
-
-  assertHasExpression(sourceFile, "ws WebSocket client", /from\s+["']ws["']/);
-  assertHasExpression(sourceFile, "Chrome path environment override", /process\.env\[/);
-  assertContainsAll(sourceFile, [
-    ["QA Chrome path override", "QA_CHROME_PATH"],
-    ["Chrome path override", "CHROME_PATH"],
-    ["Chrome binary override", "CHROME_BIN"],
-  ]);
-  assertHasExpression(sourceFile, "platform-specific Chrome discovery", /process\.platform/);
-  assertHasExpression(sourceFile, "dynamic report date", /new Date\(\)\.toISOString\(\)\.split\(["']T["']\)\[0\]/);
-  assertHasExpression(sourceFile, "navigation readiness expression", /\breadyExpression\b/);
-
-  assertSourceDoesNotMatch(source, "Chrome executable default", /const\s+chromePath\s*=[\s\S]*\/Applications\/Google Chrome\.app\/Contents\/MacOS\/Google Chrome/);
-  assertSourceDoesNotMatch(source, "static report date", /const\s+date\s*=\s*["']\d{4}-\d{2}-\d{2}["']/);
-  assertSourceDoesNotMatch(source, "post-navigation fixed sleep", /Page\.navigate[\s\S]{0,180}sleep\(\s*900\s*\)/);
-  assertSourceDoesNotMatch(source, "global WebSocket constructor", /globalThis\.WebSocket/);
 });

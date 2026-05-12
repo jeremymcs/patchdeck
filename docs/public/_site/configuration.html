@@ -250,7 +250,7 @@ patchdeck --no-log-file
 <li><strong>Babysitter tuning</strong> — Control polling, batching, merge-conflict handling, release automation, and automatic docs assessment.</li>
 <li><strong>Runtime drain mode</strong> — Pause new background automation and manual agent-triggering actions while allowing in-flight work to finish. During drain mode, the dashboard disables Run now/apply, feedback retry, Ask Agent, manual Release, and release retry actions; matching API calls return <code>409</code> instead of queueing new agent work.</li>
 <li><strong>Ignored bots</strong> — Add or remove bot logins whose comments and reviews should be ignored.</li>
-<li><strong>PR comment branding</strong> — Toggle whether agent-authored GitHub PR comments link back to patchdeck and include the <code>Posted by patchdeck</code> footer.</li>
+<li><strong>PR comment branding</strong> — Customize the app name shown in agent-authored GitHub PR comments, or remove that signature entirely. Toggle whether the signature links back to patchdeck and includes the <code>Posted by patchdeck</code> footer.</li>
 <li><strong>GitHub progress replies</strong> — Toggle whether the babysitter posts public Accepted/running/completed status replies while working through review comments.</li>
 <li><strong>CI healing</strong> — Enable autonomous CI repair and tune retry/session limits.</li>
 <li><strong>Deployment healing</strong> — Not yet exposed in the dashboard; use <code>PATCH /api/config</code> for the deployment-healing keys listed below.</li>
@@ -299,7 +299,7 @@ dashboard shows an update banner with a link to the matching release page and
 step-by-step npm update instructions:</p>
 <ol>
 <li>Stop the running <code>patchdeck</code> process.</li>
-<li>Run <code>npm install -g patchdeck@latest</code>.</li>
+<li>Run <code>npm install -g @jeremymcs/patchdeck@latest</code>.</li>
 <li>Start <code>patchdeck</code> again.</li>
 </ol>
 <p>Selecting <code>dismiss for now</code> stores a release-scoped key in browser
@@ -309,7 +309,7 @@ session or publishing a newer release makes the banner eligible to appear
 again. If the app is running a non-semver build such as <code>dev</code>, or if the
 release check fails, the banner stays hidden and the API falls back quietly.</p>
 <h2>PR Comment Branding</h2>
-<p>Agent-authored GitHub PR comments posted by the babysitter — follow-up replies on review threads, agent-command acknowledgements, status updates, and CI alerts — are branded as patchdeck. Each comment references the app name and, by default, appends a <code>Posted by [patchdeck](https://github.com/jeremymcs/patchdeck)</code> footer that links back to this repository.</p>
+<p>Agent-authored GitHub PR comments posted by the babysitter — follow-up replies on review threads, agent-command acknowledgements, status updates, and CI alerts — are branded as patchdeck by default. Each comment references the configured app name and, by default, appends a <code>Posted by [patchdeck](https://github.com/jeremymcs/patchdeck)</code> footer that links back to this repository. Set the GitHub reply signature to a different name to replace <code>patchdeck</code>, or leave it blank to remove the visible app signature from GitHub replies and footers.</p>
 <table>
 <thead>
 <tr>
@@ -319,9 +319,14 @@ release check fails, the banner stays hidden and the API falls back quietly.</p>
 </tr>
 </thead>
 <tbody><tr>
+<td><code>GitHub reply signature</code></td>
+<td><code>patchdeck</code></td>
+<td>App name shown in public GitHub replies and <code>Posted by ...</code> footers. Leave blank to remove the signature.</td>
+</tr>
+<tr>
 <td><code>Repository links in PR comments</code></td>
 <td><code>true</code></td>
-<td>When enabled, babysitter comments render the app name as a Markdown link to the patchdeck repo and append the <code>Posted by patchdeck</code> footer. When disabled, comments reference <code>patchdeck</code> as plain text and omit the footer.</td>
+<td>When enabled, babysitter comments render the configured app name as a Markdown link to the patchdeck repo and append the <code>Posted by ...</code> footer. When disabled, comments reference the configured app name as plain text and omit the footer.</td>
 </tr>
 <tr>
 <td><code>GitHub progress replies</code></td>
@@ -329,7 +334,7 @@ release check fails, the banner stays hidden and the API falls back quietly.</p>
 <td>When enabled, the babysitter posts public status replies on accepted review feedback as it moves from queued to running, completed, and resolved. When disabled, it still posts the final follow-up reply without intermediate public progress updates.</td>
 </tr>
 </tbody></table>
-<p>These toggles are available in the dashboard settings page and as <code>includeRepositoryLinksInGitHubComments</code> plus <code>postGitHubProgressReplies</code> (booleans) in <code>GET /api/config</code>, <code>PATCH /api/config</code>, and the MCP <code>update_config</code> tool. Turning repository links off is useful for private forks or environments where operators do not want outgoing PR comments to link to the upstream patchdeck repository.</p>
+<p>These settings are available in the dashboard settings page and as <code>githubCommentAppName</code> (string), <code>includeRepositoryLinksInGitHubComments</code> (boolean), and <code>postGitHubProgressReplies</code> (boolean) in <code>GET /api/config</code>, <code>PATCH /api/config</code>, and the MCP <code>update_config</code> tool. Turning repository links off is useful for private forks or environments where operators do not want outgoing PR comments to link to the upstream patchdeck repository.</p>
 <h2>CI Healing Settings</h2>
 <p>patchdeck can track failing CI checks as first-class healing sessions and, when enabled, dispatch bounded repair attempts in isolated worktrees.</p>
 <table>

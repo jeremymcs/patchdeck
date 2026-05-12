@@ -14,7 +14,7 @@ Welcome to patchdeck — the autonomous PR babysitter that watches the repositor
 Install from npm:
 
 ```bash
-npm install -g patchdeck
+npm install -g @jeremymcs/patchdeck
 ```
 
 ## Quick Start

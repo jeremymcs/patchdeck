@@ -108,7 +108,7 @@ dashboard shows an update banner with a link to the matching release page and
 step-by-step npm update instructions:
 
 1. Stop the running `patchdeck` process.
-2. Run `npm install -g patchdeck@latest`.
+2. Run `npm install -g @jeremymcs/patchdeck@latest`.
 3. Start `patchdeck` again.
 
 Selecting `dismiss for now` stores a release-scoped key in browser

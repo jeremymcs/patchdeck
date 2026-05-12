@@ -44,16 +44,15 @@ test("evaluateFixNecessityWithAgent throws a clear error when codex writes no ou
     tempRoot,
     process.platform === "win32" ? "codex.exe" : "codex",
   );
-  const exitHookPath = path.join(tempRoot, "exit-immediately.cjs");
   const originalPath = process.env.PATH;
-  const originalNodeOptions = process.env.NODE_OPTIONS;
 
   try {
-    await copyFile(process.execPath, fakeCodexPath);
-    await writeFile(exitHookPath, "process.exit(0);\n", "utf8");
-    process.env.NODE_OPTIONS = [`--require=${exitHookPath}`, originalNodeOptions]
-      .filter(Boolean)
-      .join(" ");
+    if (process.platform === "win32") {
+      await writeFile(fakeCodexPath, "@echo off\r\nexit /b 0\r\n", "utf8");
+    } else {
+      await writeFile(fakeCodexPath, "#!/bin/sh\nexit 0\n", "utf8");
+      await chmod(fakeCodexPath, 0o755);
+    }
     process.env.PATH = [tempRoot, originalPath].filter(Boolean).join(path.delimiter);
 
     await assert.rejects(
@@ -66,11 +65,6 @@ test("evaluateFixNecessityWithAgent throws a clear error when codex writes no ou
       /without writing expected output file/,
     );
   } finally {
-    if (originalNodeOptions === undefined) {
-      delete process.env.NODE_OPTIONS;
-    } else {
-      process.env.NODE_OPTIONS = originalNodeOptions;
-    }
     process.env.PATH = originalPath;
     await rm(tempRoot, { recursive: true, force: true });
   }

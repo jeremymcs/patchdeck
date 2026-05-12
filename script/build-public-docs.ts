@@ -468,7 +468,7 @@ function renderLandingPage(context: RenderContext, docs: DocMeta[]): string {
   <div class="overflow-hidden border border-dark-700 bg-dark-800">
     <div class="overflow-x-auto p-6">
       <pre class="font-mono text-sm leading-relaxed text-gray-300"><code><span class="text-gray-500"># Install globally from npm</span>
-<span class="text-white">npm install -g patchdeck</span>
+<span class="text-white">npm install -g @jeremymcs/patchdeck</span>
 
 <span class="text-gray-500"># Start the dashboard</span>
 <span class="text-white">patchdeck</span></code></pre>
