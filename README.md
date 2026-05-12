@@ -10,7 +10,9 @@ PatchDeck is a local-first GitHub PR babysitter. It watches the pull requests yo
 
 If you regularly lose time to review comments, flaky checks, merge conflicts, and back-and-forth cleanup before merge, this is the tool for that.
 
-<!-- TODO: drop a fresh screenshot of the PatchDeck dashboard here. -->
+![PatchDeck PRs dashboard](docs/assets/PatchDeck-PRs.png)
+
+![PatchDeck Issues dashboard](docs/assets/PatchDeck-Issues.png)
 
 > ⚠ PatchDeck helps developers ship high-quality code fast, and the tradeoff is heavy coding-agent usage. Expect it to use a lot of tokens, which can increase your AI provider costs. It's built for tokenmaxing.
 
