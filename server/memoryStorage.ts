@@ -198,6 +198,19 @@ export class MemStorage implements IStorage {
     return entry;
   }
 
+  async addLogToFile(
+    prId: string,
+    level: "info" | "warn" | "error",
+    message: string,
+    details?: {
+      runId?: string | null;
+      phase?: string | null;
+      metadata?: Record<string, unknown> | null;
+    },
+  ): Promise<LogEntry> {
+    return createLogEntry(prId, level, message, details);
+  }
+
   async clearLogs(prId?: string): Promise<void> {
     if (prId) {
       this.logs = this.logs.filter((l) => l.prId !== prId);
@@ -205,6 +218,16 @@ export class MemStorage implements IStorage {
     }
 
     this.logs = [];
+  }
+
+  async pruneLogs(options: { olderThan?: string; messagePrefix?: string }): Promise<number> {
+    const before = this.logs.length;
+    this.logs = this.logs.filter((entry) => {
+      if (options.olderThan && entry.timestamp < options.olderThan) return false;
+      if (options.messagePrefix && entry.message.startsWith(options.messagePrefix)) return false;
+      return true;
+    });
+    return before - this.logs.length;
   }
 
   async getConfig(): Promise<Config> {

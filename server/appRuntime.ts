@@ -39,6 +39,7 @@ import { BackgroundJobDispatcher } from "./backgroundJobDispatcher";
 import { BackgroundJobQueue, buildBackgroundJobDedupeKey } from "./backgroundJobQueue";
 import { buildActivityPayload, readActivityPayload } from "./activityPayload";
 import { createWatcherScheduler, type WatcherScheduler } from "./watcherScheduler";
+import { startLogsRetentionJob, type RetentionJobHandle } from "./logsRetention";
 import { ReleaseManager } from "./releaseManager";
 import type { ReleaseAgentPullSummary } from "./releaseAgent";
 import { DeploymentHealingManager } from "./deploymentHealingManager";
@@ -625,6 +626,7 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
 
   let watcherTimer: NodeJS.Timeout | null = null;
   let watcherIntervalMs = 0;
+  let logsRetentionJob: RetentionJobHandle | null = null;
   const watcherScheduler = dependencies.watcherScheduler ?? createWatcherScheduler(
     async () => {
       await scheduleBackgroundJob(
@@ -1253,6 +1255,7 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
 
       if (startBackgroundServices) {
         await backgroundJobDispatcher.start();
+        logsRetentionJob = startLogsRetentionJob(storage);
       }
 
       if (startWatcher) {
@@ -1265,6 +1268,10 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
     stop() {
       started = false;
       backgroundJobDispatcher.stop();
+      if (logsRetentionJob) {
+        logsRetentionJob.stop();
+        logsRetentionJob = null;
+      }
       if (watcherTimer) {
         clearInterval(watcherTimer);
         watcherTimer = null;

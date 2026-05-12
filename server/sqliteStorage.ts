@@ -1644,6 +1644,27 @@ export class SqliteStorage implements IStorage {
     return entry;
   }
 
+  async addLogToFile(
+    prId: string,
+    level: "info" | "warn" | "error",
+    message: string,
+    details?: {
+      runId?: string | null;
+      phase?: string | null;
+      metadata?: Record<string, unknown> | null;
+    },
+  ): Promise<LogEntry> {
+    const entry = createLogEntry(prId, level, message, details);
+    const pr = this.get<{ repo: string; number: number }>(
+      "SELECT repo, number FROM prs WHERE id = ?",
+      prId,
+    );
+    if (pr) {
+      appendLogFile(this.logRootDir, pr, entry);
+    }
+    return entry;
+  }
+
   async clearLogs(prId?: string): Promise<void> {
     if (prId) {
       this.run("DELETE FROM logs WHERE pr_id = ?", prId);
@@ -1651,6 +1672,30 @@ export class SqliteStorage implements IStorage {
     }
 
     this.exec("DELETE FROM logs");
+  }
+
+  vacuum(): void {
+    this.exec("VACUUM");
+  }
+
+  async pruneLogs(options: { olderThan?: string; messagePrefix?: string }): Promise<number> {
+    const clauses: string[] = [];
+    const params: unknown[] = [];
+
+    if (options.olderThan) {
+      clauses.push("datetime(timestamp) < datetime(?)");
+      params.push(options.olderThan);
+    }
+    if (options.messagePrefix) {
+      clauses.push("message LIKE ?");
+      params.push(`${options.messagePrefix}%`);
+    }
+    if (clauses.length === 0) {
+      return 0;
+    }
+
+    const result = this.run(`DELETE FROM logs WHERE ${clauses.join(" AND ")}`, ...params as SQLInputValue[]);
+    return Number(result.changes ?? 0);
   }
 
   async getConfig(): Promise<Config> {

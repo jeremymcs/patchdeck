@@ -6014,17 +6014,12 @@ test("babysitPR skips conflict resolution when PR is mergeable", async () => {
   assert.equal(mergeAttempted, false, "Should not attempt merge when PR is mergeable");
   assert.equal(updated?.status, "watching");
   assert.ok(!logs.some((log) => log.phase === "conflict"));
-  const stderrLogs = logs.filter((log) => log.phase === "agent" && log.metadata?.stream === "stderr");
-  assert.ok(stderrLogs.length > 0);
-  assert.ok(stderrLogs.every((log) => log.level === "info"));
-  assert.ok(stderrLogs.some((log) => log.message === "[stderr] stderr line 1"));
-  assert.ok(logs.some((log) =>
-    log.level === "info"
-    && log.phase === "agent"
-    && log.message.includes("output truncated after")
-    && log.metadata?.truncated === true
-  ));
-  assert.ok(!logs.some((log) => log.message.includes("stderr line 121")));
+  // Stderr is intentionally not persisted to the logs DB (file-only); only stdout
+  // and higher-level info/warn lines should land here.
+  const stderrLogs = logs.filter((log) => log.metadata?.stream === "stderr");
+  assert.equal(stderrLogs.length, 0, "stderr chunks must stay out of the logs DB");
+  const stdoutLogs = logs.filter((log) => log.metadata?.stream === "stdout");
+  assert.ok(stdoutLogs.some((log) => log.message === "[stdout] applied fix"));
 
   delete process.env.CODEFACTORY_HOME;
 });
