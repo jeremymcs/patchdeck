@@ -265,6 +265,7 @@ export class MemStorage implements IStorage {
       repo,
       autoCreateReleases: false,
       ownPrsOnly: true,
+      issueAutoEvaluate: false,
       issueAutoWork: false,
     };
     const next = applyWatchedRepoUpdate(existing, updates);
@@ -298,6 +299,7 @@ export class MemStorage implements IStorage {
           repo,
           autoCreateReleases: false,
           ownPrsOnly: true,
+          issueAutoEvaluate: false,
           issueAutoWork: false,
         });
       }

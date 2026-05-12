@@ -1171,12 +1171,14 @@ test("GET/PATCH /api/repos/settings exposes repo-level settings", async () => {
       repo: string;
       autoCreateReleases: boolean;
       ownPrsOnly: boolean;
+      issueAutoEvaluate: boolean;
       issueAutoWork: boolean;
     }>;
     assert.deepEqual(initial, [{
       repo: "acme/widgets",
       autoCreateReleases: false,
       ownPrsOnly: true,
+      issueAutoEvaluate: false,
       issueAutoWork: false,
     }]);
 
@@ -1197,12 +1199,16 @@ test("GET/PATCH /api/repos/settings exposes repo-level settings", async () => {
       repo: string;
       autoCreateReleases: boolean;
       ownPrsOnly: boolean;
+      issueAutoEvaluate: boolean;
       issueAutoWork: boolean;
     };
+    // Enabling auto-work implicitly enables auto-evaluate — they're dependent settings,
+    // not independent flags. Verifies coercion in applyWatchedRepoUpdate.
     assert.deepEqual(updated, {
       repo: "acme/widgets",
       autoCreateReleases: false,
       ownPrsOnly: false,
+      issueAutoEvaluate: true,
       issueAutoWork: true,
     });
 
@@ -1211,6 +1217,7 @@ test("GET/PATCH /api/repos/settings exposes repo-level settings", async () => {
       repo: "acme/widgets",
       autoCreateReleases: false,
       ownPrsOnly: false,
+      issueAutoEvaluate: true,
       issueAutoWork: true,
     });
   } finally {
@@ -1242,14 +1249,47 @@ test("PATCH /api/repos/settings can update only ownPrsOnly", async () => {
       repo: string;
       autoCreateReleases: boolean;
       ownPrsOnly: boolean;
+      issueAutoEvaluate: boolean;
       issueAutoWork: boolean;
     };
     assert.deepEqual(updated, {
       repo: "acme/widgets",
       autoCreateReleases: false,
       ownPrsOnly: false,
+      issueAutoEvaluate: false,
       issueAutoWork: false,
     });
+  } finally {
+    await harness.close();
+  }
+});
+
+test("PATCH /api/repos/settings accepts issueAutoEvaluate independently of auto-work", async () => {
+  // Independence matters: users should be able to evaluate without committing to running the agent.
+  const harness = await createHarness();
+  await harness.storage.updateRepoSettings("acme/widgets", {
+    autoCreateReleases: false,
+    ownPrsOnly: true,
+  });
+
+  try {
+    const updateResponse = await fetch(`${harness.baseUrl}/api/repos/settings`, {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        repo: "acme/widgets",
+        issueAutoEvaluate: true,
+      }),
+    });
+    assert.equal(updateResponse.status, 200);
+    const updated = await updateResponse.json() as {
+      issueAutoEvaluate: boolean;
+      issueAutoWork: boolean;
+    };
+    assert.equal(updated.issueAutoEvaluate, true);
+    assert.equal(updated.issueAutoWork, false);
   } finally {
     await harness.close();
   }
@@ -1463,7 +1503,7 @@ test("GET and POST /api/issues proxy the runtime issue monitor and work action",
     listRepos: async () => [],
     listRepoSettings: async () => [],
     addRepo: async () => ({ repo: "acme/widgets" }),
-    updateRepoSettings: async () => ({ repo: "acme/widgets", autoCreateReleases: false, ownPrsOnly: true, issueAutoWork: false }),
+    updateRepoSettings: async () => ({ repo: "acme/widgets", autoCreateReleases: false, ownPrsOnly: true, issueAutoEvaluate: false, issueAutoWork: false }),
     syncRepos: async () => ({ ok: true }),
     createManualRelease: async () => undefined,
     listPRs: async () => [],

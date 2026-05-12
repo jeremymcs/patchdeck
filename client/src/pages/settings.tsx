@@ -35,6 +35,10 @@ function getIssueWorkMode(issueAutoWork?: boolean): IssueWorkMode {
   return issueAutoWork ? "auto" : "manual";
 }
 
+function getIssueEvaluateMode(issueAutoEvaluate?: boolean): IssueWorkMode {
+  return issueAutoEvaluate ? "auto" : "manual";
+}
+
 function repoTestId(repo: string): string {
   return repo.replace("/", "-");
 }
@@ -209,7 +213,7 @@ export default function Settings() {
   });
 
   const updateRepoSettingsMutation = useMutation({
-    mutationFn: async (updates: { repo: string; autoCreateReleases?: boolean; ownPrsOnly?: boolean; issueAutoWork?: boolean }) => {
+    mutationFn: async (updates: { repo: string; autoCreateReleases?: boolean; ownPrsOnly?: boolean; issueAutoEvaluate?: boolean; issueAutoWork?: boolean }) => {
       const res = await apiRequest("PATCH", "/api/repos/settings", updates);
       return res.json();
     },
@@ -455,7 +459,7 @@ export default function Settings() {
                             {repo.repo}
                           </a>
                           <div className="mt-1 text-[11px] text-muted-foreground">
-                            {repo.ownPrsOnly === false ? "Tracking team PRs" : "Tracking your PRs"} · issue work {repo.issueAutoWork ? "auto" : "manual"}
+                            {repo.ownPrsOnly === false ? "Tracking team PRs" : "Tracking your PRs"} · issue evaluate {repo.issueAutoEvaluate ? "auto" : "manual"} · issue work {repo.issueAutoWork ? "auto" : "manual"}
                           </div>
                         </div>
                         <button
@@ -497,7 +501,15 @@ export default function Settings() {
                           Remove data
                         </button>
                       </div>
-                      <div className="mt-4 grid gap-4 md:grid-cols-3">
+                      {config?.autoIssues === false && (
+                        <div
+                          data-testid={`tracked-repo-global-issues-off-${repo.repo.replace("/", "-")}`}
+                          className="mt-3 border border-warning-border bg-warning-muted px-3 py-2 text-[11px] text-warning-foreground"
+                        >
+                          Global Issues auto is off — these per-repo issue controls are paused. Re-enable from the AUTO MODE menu.
+                        </div>
+                      )}
+                      <div className="mt-4 grid gap-4 md:grid-cols-4">
                         <div>
                           <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
                             Track automatically
@@ -517,6 +529,23 @@ export default function Settings() {
                         </div>
                         <div>
                           <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                            Issue auto-evaluate
+                          </div>
+                          <IssueWorkModeControl
+                            value={getIssueEvaluateMode(repo.issueAutoEvaluate)}
+                            onChange={(value) =>
+                              updateRepoSettingsMutation.mutate({
+                                repo: repo.repo,
+                                issueAutoEvaluate: value === "auto",
+                              })
+                            }
+                            disabled={updateRepoSettingsMutation.isPending || repo.issueAutoWork}
+                            name={`tracked-repo-issue-evaluate-mode-${repo.repo}`}
+                            testIdPrefix={`tracked-repo-issue-evaluate-mode-${repo.repo.replace("/", "-")}`}
+                          />
+                        </div>
+                        <div>
+                          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
                             Issue work mode
                           </div>
                           <IssueWorkModeControl
@@ -531,6 +560,9 @@ export default function Settings() {
                             name={`tracked-repo-issue-work-mode-${repo.repo}`}
                             testIdPrefix={`tracked-repo-issue-work-mode-${repo.repo.replace("/", "-")}`}
                           />
+                          <div className="mt-1 text-[10px] text-muted-foreground">
+                            Auto-work also enables auto-evaluate.
+                          </div>
                         </div>
                         <label className="flex items-end gap-2 text-[11px] uppercase tracking-wider text-muted-foreground">
                           <input

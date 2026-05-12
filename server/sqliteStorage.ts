@@ -87,6 +87,8 @@ type ConfigRow = {
   deployment_check_delay_ms: number;
   deployment_check_timeout_ms: number;
   deployment_check_poll_interval_ms: number;
+  max_concurrent_issue_evaluations: number;
+  max_concurrent_issue_work: number;
   trusted_reviewers_json: string;
   ignored_bots_json: string;
 };
@@ -152,6 +154,7 @@ type WatchedRepoRow = {
   repo: string;
   auto_create_releases: number;
   own_prs_only: number;
+  issue_auto_evaluate: number;
   issue_auto_work: number;
 };
 
@@ -853,6 +856,10 @@ export class SqliteStorage implements IStorage {
     this.ensureColumn("watched_repos", "auto_create_releases", "INTEGER NOT NULL DEFAULT 0");
     this.ensureColumn("watched_repos", "own_prs_only", "INTEGER NOT NULL DEFAULT 1");
     this.ensureColumn("watched_repos", "issue_auto_work", "INTEGER NOT NULL DEFAULT 0");
+    this.ensureColumn("watched_repos", "issue_auto_evaluate", "INTEGER NOT NULL DEFAULT 0");
+    this.exec("UPDATE watched_repos SET issue_auto_evaluate = 1 WHERE issue_auto_work = 1 AND issue_auto_evaluate = 0");
+    this.ensureColumn("config", "max_concurrent_issue_evaluations", "INTEGER NOT NULL DEFAULT 2");
+    this.ensureColumn("config", "max_concurrent_issue_work", "INTEGER NOT NULL DEFAULT 1");
     this.ensureColumn("release_runs", "source", "TEXT NOT NULL DEFAULT 'automatic'");
     this.ensureColumn("prs", "watch_enabled", "INTEGER NOT NULL DEFAULT 1");
     this.ensureColumn("prs", "docs_assessment_json", "TEXT");
@@ -959,6 +966,8 @@ export class SqliteStorage implements IStorage {
       deploymentCheckDelayMs: row.deployment_check_delay_ms ?? DEFAULT_CONFIG.deploymentCheckDelayMs,
       deploymentCheckTimeoutMs: row.deployment_check_timeout_ms ?? DEFAULT_CONFIG.deploymentCheckTimeoutMs,
       deploymentCheckPollIntervalMs: row.deployment_check_poll_interval_ms ?? DEFAULT_CONFIG.deploymentCheckPollIntervalMs,
+      maxConcurrentIssueEvaluations: row.max_concurrent_issue_evaluations ?? DEFAULT_CONFIG.maxConcurrentIssueEvaluations,
+      maxConcurrentIssueWork: row.max_concurrent_issue_work ?? DEFAULT_CONFIG.maxConcurrentIssueWork,
       watchedRepos,
       trustedReviewers: JSON.parse(row.trusted_reviewers_json),
       ignoredBots: JSON.parse(row.ignored_bots_json),
@@ -1003,9 +1012,11 @@ export class SqliteStorage implements IStorage {
           deployment_check_delay_ms,
           deployment_check_timeout_ms,
           deployment_check_poll_interval_ms,
+          max_concurrent_issue_evaluations,
+          max_concurrent_issue_work,
           trusted_reviewers_json,
           ignored_bots_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           github_token = excluded.github_token,
           github_tokens_json = excluded.github_tokens_json,
@@ -1033,6 +1044,8 @@ export class SqliteStorage implements IStorage {
           deployment_check_delay_ms = excluded.deployment_check_delay_ms,
           deployment_check_timeout_ms = excluded.deployment_check_timeout_ms,
           deployment_check_poll_interval_ms = excluded.deployment_check_poll_interval_ms,
+          max_concurrent_issue_evaluations = excluded.max_concurrent_issue_evaluations,
+          max_concurrent_issue_work = excluded.max_concurrent_issue_work,
           trusted_reviewers_json = excluded.trusted_reviewers_json,
         ignored_bots_json = excluded.ignored_bots_json
       `,
@@ -1063,6 +1076,8 @@ export class SqliteStorage implements IStorage {
         config.deploymentCheckDelayMs,
         config.deploymentCheckTimeoutMs,
         config.deploymentCheckPollIntervalMs,
+        config.maxConcurrentIssueEvaluations,
+        config.maxConcurrentIssueWork,
         JSON.stringify(config.trustedReviewers),
         JSON.stringify(config.ignoredBots),
       );
@@ -1071,10 +1086,11 @@ export class SqliteStorage implements IStorage {
       for (const repo of config.watchedRepos) {
         const settings = watchedRepoSettings.get(repo);
         this.run(
-          "INSERT INTO watched_repos (repo, auto_create_releases, own_prs_only, issue_auto_work) VALUES (?, ?, ?, ?)",
+          "INSERT INTO watched_repos (repo, auto_create_releases, own_prs_only, issue_auto_evaluate, issue_auto_work) VALUES (?, ?, ?, ?, ?)",
           repo,
           settings?.auto_create_releases ?? 0,
           settings?.own_prs_only ?? 1,
+          settings?.issue_auto_evaluate ?? 0,
           settings?.issue_auto_work ?? 0,
         );
       }
@@ -1086,13 +1102,14 @@ export class SqliteStorage implements IStorage {
       repo: row.repo,
       autoCreateReleases: Boolean(row.auto_create_releases),
       ownPrsOnly: Boolean(row.own_prs_only ?? 1),
+      issueAutoEvaluate: Boolean(row.issue_auto_evaluate ?? 0),
       issueAutoWork: Boolean(row.issue_auto_work ?? 0),
     };
   }
 
   private getWatchedRepoRows(): WatchedRepoRow[] {
     return this.all<WatchedRepoRow>(
-      "SELECT repo, auto_create_releases, own_prs_only, issue_auto_work FROM watched_repos ORDER BY repo ASC",
+      "SELECT repo, auto_create_releases, own_prs_only, issue_auto_evaluate, issue_auto_work FROM watched_repos ORDER BY repo ASC",
     );
   }
 
@@ -1721,7 +1738,8 @@ export class SqliteStorage implements IStorage {
              auto_heal_ci, max_healing_attempts_per_session,
              max_healing_attempts_per_fingerprint, max_concurrent_healing_runs, healing_cooldown_ms,
              auto_heal_deployments, deployment_check_delay_ms, deployment_check_timeout_ms,
-             deployment_check_poll_interval_ms, trusted_reviewers_json, ignored_bots_json
+             deployment_check_poll_interval_ms, max_concurrent_issue_evaluations, max_concurrent_issue_work,
+             trusted_reviewers_json, ignored_bots_json
       FROM config
       WHERE id = 1
     `);
@@ -1742,7 +1760,7 @@ export class SqliteStorage implements IStorage {
 
   async getRepoSettings(repo: string): Promise<WatchedRepo | undefined> {
     const row = this.get<WatchedRepoRow>(
-      "SELECT repo, auto_create_releases, own_prs_only, issue_auto_work FROM watched_repos WHERE repo = ?",
+      "SELECT repo, auto_create_releases, own_prs_only, issue_auto_evaluate, issue_auto_work FROM watched_repos WHERE repo = ?",
       repo,
     );
     return row ? this.parseWatchedRepoRow(row) : undefined;
@@ -1756,6 +1774,7 @@ export class SqliteStorage implements IStorage {
       repo,
       autoCreateReleases: false,
       ownPrsOnly: true,
+      issueAutoEvaluate: false,
       issueAutoWork: false,
     };
     const next = applyWatchedRepoUpdate(existing, updates);
@@ -1763,16 +1782,18 @@ export class SqliteStorage implements IStorage {
     this.withWriteTransaction(() => {
       this.run(
         `
-          INSERT INTO watched_repos (repo, auto_create_releases, own_prs_only, issue_auto_work)
-          VALUES (?, ?, ?, ?)
+          INSERT INTO watched_repos (repo, auto_create_releases, own_prs_only, issue_auto_evaluate, issue_auto_work)
+          VALUES (?, ?, ?, ?, ?)
           ON CONFLICT(repo) DO UPDATE SET
             auto_create_releases = excluded.auto_create_releases,
             own_prs_only = excluded.own_prs_only,
+            issue_auto_evaluate = excluded.issue_auto_evaluate,
             issue_auto_work = excluded.issue_auto_work
         `,
         next.repo,
         Number(next.autoCreateReleases),
         Number(next.ownPrsOnly),
+        Number(next.issueAutoEvaluate),
         Number(next.issueAutoWork),
       );
     });

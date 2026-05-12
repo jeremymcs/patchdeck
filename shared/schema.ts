@@ -584,6 +584,8 @@ export const configSchema = z.object({
   deploymentCheckDelayMs: z.number(),
   deploymentCheckTimeoutMs: z.number(),
   deploymentCheckPollIntervalMs: z.number(),
+  maxConcurrentIssueEvaluations: z.number().int().positive().default(2),
+  maxConcurrentIssueWork: z.number().int().positive().default(1),
   watchedRepos: z.array(z.string()),
   trustedReviewers: z.array(z.string()),
   ignoredBots: z.array(z.string()),
@@ -594,6 +596,7 @@ export const watchedRepoSchema = z.object({
   repo: z.string(),
   autoCreateReleases: z.boolean(),
   ownPrsOnly: z.boolean(),
+  issueAutoEvaluate: z.boolean(),
   issueAutoWork: z.boolean(),
 });
 export type WatchedRepo = z.infer<typeof watchedRepoSchema>;

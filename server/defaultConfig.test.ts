@@ -42,6 +42,8 @@ describe("DEFAULT_CONFIG", () => {
       "deploymentCheckDelayMs",
       "deploymentCheckTimeoutMs",
       "deploymentCheckPollIntervalMs",
+      "maxConcurrentIssueEvaluations",
+      "maxConcurrentIssueWork",
       "watchedRepos",
       "trustedReviewers",
       "ignoredBots",
@@ -100,11 +102,19 @@ describe("DEFAULT_CONFIG", () => {
       "deploymentCheckDelayMs",
       "deploymentCheckTimeoutMs",
       "deploymentCheckPollIntervalMs",
+      "maxConcurrentIssueEvaluations",
+      "maxConcurrentIssueWork",
     ] as const;
     for (const field of numericFields) {
       assert.equal(typeof DEFAULT_CONFIG[field], "number", `${field} should be a number`);
       assert.ok(DEFAULT_CONFIG[field] > 0, `${field} should be positive, got ${DEFAULT_CONFIG[field]}`);
     }
+  });
+
+  it("caps issue evaluation and work concurrency conservatively by default", () => {
+    // Evaluations default to 2 (low, GitHub-API friendly), work default to 1 (matches healing-run cap).
+    assert.equal(DEFAULT_CONFIG.maxConcurrentIssueEvaluations, 2);
+    assert.equal(DEFAULT_CONFIG.maxConcurrentIssueWork, 1);
   });
 
   it("has a valid codingAgent enum value", () => {

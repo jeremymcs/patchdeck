@@ -397,9 +397,13 @@ export function applyWatchedRepoUpdate(
   existing: WatchedRepo,
   updates: Partial<Omit<WatchedRepo, "repo">>,
 ): WatchedRepo {
-  return watchedRepoSchema.parse({
+  const merged = {
     ...existing,
     ...updates,
     repo: existing.repo,
-  });
+  };
+  if (merged.issueAutoWork) {
+    merged.issueAutoEvaluate = true;
+  }
+  return watchedRepoSchema.parse(merged);
 }

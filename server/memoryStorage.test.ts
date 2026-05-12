@@ -484,6 +484,7 @@ describe("MemStorage", () => {
         repo: "acme/widgets",
         autoCreateReleases: false,
         ownPrsOnly: true,
+        issueAutoEvaluate: false,
         issueAutoWork: false,
       }]);
     });
@@ -495,10 +496,12 @@ describe("MemStorage", () => {
         issueAutoWork: true,
       });
 
+      // Enabling auto-work coerces auto-evaluate to true (dependent setting).
       assert.deepEqual(updated, {
         repo: "acme/widgets",
         autoCreateReleases: false,
         ownPrsOnly: false,
+        issueAutoEvaluate: true,
         issueAutoWork: true,
       });
 
@@ -510,6 +513,7 @@ describe("MemStorage", () => {
         repo: "acme/widgets",
         autoCreateReleases: false,
         ownPrsOnly: false,
+        issueAutoEvaluate: true,
         issueAutoWork: true,
       });
     });
