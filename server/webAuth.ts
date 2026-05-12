@@ -32,6 +32,8 @@ interface WebAuthCredentials {
   password: string;
 }
 
+export type WebAuthConfigProvider = () => WebAuthConfig | Promise<WebAuthConfig>;
+
 interface AuthStatus {
   requiresLogin: boolean;
   loginConfigured: boolean;
@@ -65,6 +67,10 @@ function getCredentials(config: WebAuthConfig): WebAuthCredentials | null {
     username: config.username,
     password: config.password,
   };
+}
+
+function isWebAuthConfigProvider(value: WebAuthConfig | WebAuthConfigProvider): value is WebAuthConfigProvider {
+  return typeof value === "function";
 }
 
 function getRequestIp(req: Request): string | undefined {
@@ -139,9 +145,16 @@ function buildSessionPhaseError(phase: string, error: unknown): Error {
   return new Error(`Web auth ${phase} failed: ${message}`, { cause: error });
 }
 
-export function configureWebAuth(app: Express, config = readWebAuthConfig()): WebAuthHandlers {
-  const credentials = getCredentials(config);
-  const sessionSecret = config.sessionSecret ?? crypto.randomBytes(32).toString("hex");
+export function configureWebAuth(
+  app: Express,
+  config: WebAuthConfig | WebAuthConfigProvider = readWebAuthConfig(),
+): WebAuthHandlers {
+  const initialConfig = isWebAuthConfigProvider(config) ? readWebAuthConfig() : config;
+  const sessionSecret = initialConfig.sessionSecret ?? crypto.randomBytes(32).toString("hex");
+  const resolveCredentials = async (): Promise<WebAuthCredentials | null> => {
+    const currentConfig = isWebAuthConfigProvider(config) ? await config() : config;
+    return getCredentials(currentConfig);
+  };
 
   app.use(
     session({
@@ -168,11 +181,23 @@ export function configureWebAuth(app: Express, config = readWebAuthConfig()): We
     legacyHeaders: false,
   });
 
-  app.get("/api/auth/status", (req, res) => {
-    res.json(buildAuthStatus(req, credentials));
+  app.get("/api/auth/status", async (req, res, next) => {
+    try {
+      res.json(buildAuthStatus(req, await resolveCredentials()));
+    } catch (error) {
+      next(error);
+    }
   });
 
   app.post("/api/auth/login", loginLimiter, async (req, res, next) => {
+    let credentials: WebAuthCredentials | null;
+    try {
+      credentials = await resolveCredentials();
+    } catch (error) {
+      next(error);
+      return;
+    }
+
     if (!credentials) {
       res.status(403).json({
         error: "Remote login is not configured",
@@ -207,6 +232,14 @@ export function configureWebAuth(app: Express, config = readWebAuthConfig()): We
   });
 
   app.post("/api/auth/logout", async (req, res, next) => {
+    let credentials: WebAuthCredentials | null;
+    try {
+      credentials = await resolveCredentials();
+    } catch (error) {
+      next(error);
+      return;
+    }
+
     try {
       if (req.session.authenticatedWebUser) {
         await destroySession(req);
@@ -221,9 +254,17 @@ export function configureWebAuth(app: Express, config = readWebAuthConfig()): We
   });
 
   return {
-    apiAccessMiddleware(req: Request, res: Response, next: NextFunction): void {
+    async apiAccessMiddleware(req: Request, res: Response, next: NextFunction): Promise<void> {
       if (isLoopbackRequest(req)) {
         next();
+        return;
+      }
+
+      let credentials: WebAuthCredentials | null;
+      try {
+        credentials = await resolveCredentials();
+      } catch (error) {
+        next(error);
         return;
       }
 

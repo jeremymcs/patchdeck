@@ -907,7 +907,7 @@ export default function Issues() {
                     dangerouslySetInnerHTML={{ __html: selectedIssue.bodyHtml }}
                   />
                 ) : (
-                  <pre className="mt-2 whitespace-pre-wrap border border-border/60 bg-background p-4 text-[12px] leading-6 text-muted-foreground">
+                  <pre className="mt-2 whitespace-pre-wrap break-words border border-border/60 bg-background p-4 text-[12px] leading-6 text-muted-foreground">
                     {selectedIssue.body?.trim() || "No body provided."}
                   </pre>
                 )}

@@ -376,6 +376,9 @@ export function applyConfigUpdate(existing: Config, updates: Partial<Config>): C
   const githubCommentAppName = updates.githubCommentAppName === undefined
     ? existing.githubCommentAppName
     : updates.githubCommentAppName.trim();
+  const webUsername = updates.webUsername === undefined
+    ? existing.webUsername
+    : updates.webUsername.trim();
 
   return configSchema.parse({
     ...existing,
@@ -383,6 +386,7 @@ export function applyConfigUpdate(existing: Config, updates: Partial<Config>): C
     githubTokens: normalizedGithubTokens,
     githubToken: undefined,
     githubCommentAppName,
+    webUsername,
     watchedRepos: updates.watchedRepos ?? existing.watchedRepos,
     trustedReviewers: updates.trustedReviewers ?? existing.trustedReviewers,
     ignoredBots: updates.ignoredBots ?? existing.ignoredBots,

@@ -1,12 +1,13 @@
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
-import { configureWebAuth } from "./webAuth";
+import { configureWebAuth, readWebAuthConfig } from "./webAuth";
 import { createServer } from "http";
 import { childLogger, logger } from "./logger";
 import { migrateLegacyHomeIfNeeded } from "./migrateLegacyHome";
 import { acquireInstanceLock, InstanceLockError } from "./instanceLock";
 import { getCodeFactoryPaths } from "./paths";
+import { getDefaultStorage } from "./storage";
 
 const serverLog = childLogger("server");
 
@@ -49,7 +50,15 @@ app.use(express.urlencoded({ extended: false }));
 // Keep loopback API access local-first while allowing authenticated remote
 // dashboard sessions when web credentials are configured.
 app.set("trust proxy", readTrustProxySetting(process.env.PATCHDECK_TRUST_PROXY ?? process.env.OH_MY_PR_TRUST_PROXY));
-const webAuth = configureWebAuth(app);
+const webAuth = configureWebAuth(app, async () => {
+  const envConfig = readWebAuthConfig();
+  const config = await getDefaultStorage().getConfig();
+  return {
+    username: config.webUsername || envConfig.username,
+    password: config.webPassword || envConfig.password,
+    sessionSecret: envConfig.sessionSecret,
+  };
+});
 app.use("/api", webAuth.apiAccessMiddleware);
 
 export function log(message: string, source = "express") {

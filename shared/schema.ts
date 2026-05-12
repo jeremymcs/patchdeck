@@ -559,6 +559,8 @@ export type DeploymentHealingSession = z.infer<typeof deploymentHealingSessionSc
 export const configSchema = z.object({
   githubTokens: z.array(z.string()),
   githubToken: z.string().optional(),
+  webUsername: z.string(),
+  webPassword: z.string(),
   codingAgent: z.enum(["codex", "claude"]),
   fallbackToNextCodingAgent: z.boolean(),
   maxTurns: z.number(),
