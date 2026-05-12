@@ -117,6 +117,7 @@ test("formatCliHelp reflects the web-first command surface", () => {
   const help = formatCliHelp("1.2.3");
 
   assert.match(help, /PatchDeck v1\.2\.3/);
+  assert.match(help, /PR and issue workbench/);
   assert.match(help, /patchdeck\s+Start the dashboard server/);
   assert.match(help, /patchdeck web\s+Start the dashboard server/);
   assert.match(help, /patchdeck mcp\s+Start the MCP server/);

@@ -1,7 +1,7 @@
 {
   "name": "@jeremymcs/patchdeck",
-  "version": "1.0.0",
-  "description": "Autonomous GitHub PR babysitter that watches repos, triages review feedback, and dispatches AI agents to fix code locally",
+  "version": "1.0.1",
+  "description": "Autonomous GitHub PR and issue workbench that watches repos, triages review feedback, and dispatches agents to fix code locally",
   "keywords": [
     "github",
     "pull-request",

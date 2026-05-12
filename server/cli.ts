@@ -111,8 +111,8 @@ export function formatCliHelp(version: string): string {
   return `
   PatchDeck v${version}
 
-  Autonomous GitHub PR babysitter — watches repos, triages review
-  feedback, and dispatches AI agents to fix code locally.
+  Autonomous GitHub PR and issue workbench — watches repos, triages
+  review feedback, and dispatches agents to fix code locally.
 
   Usage:
     patchdeck              Start the dashboard server
