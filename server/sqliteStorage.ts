@@ -2547,11 +2547,24 @@ export class SqliteStorage implements IStorage {
     return Number(result.changes);
   }
 
-  async clearFailedBackgroundJobs(): Promise<number> {
+  async clearFailedBackgroundJobs(filters: { kind?: BackgroundJobKind; targetId?: string } = {}): Promise<number> {
+    const clauses = ["status = 'failed'"];
+    const values: Array<SQLInputValue> = [];
+
+    if (filters.kind) {
+      clauses.push("kind = ?");
+      values.push(filters.kind);
+    }
+
+    if (filters.targetId) {
+      clauses.push("target_id = ?");
+      values.push(filters.targetId);
+    }
+
     const result = this.run(`
       DELETE FROM background_jobs
-      WHERE status = 'failed'
-    `);
+      WHERE ${clauses.join(" AND ")}
+    `, ...values);
     return Number(result.changes);
   }
 

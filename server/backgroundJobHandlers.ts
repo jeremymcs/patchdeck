@@ -47,6 +47,10 @@ function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function shouldPostInitialIssueWorkNotice(job: BackgroundJob): boolean {
+  return job.attemptCount <= 1;
+}
+
 export function createBackgroundJobHandlers(params: {
   storage: IStorage;
   babysitter?: Pick<PRBabysitter, "runQueuedBabysitPR" | "syncAndBabysitTrackedRepos">;
@@ -245,7 +249,7 @@ export function createBackgroundJobHandlers(params: {
         baseMetadata,
       );
 
-      if (progressRepliesEnabled) {
+      if (progressRepliesEnabled && shouldPostInitialIssueWorkNotice(job)) {
         await postIssueWorkStatusComment(
           octokit,
           parsedRepo,
@@ -310,7 +314,7 @@ export function createBackgroundJobHandlers(params: {
           },
           "error",
         );
-        throw error;
+        throw new TerminalBackgroundJobError(error instanceof Error ? error.message : String(error));
       }
 
       if (!repairResult.accepted) {
@@ -341,7 +345,7 @@ export function createBackgroundJobHandlers(params: {
             "failed",
           );
         }
-        throw new Error(repairResult.rejectionReason ?? "Issue work not accepted");
+        throw new TerminalBackgroundJobError(repairResult.rejectionReason ?? "Issue work not accepted");
       }
 
       await addIssueWorkStageLog(

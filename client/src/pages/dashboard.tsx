@@ -2,7 +2,7 @@ import { memo, useEffect, useMemo, useRef, useState, type MouseEvent } from "rea
 import { Link } from "wouter";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import * as Collapsible from "@radix-ui/react-collapsible";
-import { Activity as ActivityIcon, AlertTriangle, Bot } from "lucide-react";
+import { Activity as ActivityIcon, AlertTriangle, Bot, Trash2 } from "lucide-react";
 import { queryClient, apiRequest, fetchJson } from "@/lib/queryClient";
 import type { ActivityItem, ActivitySnapshot, Config, FeedbackItem, HealingSession, LogEntry, OperatorWarning, PR, PRQuestion, RuntimeState, WatchedRepo } from "@shared/schema";
 import { AppHeader } from "@/components/AppHeader";
@@ -74,6 +74,25 @@ function latestActivityForTarget(activities: ActivityItem[], targetId: string): 
     }
     return latest;
   }, undefined as ActivityItem | undefined);
+}
+
+function parseIssueTargetId(targetId: string): { repo: string; number: number } | null {
+  const separator = targetId.lastIndexOf("#");
+  if (separator === -1) {
+    return null;
+  }
+
+  const repo = targetId.slice(0, separator);
+  const number = Number(targetId.slice(separator + 1));
+  if (!repo || !Number.isInteger(number) || number <= 0) {
+    return null;
+  }
+
+  return { repo, number };
+}
+
+function scrollToDashboardErrors() {
+  document.getElementById("dashboard-errors")?.scrollIntoView({ block: "start" });
 }
 
 function getPRFeedbackFailureReason(pr: PR): string | null {
@@ -368,7 +387,15 @@ function OperatorWarningsBanner({ warnings }: { warnings: OperatorWarning[] }) {
   );
 }
 
-function DashboardErrorsPanel({ activities }: { activities: ActivitySnapshot }) {
+function DashboardErrorsPanel({
+  activities,
+  onClearIssueFailure,
+  isClearingIssueFailure,
+}: {
+  activities: ActivitySnapshot;
+  onClearIssueFailure: (activity: ActivityItem) => void;
+  isClearingIssueFailure: boolean;
+}) {
   if (activities.failed.length === 0) {
     return null;
   }
@@ -403,16 +430,36 @@ function DashboardErrorsPanel({ activities }: { activities: ActivitySnapshot }) 
                   <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{activity.detail}</div>
                 )}
               </div>
-              {activity.targetUrl && (
-                <a
-                  href={activity.targetUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="shrink-0 rounded-md border border-destructive/50 px-2 py-0.5 text-[10px] uppercase tracking-wider text-destructive transition-colors hover:bg-destructive hover:text-background focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
-                >
-                  Open
-                </a>
-              )}
+              <div className="flex shrink-0 flex-wrap justify-end gap-2">
+                {activity.kind === "work_issue" && parseIssueTargetId(activity.targetId) && (
+                  <button
+                    type="button"
+                    onClick={() => onClearIssueFailure(activity)}
+                    disabled={isClearingIssueFailure}
+                    className="inline-flex items-center gap-1 rounded-md border border-destructive/50 px-2 py-0.5 text-[10px] uppercase tracking-wider text-destructive transition-colors hover:bg-destructive hover:text-background disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+                    data-testid="dashboard-clear-issue-failure"
+                  >
+                    {isClearingIssueFailure ? (
+                      "Clearing"
+                    ) : (
+                      <>
+                        <Trash2 className="h-3 w-3" aria-hidden="true" />
+                        Clear
+                      </>
+                    )}
+                  </button>
+                )}
+                {activity.targetUrl && (
+                  <a
+                    href={activity.targetUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="shrink-0 rounded-md border border-destructive/50 px-2 py-0.5 text-[10px] uppercase tracking-wider text-destructive transition-colors hover:bg-destructive hover:text-background focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+                  >
+                    Open
+                  </a>
+                )}
+              </div>
             </div>
             {activity.lastError && (
               <div
@@ -1259,6 +1306,28 @@ export default function Dashboard() {
     },
   });
 
+  const clearIssueFailureMutation = useMutation({
+    mutationFn: async (activity: ActivityItem) => {
+      const issueTarget = parseIssueTargetId(activity.targetId);
+      if (!issueTarget) {
+        throw new Error(`Could not parse issue target ${activity.targetId}`);
+      }
+
+      const res = await apiRequest("DELETE", "/api/issues/work/failures", issueTarget);
+      return res.json() as Promise<{ repo: string; number: number; id: string }>;
+    },
+    onSuccess: (issue) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/activities"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/issues"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/issues/detail", issue.repo, issue.number] });
+      queryClient.invalidateQueries({ queryKey: ["/api/logs", issue.id] });
+      toast({ description: `Cleared failed work attempts for #${issue.number}.` });
+    },
+    onError: (error) => {
+      showMutationError("Could not clear issue failure", error);
+    },
+  });
+
   return (
     <div className="flex min-h-screen flex-col lg:h-screen lg:overflow-hidden">
       <UpdateBanner />
@@ -1294,15 +1363,16 @@ export default function Dashboard() {
               <option value="claude">claude</option>
             </select>
             {activeErrorCount > 0 && (
-              <a
-                href="#dashboard-errors"
+              <button
+                type="button"
+                onClick={scrollToDashboardErrors}
                 data-testid="dashboard-error-pill"
                 className="inline-flex items-center gap-1 rounded-md border border-destructive/50 bg-destructive/10 px-2 py-0.5 text-[11px] uppercase tracking-wider text-destructive transition-colors hover:bg-destructive hover:text-background focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
               >
                 <AlertTriangle className="h-3 w-3" aria-hidden="true" />
                 errors
                 <span className="font-mono">{activeErrorCount}</span>
-              </a>
+              </button>
             )}
             <ActivityMenu
               activities={activities}
@@ -1316,7 +1386,11 @@ export default function Dashboard() {
 
       <OnboardingPanel />
       <OperatorWarningsBanner warnings={activities.warnings} />
-      <DashboardErrorsPanel activities={activities} />
+      <DashboardErrorsPanel
+        activities={activities}
+        onClearIssueFailure={(activity) => clearIssueFailureMutation.mutate(activity)}
+        isClearingIssueFailure={clearIssueFailureMutation.isPending}
+      />
       <DashboardDrainBanner runtimeState={runtimeState} />
 
       <div className="flex flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">

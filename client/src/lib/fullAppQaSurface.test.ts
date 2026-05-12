@@ -278,12 +278,14 @@ test("dashboard keeps the QA-tested PR, repo, feedback, and side-panel workflows
     ["ask submit", "button-ask"],
     ["dashboard error pill", "dashboard-error-pill"],
     ["dashboard errors panel", "dashboard-errors-panel"],
+    ["dashboard clear issue failure", "dashboard-clear-issue-failure"],
   ] satisfies SourceExpectation[]) {
     assertHasTestId(sourceFile, label, testId);
   }
 
   assertHasExpression(sourceFile, "feedback retry action", /\bretryMutation\b/);
   assertHasExpression(sourceFile, "feedback manual decisions", /\[\s*["']accept["']\s*,\s*["']reject["']\s*,\s*["']flag["']\s*\]/);
+  assertHasExpression(sourceFile, "dashboard error scroll action", /\bscrollToDashboardErrors\b/);
 
   for (const [label, endpoint] of [
     ["active PR API", "/api/prs"],
@@ -298,6 +300,7 @@ test("dashboard keeps the QA-tested PR, repo, feedback, and side-panel workflows
   }
 
   assertHasApiRequest(sourceFile, "failed activity clear mutation", "DELETE", "/api/activities/failed");
+  assertHasApiRequest(sourceFile, "issue failure clear mutation", "DELETE", "/api/issues/work/failures");
   assertHasApiRequest(sourceFile, "ask agent mutation", "POST", /`\/api\/prs\/\$\{prId\}\/questions`/);
   assertHasTestId(sourceFile, "dashboard drain banner", "dashboard-drain-banner");
   assertHasTestId(sourceFile, "dashboard drain reason", "dashboard-drain-reason");
@@ -334,6 +337,7 @@ test("issues page keeps the QA-tested issue monitor and work surface wired", asy
     ["stale filter", "issue-stale-filter"],
     ["issue body markdown", "issue-body-markdown"],
     ["issue work failed", "issue-work-failed"],
+    ["clear issue failures action", "button-clear-issue-failures"],
     ["issue work stage", "issue-work-stage"],
     ["issue work attempt", "issue-work-attempt"],
     ["issue auto work state", "issue-auto-work-state"],

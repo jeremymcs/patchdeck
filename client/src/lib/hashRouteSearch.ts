@@ -1,3 +1,8 @@
+export type InitialHashRouteNormalization = {
+  href: string;
+  anchorId: string | null;
+};
+
 export function normalizeHashRouteSearch(href: string): string | null {
   const url = new URL(href);
   const rawHash = url.hash;
@@ -18,4 +23,21 @@ export function normalizeHashRouteSearch(href: string): string | null {
   url.search = searchParams.toString();
 
   return url.href;
+}
+
+export function normalizeInitialHashRoute(href: string): InitialHashRouteNormalization | null {
+  const normalizedSearchHref = normalizeHashRouteSearch(href);
+  const url = new URL(normalizedSearchHref ?? href);
+  const rawHash = url.hash;
+
+  if (!rawHash || rawHash.startsWith("#/")) {
+    return normalizedSearchHref ? { href: normalizedSearchHref, anchorId: null } : null;
+  }
+
+  url.hash = "#/";
+
+  return {
+    href: url.href,
+    anchorId: decodeURIComponent(rawHash.slice(1)),
+  };
 }

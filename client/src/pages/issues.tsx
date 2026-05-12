@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { ExternalLink, Loader2, RefreshCw, ShieldCheck, Wrench } from "lucide-react";
+import { ExternalLink, Loader2, RefreshCw, ShieldCheck, Trash2, Wrench } from "lucide-react";
 import { apiRequest, fetchJson, queryClient } from "@/lib/queryClient";
 import { AppHeader } from "@/components/AppHeader";
 import { UpdateBanner } from "@/components/UpdateBanner";
@@ -446,7 +446,7 @@ export default function Issues() {
         repo: issue.repo,
         number: issue.number,
       });
-      return res.json() as Promise<Issue>;
+      return res.json() as Promise<{ repo: string; number: number; id: string }>;
     },
     onSuccess: async (issue) => {
       await Promise.all([
@@ -459,6 +459,28 @@ export default function Issues() {
     },
     onError: (error) => {
       toast({ variant: "destructive", description: `Could not queue issue work: ${error.message}` });
+    },
+  });
+
+  const clearFailuresMutation = useMutation({
+    mutationFn: async (issue: Issue) => {
+      const res = await apiRequest("DELETE", "/api/issues/work/failures", {
+        repo: issue.repo,
+        number: issue.number,
+      });
+      return res.json() as Promise<Issue>;
+    },
+    onSuccess: async (issue) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["/api/issues"] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/issues/detail", issue.repo, issue.number] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/activities"] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/logs", issue.id] }),
+      ]);
+      toast({ description: `Cleared failed work attempts for #${issue.number}.` });
+    },
+    onError: (error) => {
+      toast({ variant: "destructive", description: `Could not clear issue failures: ${error.message}` });
     },
   });
 
@@ -847,12 +869,34 @@ export default function Issues() {
                 {selectedIssue.workStatus === "failed" && selectedIssue.lastError && (
                   <div
                     data-testid="issue-work-failed"
-                    className="mt-3 border border-destructive/40 bg-destructive/10 px-3 py-2 text-[11px] text-destructive"
+                    className="mt-3 border border-destructive/40 bg-destructive/10 text-[11px] text-destructive"
                   >
-                    <div className="text-[10px] uppercase tracking-wider text-destructive/70">
-                      Issue work failed
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-destructive/20 px-3 py-2">
+                      <div className="text-[10px] uppercase tracking-wider text-destructive/70">
+                        Issue work failed
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => clearFailuresMutation.mutate(selectedIssue)}
+                        disabled={clearFailuresMutation.isPending}
+                        title="Clear failed issue work attempts"
+                        data-testid="button-clear-issue-failures"
+                        className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-destructive/50 bg-background/40 px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-destructive transition-colors hover:bg-destructive hover:text-background focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        {clearFailuresMutation.isPending ? (
+                          <>
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            Clearing
+                          </>
+                        ) : (
+                          <>
+                            <Trash2 className="h-3.5 w-3.5" />
+                            Clear failures
+                          </>
+                        )}
+                      </button>
                     </div>
-                    <div className="mt-1 whitespace-pre-wrap leading-5">
+                    <div className="max-h-80 overflow-auto whitespace-pre-wrap px-3 py-2 leading-5">
                       {selectedIssue.lastError}
                     </div>
                   </div>
