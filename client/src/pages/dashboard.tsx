@@ -2,7 +2,7 @@ import { memo, useEffect, useMemo, useRef, useState, type MouseEvent } from "rea
 import { Link } from "wouter";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import * as Collapsible from "@radix-ui/react-collapsible";
-import { Activity as ActivityIcon, Bot } from "lucide-react";
+import { Activity as ActivityIcon, AlertTriangle, Bot } from "lucide-react";
 import { queryClient, apiRequest, fetchJson } from "@/lib/queryClient";
 import type { ActivityItem, ActivitySnapshot, Config, FeedbackItem, HealingSession, LogEntry, OperatorWarning, PR, PRQuestion, RuntimeState, WatchedRepo } from "@shared/schema";
 import { AppHeader } from "@/components/AppHeader";
@@ -365,6 +365,72 @@ function OperatorWarningsBanner({ warnings }: { warnings: OperatorWarning[] }) {
         ))}
       </div>
     </div>
+  );
+}
+
+function DashboardErrorsPanel({ activities }: { activities: ActivitySnapshot }) {
+  if (activities.failed.length === 0) {
+    return null;
+  }
+
+  return (
+    <section
+      id="dashboard-errors"
+      className="shrink-0 border-b border-destructive/40 bg-destructive/10 px-4 py-3"
+      data-testid="dashboard-errors-panel"
+    >
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <div className="inline-flex items-center gap-2 text-[12px] font-medium uppercase tracking-wider text-destructive">
+          <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
+          Needs attention
+          <span className="font-mono text-foreground">{activities.failed.length}</span>
+        </div>
+        <div className="text-[11px] text-muted-foreground">
+          Failed jobs stay here until retried or cleared from activity.
+        </div>
+      </div>
+      <div className="grid gap-2 lg:grid-cols-2">
+        {activities.failed.slice(0, 4).map((activity) => (
+          <div
+            key={activity.id}
+            className="rounded-md border border-destructive/40 bg-background/70 px-3 py-2"
+            data-testid={`dashboard-error-${activity.id}`}
+          >
+            <div className="flex min-w-0 items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="truncate text-[13px] font-medium text-foreground">{activity.label}</div>
+                {activity.detail && (
+                  <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{activity.detail}</div>
+                )}
+              </div>
+              {activity.targetUrl && (
+                <a
+                  href={activity.targetUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="shrink-0 rounded-md border border-destructive/50 px-2 py-0.5 text-[10px] uppercase tracking-wider text-destructive transition-colors hover:bg-destructive hover:text-background focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+                >
+                  Open
+                </a>
+              )}
+            </div>
+            {activity.lastError && (
+              <div
+                className="mt-2 line-clamp-3 whitespace-pre-wrap break-words text-[11px] leading-4 text-destructive"
+                title={activity.lastError}
+              >
+                {activity.lastError}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      {activities.failed.length > 4 && (
+        <div className="mt-2 text-[11px] text-muted-foreground">
+          {activities.failed.length - 4} more failed job{activities.failed.length - 4 === 1 ? "" : "s"} in activity.
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -1133,6 +1199,7 @@ export default function Dashboard() {
     ? selectedFailedActivity?.lastError ?? getPRFeedbackFailureReason(selectedPR) ?? "Automation stopped on this PR. Check the activity log for the full failure context."
     : null;
   const globalDrainMode = runtimeState?.drainMode === true;
+  const activeErrorCount = activities.failed.length + activities.warnings.length;
 
   const applyMutation = useMutation({
     mutationFn: async (id: string) => {
@@ -1226,6 +1293,17 @@ export default function Dashboard() {
               <option value="codex">codex</option>
               <option value="claude">claude</option>
             </select>
+            {activeErrorCount > 0 && (
+              <a
+                href="#dashboard-errors"
+                data-testid="dashboard-error-pill"
+                className="inline-flex items-center gap-1 rounded-md border border-destructive/50 bg-destructive/10 px-2 py-0.5 text-[11px] uppercase tracking-wider text-destructive transition-colors hover:bg-destructive hover:text-background focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+              >
+                <AlertTriangle className="h-3 w-3" aria-hidden="true" />
+                errors
+                <span className="font-mono">{activeErrorCount}</span>
+              </a>
+            )}
             <ActivityMenu
               activities={activities}
               onClearFailed={() => clearFailedActivitiesMutation.mutate()}
@@ -1238,6 +1316,7 @@ export default function Dashboard() {
 
       <OnboardingPanel />
       <OperatorWarningsBanner warnings={activities.warnings} />
+      <DashboardErrorsPanel activities={activities} />
       <DashboardDrainBanner runtimeState={runtimeState} />
 
       <div className="flex flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
