@@ -4,6 +4,7 @@ import { serveStatic } from "./static";
 import { configureWebAuth } from "./webAuth";
 import { createServer } from "http";
 import { childLogger, logger } from "./logger";
+import { migrateLegacyHomeIfNeeded } from "./migrateLegacyHome";
 
 const serverLog = childLogger("server");
 
@@ -59,6 +60,11 @@ async function openDashboard(url: string) {
 }
 
 (async () => {
+  // Move ~/.oh-my-pr to ~/.patchdeck before anything else reads the state
+  // directory. Idempotent: skipped when an env override is set, when the new
+  // directory already exists, or when the legacy directory is absent.
+  migrateLegacyHomeIfNeeded();
+
   await registerRoutes(httpServer, app);
 
   app.use((err: unknown, _req: Request, res: Response, next: NextFunction) => {
