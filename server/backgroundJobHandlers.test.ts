@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { TerminalBabysitterError } from "./babysitter";
-import { CancelBackgroundJobError, TerminalBackgroundJobError } from "./backgroundJobDispatcher";
+import { BackgroundJobDispatcher, CancelBackgroundJobError, TerminalBackgroundJobError } from "./backgroundJobDispatcher";
 import { createBackgroundJobHandlers } from "./backgroundJobHandlers";
 import { BackgroundJobQueue } from "./backgroundJobQueue";
 import { MemStorage } from "./memoryStorage";
@@ -25,6 +25,25 @@ async function seedPR(storage: MemStorage): Promise<string> {
     lastChecked: null,
   });
   return pr.id;
+}
+
+async function waitForCondition(
+  condition: () => boolean | Promise<boolean>,
+  timeoutMs = 250,
+): Promise<void> {
+  const startedAt = Date.now();
+
+  while (true) {
+    if (await condition()) {
+      return;
+    }
+
+    if (Date.now() - startedAt >= timeoutMs) {
+      throw new Error(`Condition not met within ${timeoutMs}ms`);
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
 }
 
 test("answer_pr_question handler delegates for non-terminal questions", async () => {
@@ -303,6 +322,100 @@ test("work_issue handler opens a PR after a successful repair run", async () => 
     issueLogs.map((entry) => entry.metadata?.stage),
     ["started", "working", "verifying", "opening_pr", "completed"],
   );
+});
+
+test("work_issue handler stops rejected repair runs after one failed notice", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig({
+    watchedRepos: ["acme/widgets"],
+    codingAgent: "claude",
+    postGitHubProgressReplies: true,
+  });
+  const queue = new BackgroundJobQueue(storage);
+  const job = await queue.enqueue(
+    "work_issue",
+    "acme/widgets#17",
+    "work_issue:acme/widgets#17",
+    {
+      repo: "acme/widgets",
+      issueNumber: 17,
+      issueTitle: "Fix the toggle",
+      issueUrl: "https://github.com/acme/widgets/issues/17",
+      baseBranch: "main",
+    },
+  );
+  const commentsCreated: Array<Record<string, unknown>> = [];
+  let repairCalls = 0;
+  const octokit = {
+    issues: {
+      get: async () => ({
+        data: {
+          number: 17,
+          title: "Fix the toggle",
+          body: "The toggle is stuck",
+          html_url: "https://github.com/acme/widgets/issues/17",
+          user: { login: "alice" },
+          labels: [{ name: "bug" }],
+          assignees: [],
+          comments: 2,
+          created_at: "2026-05-03T17:00:00.000Z",
+          updated_at: "2026-05-03T18:00:00.000Z",
+        },
+      }),
+      createComment: async (params: Record<string, unknown>) => {
+        commentsCreated.push(params);
+        return { data: { id: 123 } };
+      },
+    },
+    pulls: {
+      create: async () => {
+        throw new Error("PR creation should not run after rejected repair");
+      },
+    },
+  };
+
+  const dispatcher = new BackgroundJobDispatcher({
+    storage,
+    queue,
+    workerId: "dispatcher-1",
+    pollIntervalMs: 5,
+    leaseMs: 30_000,
+    heartbeatIntervalMs: 10,
+    maxAttempts: 3,
+    retryBackoffMs: 0,
+    handlers: createBackgroundJobHandlers({
+      storage,
+      deps: {
+        buildOctokitFn: async () => octokit as never,
+        resolveGitHubAuthTokenFn: async () => "gho_token",
+        runIssueWorkRepairFn: async () => {
+          repairCalls += 1;
+          return {
+            accepted: false,
+            rejectionReason: "agent failed (124): command timed out",
+            summary: "No agent summary provided",
+            fixBranch: "issue/17-fix-the-toggle-123",
+            agentResult: { stdout: "", stderr: "command timed out", code: 124 },
+          };
+        },
+      },
+    }),
+  });
+
+  try {
+    await dispatcher.start();
+    await waitForCondition(async () => (await storage.getBackgroundJob(job.id))?.status === "failed", 500);
+
+    const stored = await storage.getBackgroundJob(job.id);
+    assert.equal(repairCalls, 1);
+    assert.equal(stored?.attemptCount, 1);
+    assert.match(stored?.lastError ?? "", /agent failed \(124\)/);
+    assert.equal(commentsCreated.length, 2);
+    assert.match(String(commentsCreated[0]?.body), /Issue work started/);
+    assert.match(String(commentsCreated[1]?.body), /Issue work failed/);
+  } finally {
+    dispatcher.stop();
+  }
 });
 
 test("babysit_pr handler marks terminal babysitter failures as terminal background failures", async () => {
