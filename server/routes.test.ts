@@ -1478,6 +1478,7 @@ test("GET and POST /api/issues proxy the runtime issue monitor and work action",
   }];
   const workCalls: Array<{ repo: string; number: number }> = [];
   const evaluateCalls: Array<{ repo: string; number: number }> = [];
+  const clearFailureCalls: Array<{ repo: string; number: number }> = [];
   const fakeRuntime = {
     start: async () => undefined,
     stop: () => undefined,
@@ -1495,6 +1496,10 @@ test("GET and POST /api/issues proxy the runtime issue monitor and work action",
     evaluateIssue: async (repo: string, number: number) => {
       evaluateCalls.push({ repo, number });
       return { ...issues[0], evaluationStatus: "approved", evaluationSummary: "Ready for automatic work" };
+    },
+    clearIssueWorkFailures: async (repo: string, number: number) => {
+      clearFailureCalls.push({ repo, number });
+      return { ...issues[0], workStatus: "idle", workJobId: null, lastError: null };
     },
     listActivities: async () => ({ failed: [], inProgress: [], queued: [], warnings: [], generatedAt: "2026-05-03T00:00:00.000Z" }),
     getRuntimeSnapshot: async () => ({ drainMode: false, drainRequestedAt: null, drainReason: null, activeRuns: 0 }),
@@ -1619,6 +1624,15 @@ test("GET and POST /api/issues proxy the runtime issue monitor and work action",
 
     assert.equal(evaluateResponse.status, 201);
     assert.deepEqual(evaluateCalls, [{ repo: "acme/widgets", number: 17 }]);
+
+    const clearResponse = await fetch(`${harness.baseUrl}/api/issues/work/failures`, {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ repo: "acme/widgets", number: 17 }),
+    });
+
+    assert.equal(clearResponse.status, 200);
+    assert.deepEqual(clearFailureCalls, [{ repo: "acme/widgets", number: 17 }]);
   } finally {
     await harness.close();
   }

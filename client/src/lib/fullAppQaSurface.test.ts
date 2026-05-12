@@ -334,6 +334,7 @@ test("issues page keeps the QA-tested issue monitor and work surface wired", asy
     ["stale filter", "issue-stale-filter"],
     ["issue body markdown", "issue-body-markdown"],
     ["issue work failed", "issue-work-failed"],
+    ["clear issue failures action", "button-clear-issue-failures"],
     ["issue work stage", "issue-work-stage"],
     ["issue work attempt", "issue-work-attempt"],
     ["issue auto work state", "issue-auto-work-state"],

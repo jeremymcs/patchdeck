@@ -148,6 +148,7 @@ export type AppRuntime = {
   getIssue(repo: string, number: number): Promise<Issue>;
   evaluateIssue(repo: string, number: number): Promise<Issue>;
   workIssue(repo: string, number: number): Promise<Issue>;
+  clearIssueWorkFailures(repo: string, number: number): Promise<Issue>;
 };
 
 function getErrorMessage(error: unknown): string {
@@ -1004,6 +1005,41 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
     return applyIssueWorkState(issue, { includePrMergeability: true });
   }
 
+  async function clearIssueWorkFailuresInternal(repoInput: string, number: number): Promise<Issue> {
+    const parsedRepo = parseRepoSlug(repoInput);
+    if (!parsedRepo) {
+      throw new AppRuntimeError(400, "Invalid repository. Use owner/repo or https://github.com/owner/repo");
+    }
+
+    const canonical = formatRepoSlug(parsedRepo);
+    const config = await storage.getConfig();
+    if (!config.watchedRepos.includes(canonical)) {
+      throw new AppRuntimeError(404, `Repository ${canonical} is not being watched`);
+    }
+
+    const cleared = await storage.clearFailedBackgroundJobs({
+      kind: "work_issue",
+      targetId: formatIssueTargetId(canonical, number),
+    });
+
+    await storage.addLog(
+      formatIssueTargetId(canonical, number),
+      "info",
+      cleared === 1 ? "Cleared 1 failed issue work attempt" : `Cleared ${cleared} failed issue work attempts`,
+      {
+        metadata: {
+          repo: canonical,
+          issueNumber: number,
+          cleared,
+          stage: "reset_failures",
+        },
+      },
+    );
+
+    notifyChange();
+    return getIssueInternal(canonical, number);
+  }
+
   async function queueAutomaticIssueWorkInternal(): Promise<void> {
     const [runtimeState, config, repoSettings, issues, evaluationJobs, workJobs] = await Promise.all([
       storage.getRuntimeState(),
@@ -1575,6 +1611,10 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
 
     async workIssue(repoInput, number) {
       return queueIssueWorkInternal(repoInput, number, "manual");
+    },
+
+    async clearIssueWorkFailures(repoInput, number) {
+      return clearIssueWorkFailuresInternal(repoInput, number);
     },
 
     async listPRs(view = "active") {

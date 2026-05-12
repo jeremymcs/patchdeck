@@ -662,6 +662,57 @@ describe("MemStorage", () => {
       assert.equal(canceled?.status, "canceled");
       assert.equal(canceled?.lastError, "no-op");
     });
+
+    it("clears failed jobs by kind and target", async () => {
+      const issueJob = await storage.enqueueBackgroundJob(makeBackgroundJobInput({
+        targetId: "acme/widgets#17",
+        dedupeKey: "work_issue:acme/widgets#17",
+        kind: "work_issue",
+        payload: { issueNumber: 17 },
+      }));
+      const otherIssueJob = await storage.enqueueBackgroundJob(makeBackgroundJobInput({
+        targetId: "acme/widgets#18",
+        dedupeKey: "work_issue:acme/widgets#18",
+        kind: "work_issue",
+        payload: { issueNumber: 18 },
+      }));
+      const prJob = await storage.enqueueBackgroundJob(makeBackgroundJobInput({
+        targetId: "pr-1",
+        dedupeKey: "babysit_pr:pr-1",
+        kind: "babysit_pr",
+        payload: { prId: "pr-1" },
+      }));
+
+      for (const [job, leaseToken] of [
+        [issueJob, "lease-issue"],
+        [otherIssueJob, "lease-other-issue"],
+        [prJob, "lease-pr"],
+      ] as const) {
+        await storage.claimNextBackgroundJob({
+          workerId: "worker-1",
+          leaseToken,
+          leaseExpiresAt: "2026-04-02T10:00:30.000Z",
+          now: "2026-04-02T10:00:00.000Z",
+          kinds: [job.kind],
+        });
+        await storage.failBackgroundJob(
+          job.id,
+          leaseToken,
+          "boom",
+          "2026-04-02T10:00:15.000Z",
+        );
+      }
+
+      const cleared = await storage.clearFailedBackgroundJobs({
+        kind: "work_issue",
+        targetId: "acme/widgets#17",
+      });
+
+      assert.equal(cleared, 1);
+      assert.equal(await storage.getBackgroundJob(issueJob.id), undefined);
+      assert.equal((await storage.getBackgroundJob(otherIssueJob.id))?.status, "failed");
+      assert.equal((await storage.getBackgroundJob(prJob.id))?.status, "failed");
+    });
   });
 
   // ── CI healing ──────────────────────────────────────────

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { ExternalLink, Loader2, RefreshCw, ShieldCheck, Wrench } from "lucide-react";
+import { ExternalLink, Loader2, RefreshCw, ShieldCheck, Trash2, Wrench } from "lucide-react";
 import { apiRequest, fetchJson, queryClient } from "@/lib/queryClient";
 import { AppHeader } from "@/components/AppHeader";
 import { UpdateBanner } from "@/components/UpdateBanner";
@@ -462,6 +462,28 @@ export default function Issues() {
     },
   });
 
+  const clearFailuresMutation = useMutation({
+    mutationFn: async (issue: Issue) => {
+      const res = await apiRequest("DELETE", "/api/issues/work/failures", {
+        repo: issue.repo,
+        number: issue.number,
+      });
+      return res.json() as Promise<Issue>;
+    },
+    onSuccess: async (issue) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["/api/issues"] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/issues/detail", issue.repo, issue.number] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/activities"] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/logs", issue.id] }),
+      ]);
+      toast({ description: `Cleared failed work attempts for #${issue.number}.` });
+    },
+    onError: (error) => {
+      toast({ variant: "destructive", description: `Could not clear issue failures: ${error.message}` });
+    },
+  });
+
   const evaluateMutation = useMutation({
     mutationFn: async (issue: Issue) => {
       const res = await apiRequest("POST", "/api/issues/evaluate", {
@@ -805,6 +827,28 @@ export default function Issues() {
                         </>
                       )}
                     </button>
+                    {selectedIssue.workStatus === "failed" && (
+                      <button
+                        type="button"
+                        onClick={() => clearFailuresMutation.mutate(selectedIssue)}
+                        disabled={clearFailuresMutation.isPending}
+                        title="Clear failed issue work attempts"
+                        data-testid="button-clear-issue-failures"
+                        className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-destructive/50 bg-transparent px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-destructive transition-colors hover:bg-destructive hover:text-background focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        {clearFailuresMutation.isPending ? (
+                          <>
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            Clearing
+                          </>
+                        ) : (
+                          <>
+                            <Trash2 className="h-3.5 w-3.5" />
+                            Clear failures
+                          </>
+                        )}
+                      </button>
+                    )}
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-1">
