@@ -7,6 +7,8 @@ import {
   issueWorkAttemptCountFromJobs,
   issueWorkPrFromLogs,
   mapMergedPullsToReleaseSummaries,
+  planAutomaticIssueQueueActions,
+  type PlanAutomaticIssueQueueInput,
 } from "./appRuntime";
 import { _resetRingBufferForTests, readRingBuffer } from "./logger";
 import { MemStorage } from "./memoryStorage";
@@ -287,4 +289,203 @@ test("getIssueAutoWorkEligibility requires a ready label, app approval, and no b
     autoWorkEligible: false,
     autoWorkBlockedReason: "missing ready-for-agent label",
   });
+});
+
+// ── planAutomaticIssueQueueActions ───────────────────────────────────────────
+//
+// The planner is the throttle. It decides which evaluations and work jobs to enqueue on each
+// watcher tick, capped by `maxConcurrent*` config. Tests here encode the *intent* (respect the
+// caps, never starve a repo, don't double-queue) so they fail when business rules drift, not
+// just when implementation churns.
+
+function makePlanIssue(
+  overrides: Partial<PlanAutomaticIssueQueueInput["issues"][number]> & {
+    repo: string;
+    number: number;
+  },
+): PlanAutomaticIssueQueueInput["issues"][number] {
+  return {
+    id: `${overrides.repo}#${overrides.number}`,
+    repo: overrides.repo,
+    number: overrides.number,
+    workStatus: overrides.workStatus ?? "idle",
+    workPrUrl: overrides.workPrUrl ?? null,
+    autoWorkEligible: overrides.autoWorkEligible ?? false,
+    evaluationStatus: overrides.evaluationStatus ?? null,
+    updatedAt: overrides.updatedAt ?? "2026-05-01T00:00:00.000Z",
+  };
+}
+
+test("planAutomaticIssueQueueActions enqueues no jobs when no repo has auto-evaluate or auto-work on", () => {
+  const plan = planAutomaticIssueQueueActions({
+    repoSettings: [{ repo: "acme/widgets", issueAutoEvaluate: false, issueAutoWork: false }],
+    issues: [makePlanIssue({ repo: "acme/widgets", number: 1 })],
+    activeEvaluationTargets: new Set(),
+    activeWorkCount: 0,
+    maxConcurrentIssueEvaluations: 2,
+    maxConcurrentIssueWork: 1,
+  });
+  assert.deepEqual(plan, { evaluations: [], work: [] });
+});
+
+test("planAutomaticIssueQueueActions sweeps every unevaluated issue up to the evaluation cap", () => {
+  // Goal: a repo with auto-evaluate on and a backlog of unevaluated issues should not be
+  // drained one-per-tick — the planner should enqueue evaluations up to the global cap.
+  const issues = Array.from({ length: 10 }, (_, i) =>
+    makePlanIssue({ repo: "acme/widgets", number: i + 1 }),
+  );
+  const plan = planAutomaticIssueQueueActions({
+    repoSettings: [{ repo: "acme/widgets", issueAutoEvaluate: true, issueAutoWork: false }],
+    issues,
+    activeEvaluationTargets: new Set(),
+    activeWorkCount: 0,
+    maxConcurrentIssueEvaluations: 3,
+    maxConcurrentIssueWork: 1,
+  });
+  assert.equal(plan.evaluations.length, 3, "must respect the evaluation cap exactly");
+  assert.equal(plan.work.length, 0);
+});
+
+test("planAutomaticIssueQueueActions counts already-queued evaluations against the cap", () => {
+  // Goal: in-flight jobs aren't free — the budget is global (queued + leased + about-to-queue).
+  const issues = Array.from({ length: 5 }, (_, i) =>
+    makePlanIssue({ repo: "acme/widgets", number: i + 1 }),
+  );
+  const plan = planAutomaticIssueQueueActions({
+    repoSettings: [{ repo: "acme/widgets", issueAutoEvaluate: true, issueAutoWork: false }],
+    issues,
+    activeEvaluationTargets: new Set(["acme/widgets#1", "acme/widgets#2"]),
+    activeWorkCount: 0,
+    maxConcurrentIssueEvaluations: 2,
+    maxConcurrentIssueWork: 1,
+  });
+  assert.equal(plan.evaluations.length, 0, "cap already filled by in-flight jobs");
+});
+
+test("planAutomaticIssueQueueActions does not auto-queue work when auto-work is off", () => {
+  // Goal: auto-evaluate without auto-work should classify issues only — never run the agent.
+  // This separation is the whole point of having two toggles.
+  const plan = planAutomaticIssueQueueActions({
+    repoSettings: [{ repo: "acme/widgets", issueAutoEvaluate: true, issueAutoWork: false }],
+    issues: [
+      makePlanIssue({
+        repo: "acme/widgets",
+        number: 1,
+        evaluationStatus: "approved",
+        autoWorkEligible: true,
+      }),
+    ],
+    activeEvaluationTargets: new Set(),
+    activeWorkCount: 0,
+    maxConcurrentIssueEvaluations: 2,
+    maxConcurrentIssueWork: 1,
+  });
+  assert.equal(plan.work.length, 0, "auto-work toggle gates work even on approved issues");
+});
+
+test("planAutomaticIssueQueueActions queues work for approved+eligible issues when auto-work is on", () => {
+  const plan = planAutomaticIssueQueueActions({
+    repoSettings: [{ repo: "acme/widgets", issueAutoEvaluate: true, issueAutoWork: true }],
+    issues: [
+      makePlanIssue({
+        repo: "acme/widgets",
+        number: 1,
+        evaluationStatus: "approved",
+        autoWorkEligible: true,
+      }),
+    ],
+    activeEvaluationTargets: new Set(),
+    activeWorkCount: 0,
+    maxConcurrentIssueEvaluations: 2,
+    maxConcurrentIssueWork: 1,
+  });
+  assert.deepEqual(plan.work, [{ repo: "acme/widgets", number: 1, id: "acme/widgets#1" }]);
+});
+
+test("planAutomaticIssueQueueActions respects per-repo single-flight on work", () => {
+  // Goal: don't pile multiple work jobs onto one repo even if budget allows — the agent
+  // runs one at a time per repo, so queueing more just creates lag.
+  const plan = planAutomaticIssueQueueActions({
+    repoSettings: [{ repo: "acme/widgets", issueAutoEvaluate: true, issueAutoWork: true }],
+    issues: [
+      makePlanIssue({
+        repo: "acme/widgets",
+        number: 1,
+        workStatus: "in_progress",
+      }),
+      makePlanIssue({
+        repo: "acme/widgets",
+        number: 2,
+        evaluationStatus: "approved",
+        autoWorkEligible: true,
+      }),
+    ],
+    activeEvaluationTargets: new Set(),
+    activeWorkCount: 0,
+    maxConcurrentIssueEvaluations: 2,
+    maxConcurrentIssueWork: 5,
+  });
+  assert.equal(plan.work.length, 0, "skip repo that already has a work job in flight");
+});
+
+test("planAutomaticIssueQueueActions interleaves evaluations across repos fairly", () => {
+  // Goal: one repo with a huge backlog must not starve sibling repos. Round-robin is the
+  // simplest fairness contract — issue N for repo A, then issue N for repo B, etc.
+  const issues = [
+    makePlanIssue({ repo: "acme/widgets", number: 1 }),
+    makePlanIssue({ repo: "acme/widgets", number: 2 }),
+    makePlanIssue({ repo: "acme/widgets", number: 3 }),
+    makePlanIssue({ repo: "globex/gizmo", number: 100 }),
+  ];
+  const plan = planAutomaticIssueQueueActions({
+    repoSettings: [
+      { repo: "acme/widgets", issueAutoEvaluate: true, issueAutoWork: false },
+      { repo: "globex/gizmo", issueAutoEvaluate: true, issueAutoWork: false },
+    ],
+    issues,
+    activeEvaluationTargets: new Set(),
+    activeWorkCount: 0,
+    maxConcurrentIssueEvaluations: 2,
+    maxConcurrentIssueWork: 1,
+  });
+  const repos = plan.evaluations.map((action) => action.repo);
+  assert.equal(plan.evaluations.length, 2);
+  assert.deepEqual(repos.sort(), ["acme/widgets", "globex/gizmo"], "both repos get one slot");
+});
+
+test("planAutomaticIssueQueueActions skips evaluations already queued for the same target", () => {
+  // Goal: don't double-queue. The dedupe key in the background_jobs table would reject it,
+  // but the planner should avoid even trying — cleaner logs, deterministic behavior.
+  const plan = planAutomaticIssueQueueActions({
+    repoSettings: [{ repo: "acme/widgets", issueAutoEvaluate: true, issueAutoWork: false }],
+    issues: [makePlanIssue({ repo: "acme/widgets", number: 1 })],
+    activeEvaluationTargets: new Set(["acme/widgets#1"]),
+    activeWorkCount: 0,
+    maxConcurrentIssueEvaluations: 2,
+    maxConcurrentIssueWork: 1,
+  });
+  assert.equal(plan.evaluations.length, 0);
+});
+
+test("planAutomaticIssueQueueActions counts active work jobs against the work cap", () => {
+  // Goal: same global-budget semantics on work as on evaluations.
+  const plan = planAutomaticIssueQueueActions({
+    repoSettings: [
+      { repo: "acme/widgets", issueAutoEvaluate: true, issueAutoWork: true },
+      { repo: "globex/gizmo", issueAutoEvaluate: true, issueAutoWork: true },
+    ],
+    issues: [
+      makePlanIssue({
+        repo: "globex/gizmo",
+        number: 1,
+        evaluationStatus: "approved",
+        autoWorkEligible: true,
+      }),
+    ],
+    activeEvaluationTargets: new Set(),
+    activeWorkCount: 1,
+    maxConcurrentIssueEvaluations: 2,
+    maxConcurrentIssueWork: 1,
+  });
+  assert.equal(plan.work.length, 0, "work cap already saturated");
 });

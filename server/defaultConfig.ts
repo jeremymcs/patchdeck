@@ -27,6 +27,8 @@ export const DEFAULT_CONFIG: Config = {
   deploymentCheckDelayMs: 60000,
   deploymentCheckTimeoutMs: 600000,
   deploymentCheckPollIntervalMs: 15000,
+  maxConcurrentIssueEvaluations: 2,
+  maxConcurrentIssueWork: 1,
   watchedRepos: [],
   trustedReviewers: [],
   ignoredBots: ["dependabot[bot]", "codecov[bot]", "github-actions[bot]"],

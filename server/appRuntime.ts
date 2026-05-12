@@ -224,6 +224,97 @@ function normalizeIssueLabel(label: string): string {
   return label.trim().toLowerCase();
 }
 
+export type PlanAutomaticIssueQueueInput = {
+  repoSettings: Pick<WatchedRepo, "repo" | "issueAutoEvaluate" | "issueAutoWork">[];
+  issues: Pick<
+    Issue,
+    "id" | "repo" | "number" | "workStatus" | "workPrUrl" | "autoWorkEligible" | "evaluationStatus" | "updatedAt"
+  >[];
+  activeEvaluationTargets: Set<string>;
+  activeWorkCount: number;
+  maxConcurrentIssueEvaluations: number;
+  maxConcurrentIssueWork: number;
+};
+
+export type PlanAutomaticIssueQueueActions = {
+  evaluations: Array<{ repo: string; number: number; id: string }>;
+  work: Array<{ repo: string; number: number; id: string }>;
+};
+
+export function planAutomaticIssueQueueActions(
+  input: PlanAutomaticIssueQueueInput,
+): PlanAutomaticIssueQueueActions {
+  const autoWorkRepos = input.repoSettings.filter((repo) => repo.issueAutoWork).map((repo) => repo.repo);
+  const autoEvaluateRepos = input.repoSettings
+    .filter((repo) => repo.issueAutoEvaluate || repo.issueAutoWork)
+    .map((repo) => repo.repo);
+
+  const result: PlanAutomaticIssueQueueActions = { evaluations: [], work: [] };
+  if (autoWorkRepos.length === 0 && autoEvaluateRepos.length === 0) {
+    return result;
+  }
+
+  let evaluationBudget = Math.max(0, input.maxConcurrentIssueEvaluations - input.activeEvaluationTargets.size);
+  let workBudget = Math.max(0, input.maxConcurrentIssueWork - input.activeWorkCount);
+  const claimed = new Set<string>();
+
+  // Auto-work sweep first: budget is scarcer. Preserve per-repo single-flight semantics —
+  // at most one work job per repo at a time, regardless of global budget.
+  for (const repo of autoWorkRepos) {
+    if (workBudget <= 0) break;
+    const repoIssues = input.issues.filter((issue) => issue.repo === repo);
+    if (repoIssues.some((issue) => issue.workStatus === "queued" || issue.workStatus === "in_progress")) {
+      continue;
+    }
+    const candidate = repoIssues
+      .filter((issue) => issue.workStatus === "idle" && !issue.workPrUrl && issue.autoWorkEligible)
+      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())[0];
+    if (!candidate) continue;
+    result.work.push({ repo: candidate.repo, number: candidate.number, id: candidate.id });
+    claimed.add(candidate.id);
+    workBudget -= 1;
+  }
+
+  // Auto-evaluate sweep: round-robin across repos so a single backlog doesn't starve others.
+  if (evaluationBudget > 0 && autoEvaluateRepos.length > 0) {
+    const repoQueues = new Map<string, typeof input.issues>();
+    for (const repo of autoEvaluateRepos) {
+      const pending = input.issues
+        .filter((issue) =>
+          issue.repo === repo
+          && issue.workStatus === "idle"
+          && !issue.workPrUrl
+          && !issue.evaluationStatus
+          && !input.activeEvaluationTargets.has(issue.id)
+          && !claimed.has(issue.id),
+        )
+        .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+      if (pending.length > 0) {
+        repoQueues.set(repo, pending);
+      }
+    }
+
+    while (evaluationBudget > 0 && repoQueues.size > 0) {
+      for (const repo of Array.from(repoQueues.keys())) {
+        if (evaluationBudget <= 0) break;
+        const queue = repoQueues.get(repo);
+        const candidate = queue?.shift();
+        if (!candidate) {
+          repoQueues.delete(repo);
+          continue;
+        }
+        if (!queue || queue.length === 0) {
+          repoQueues.delete(repo);
+        }
+        result.evaluations.push({ repo: candidate.repo, number: candidate.number, id: candidate.id });
+        evaluationBudget -= 1;
+      }
+    }
+  }
+
+  return result;
+}
+
 export function getIssueAutoWorkEligibility(
   issue: Pick<Issue, "labels">,
   evaluation?: Pick<IssueEvaluation, "status" | "summary" | "safetyFlags"> | null,
@@ -914,12 +1005,13 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
   }
 
   async function queueAutomaticIssueWorkInternal(): Promise<void> {
-    const [runtimeState, config, repoSettings, issues, evaluationJobs] = await Promise.all([
+    const [runtimeState, config, repoSettings, issues, evaluationJobs, workJobs] = await Promise.all([
       storage.getRuntimeState(),
       storage.getConfig(),
       storage.listRepoSettings(),
       listIssuesInternal(),
       storage.listBackgroundJobs({ kind: "evaluate_issue" }),
+      storage.listBackgroundJobs({ kind: "work_issue" }),
     ]);
 
     if (runtimeState.drainMode) {
@@ -930,55 +1022,38 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       return;
     }
 
-    const autoRepos = repoSettings.filter((repo) => repo.issueAutoWork).map((repo) => repo.repo);
-    if (autoRepos.length === 0) {
-      return;
-    }
-
+    const isJobActive = (status: string) => status === "queued" || status === "leased";
     const activeEvaluationTargets = new Set(
-      evaluationJobs
-        .filter((job) => job.status === "queued" || job.status === "leased")
-        .map((job) => job.targetId),
+      evaluationJobs.filter((job) => isJobActive(job.status)).map((job) => job.targetId),
     );
+    const activeWorkCount = workJobs.filter((job) => isJobActive(job.status)).length;
 
-    for (const repo of autoRepos) {
-      const repoIssues = issues.filter((issue) => issue.repo === repo);
-      if (repoIssues.some((issue) => issue.workStatus === "queued" || issue.workStatus === "in_progress")) {
-        continue;
-      }
+    const plan = planAutomaticIssueQueueActions({
+      repoSettings,
+      issues,
+      activeEvaluationTargets,
+      activeWorkCount,
+      maxConcurrentIssueEvaluations: config.maxConcurrentIssueEvaluations,
+      maxConcurrentIssueWork: config.maxConcurrentIssueWork,
+    });
 
-      const nextIssue = repoIssues.find((issue) =>
-        issue.workStatus === "idle"
-        && !issue.workPrUrl
-        && issue.autoWorkEligible
-      );
-      if (nextIssue) {
-        try {
-          await queueIssueWorkInternal(nextIssue.repo, nextIssue.number, "automatic");
-        } catch (error) {
-          log.warn(
-            { err: error instanceof Error ? error.message : String(error), repo, issueNumber: nextIssue.number },
-            "Automatic issue work queue failed",
-          );
-        }
-        continue;
-      }
-
-      const nextEvaluationIssue = repoIssues.find((issue) =>
-        issue.workStatus === "idle"
-        && !issue.workPrUrl
-        && !issue.evaluationStatus
-        && !activeEvaluationTargets.has(issue.id)
-      );
-      if (!nextEvaluationIssue) {
-        continue;
-      }
-
+    for (const action of plan.work) {
       try {
-        await queueIssueEvaluationInternal(nextEvaluationIssue.repo, nextEvaluationIssue.number, "automatic");
+        await queueIssueWorkInternal(action.repo, action.number, "automatic");
       } catch (error) {
         log.warn(
-          { err: error instanceof Error ? error.message : String(error), repo, issueNumber: nextEvaluationIssue.number },
+          { err: error instanceof Error ? error.message : String(error), repo: action.repo, issueNumber: action.number },
+          "Automatic issue work queue failed",
+        );
+      }
+    }
+
+    for (const action of plan.evaluations) {
+      try {
+        await queueIssueEvaluationInternal(action.repo, action.number, "automatic");
+      } catch (error) {
+        log.warn(
+          { err: error instanceof Error ? error.message : String(error), repo: action.repo, issueNumber: action.number },
           "Automatic issue evaluation queue failed",
         );
       }
@@ -1445,7 +1520,7 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       const canonical = formatRepoSlug(parsedRepo);
       const updated = await storage.updateRepoSettings(canonical, updates);
       notifyChange();
-      if (updates.issueAutoWork === true) {
+      if (updates.issueAutoWork === true || updates.issueAutoEvaluate === true) {
         void queueAutomaticIssueWorkInternal().catch((error) => {
           log.warn(
             { err: error instanceof Error ? error.message : String(error), repo: canonical },

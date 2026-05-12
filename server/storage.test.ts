@@ -226,6 +226,7 @@ test("SqliteStorage reloads config and PR state from the same root", async () =>
     repo: "alex-morgan-o/lolodex",
     autoCreateReleases: false,
     ownPrsOnly: false,
+    issueAutoEvaluate: false,
     issueAutoWork: false,
   });
   assert.equal(runtime.drainMode, true);
@@ -479,10 +480,12 @@ test("SqliteStorage updateRepoSettings tracks a previously untracked repo", asyn
       issueAutoWork: true,
     });
 
+    // Auto-work coerces auto-evaluate to true.
     assert.deepEqual(updated, {
       repo: "acme/widgets",
       autoCreateReleases: false,
       ownPrsOnly: false,
+      issueAutoEvaluate: true,
       issueAutoWork: true,
     });
 
@@ -494,6 +497,7 @@ test("SqliteStorage updateRepoSettings tracks a previously untracked repo", asyn
       repo: "acme/widgets",
       autoCreateReleases: false,
       ownPrsOnly: false,
+      issueAutoEvaluate: true,
       issueAutoWork: true,
     });
   } finally {
