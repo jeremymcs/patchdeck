@@ -148,7 +148,7 @@ export type AppRuntime = {
   getIssue(repo: string, number: number): Promise<Issue>;
   evaluateIssue(repo: string, number: number): Promise<Issue>;
   workIssue(repo: string, number: number): Promise<Issue>;
-  clearIssueWorkFailures(repo: string, number: number): Promise<Issue>;
+  clearIssueWorkFailures(repo: string, number: number): Promise<{ repo: string; number: number; id: string; cleared: number }>;
 };
 
 function getErrorMessage(error: unknown): string {
@@ -1005,7 +1005,10 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
     return applyIssueWorkState(issue, { includePrMergeability: true });
   }
 
-  async function clearIssueWorkFailuresInternal(repoInput: string, number: number): Promise<Issue> {
+  async function clearIssueWorkFailuresInternal(
+    repoInput: string,
+    number: number,
+  ): Promise<{ repo: string; number: number; id: string; cleared: number }> {
     const parsedRepo = parseRepoSlug(repoInput);
     if (!parsedRepo) {
       throw new AppRuntimeError(400, "Invalid repository. Use owner/repo or https://github.com/owner/repo");
@@ -1017,13 +1020,14 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       throw new AppRuntimeError(404, `Repository ${canonical} is not being watched`);
     }
 
+    const targetId = formatIssueTargetId(canonical, number);
     const cleared = await storage.clearFailedBackgroundJobs({
       kind: "work_issue",
-      targetId: formatIssueTargetId(canonical, number),
+      targetId,
     });
 
     await storage.addLog(
-      formatIssueTargetId(canonical, number),
+      targetId,
       "info",
       cleared === 1 ? "Cleared 1 failed issue work attempt" : `Cleared ${cleared} failed issue work attempts`,
       {
@@ -1037,7 +1041,12 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
     );
 
     notifyChange();
-    return getIssueInternal(canonical, number);
+    return {
+      repo: canonical,
+      number,
+      id: targetId,
+      cleared,
+    };
   }
 
   async function queueAutomaticIssueWorkInternal(): Promise<void> {

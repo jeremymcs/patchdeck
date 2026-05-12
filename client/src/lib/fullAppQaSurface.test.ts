@@ -278,6 +278,7 @@ test("dashboard keeps the QA-tested PR, repo, feedback, and side-panel workflows
     ["ask submit", "button-ask"],
     ["dashboard error pill", "dashboard-error-pill"],
     ["dashboard errors panel", "dashboard-errors-panel"],
+    ["dashboard clear issue failure", "dashboard-clear-issue-failure"],
   ] satisfies SourceExpectation[]) {
     assertHasTestId(sourceFile, label, testId);
   }
@@ -298,6 +299,7 @@ test("dashboard keeps the QA-tested PR, repo, feedback, and side-panel workflows
   }
 
   assertHasApiRequest(sourceFile, "failed activity clear mutation", "DELETE", "/api/activities/failed");
+  assertHasApiRequest(sourceFile, "issue failure clear mutation", "DELETE", "/api/issues/work/failures");
   assertHasApiRequest(sourceFile, "ask agent mutation", "POST", /`\/api\/prs\/\$\{prId\}\/questions`/);
   assertHasTestId(sourceFile, "dashboard drain banner", "dashboard-drain-banner");
   assertHasTestId(sourceFile, "dashboard drain reason", "dashboard-drain-reason");

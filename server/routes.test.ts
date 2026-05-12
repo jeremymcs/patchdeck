@@ -1499,7 +1499,7 @@ test("GET and POST /api/issues proxy the runtime issue monitor and work action",
     },
     clearIssueWorkFailures: async (repo: string, number: number) => {
       clearFailureCalls.push({ repo, number });
-      return { ...issues[0], workStatus: "idle", workJobId: null, lastError: null };
+      return { repo, number, id: `${repo}#${number}`, cleared: 1 };
     },
     listActivities: async () => ({ failed: [], inProgress: [], queued: [], warnings: [], generatedAt: "2026-05-03T00:00:00.000Z" }),
     getRuntimeSnapshot: async () => ({ drainMode: false, drainRequestedAt: null, drainReason: null, activeRuns: 0 }),

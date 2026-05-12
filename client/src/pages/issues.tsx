@@ -446,7 +446,7 @@ export default function Issues() {
         repo: issue.repo,
         number: issue.number,
       });
-      return res.json() as Promise<Issue>;
+      return res.json() as Promise<{ repo: string; number: number; id: string }>;
     },
     onSuccess: async (issue) => {
       await Promise.all([
