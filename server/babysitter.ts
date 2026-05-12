@@ -2294,11 +2294,13 @@ export class PRBabysitter {
       details?: {
         phase?: string | null;
         metadata?: Record<string, unknown> | null;
+        fileOnly?: boolean;
       },
 	    ) => {
 	      logQueue = logQueue
 	        .then(async () => {
-	          await this.storage.addLog(currentPrId, level, message, {
+	          const write = details?.fileOnly ? this.storage.addLogToFile : this.storage.addLog;
+	          await write.call(this.storage, currentPrId, level, message, {
 	            runId,
 	            phase: details?.phase ?? null,
 	            metadata: details?.metadata ?? null,
@@ -2337,6 +2339,11 @@ export class PRBabysitter {
       let loggedLines = 0;
       let loggedTruncation = false;
 
+      // Stderr is high-volume noise that bloated the logs table to >1 GB. Keep it in
+      // the per-PR log files only; the DB still gets the stdout stream and the
+      // higher-level warn/error/info messages the babysitter writes directly.
+      const fileOnly = stream === "stderr";
+
       const enqueueLine = (trimmed: string) => {
         if (maxLines !== undefined && loggedLines >= maxLines) {
           if (!loggedTruncation) {
@@ -2344,6 +2351,7 @@ export class PRBabysitter {
             return queueLog(currentPrId, level, `[${stream}] output truncated after ${maxLines} line(s)`, {
               phase,
               metadata: { stream, truncated: true, maxLines },
+              fileOnly,
             });
           }
           return logQueue;
@@ -2353,6 +2361,7 @@ export class PRBabysitter {
         return queueLog(currentPrId, level, `[${stream}] ${trimmed}`, {
           phase,
           metadata: { stream },
+          fileOnly,
         });
       };
 

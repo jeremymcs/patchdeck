@@ -54,7 +54,18 @@ export interface IStorage {
       metadata?: Record<string, unknown> | null;
     },
   ): Promise<LogEntry>;
+  addLogToFile(
+    prId: string,
+    level: "info" | "warn" | "error",
+    message: string,
+    details?: {
+      runId?: string | null;
+      phase?: string | null;
+      metadata?: Record<string, unknown> | null;
+    },
+  ): Promise<LogEntry>;
   clearLogs(prId?: string): Promise<void>;
+  pruneLogs(options: { olderThan?: string; messagePrefix?: string }): Promise<number>;
 
   // Config
   getConfig(): Promise<Config>;
