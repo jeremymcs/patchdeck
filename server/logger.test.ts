@@ -13,16 +13,24 @@ process.env.NODE_ENV = "production";
 
 const { logger, sanitizeString, readRingBuffer, _resetRingBufferForTests, _writeRingChunkForTests } = await import("./logger");
 
-function flushAndRead(): Promise<string> {
-  return new Promise((resolve, reject) => {
+async function flushAndRead(match?: RegExp): Promise<string> {
+  await new Promise<void>((resolve, reject) => {
     logger.flush((error) => {
       if (error) {
         reject(error);
         return;
       }
-      setTimeout(() => resolve(fs.readFileSync(LOG_FILE, "utf8")), 10);
+      resolve();
     });
   });
+
+  const deadline = Date.now() + 1000;
+  do {
+    const content = fs.readFileSync(LOG_FILE, "utf8");
+    if (!match || match.test(content)) return content;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  } while (Date.now() < deadline);
+  return fs.readFileSync(LOG_FILE, "utf8");
 }
 
 test("sanitizeString redacts ghp_/gho_/ghs_ tokens", () => {
@@ -60,7 +68,7 @@ test("logger writes file and redacts tokens in serialized output", async () => {
   );
   logger.warn("Authorization: Bearer abcdef0123456789xyzfoo");
 
-  const content = await flushAndRead();
+  const content = await flushAndRead(/\[REDACTED\]/);
   assert.match(content, /\[REDACTED\]/);
   assert.doesNotMatch(content, /ghs_secret/);
   assert.doesNotMatch(content, /abcdef0123456789xyzfoo/);
@@ -71,7 +79,7 @@ test("logger preserves Error details and handles circular records", async () => 
   circular.self = circular;
   logger.error({ err: new Error("failed with ghp_abcdefghijklmnopqrstuvwxyz0123456789"), circular }, "boom");
 
-  const content = await flushAndRead();
+  const content = await flushAndRead(/failed with ghp_\[REDACTED\]/);
   assert.match(content, /failed with ghp_\[REDACTED\]/);
   assert.match(content, /"self":"\[Circular\]"/);
   assert.doesNotMatch(content, /abcdefghijklmnopqrstuvwxyz0123456789/);
@@ -80,14 +88,14 @@ test("logger preserves Error details and handles circular records", async () => 
 test("logger redacts printf-style interpolation arguments", async () => {
   logger.info("token is %s", "ghs_secret12345678901234567890");
 
-  const content = await flushAndRead();
+  const content = await flushAndRead(/ghs_\[REDACTED\]/);
   assert.match(content, /ghs_\[REDACTED\]/);
   assert.doesNotMatch(content, /secret12345678901234567890/);
 });
 
 test("redact paths censor structured token fields", async () => {
   logger.info({ headers: { authorization: "Bearer ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" } }, "request");
-  const content = await flushAndRead();
+  const content = await flushAndRead(/request/);
   // Either redact paths or sanitizeDeep should win — token must not appear.
   assert.doesNotMatch(content, /ghp_xxxxxxxxxx/);
 });
@@ -100,7 +108,7 @@ test("logger handles circular structured fields", async () => {
 
   assert.doesNotThrow(() => logger.info(circular, "circular event"));
 
-  const content = await flushAndRead();
+  const content = await flushAndRead(/"\[Circular\]"/);
   assert.match(content, /"\[Circular\]"/);
   assert.doesNotMatch(content, /ghs_secret/);
 });
