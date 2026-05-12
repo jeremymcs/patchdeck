@@ -403,7 +403,7 @@ test("settings keeps the QA-tested configuration, token, and runtime controls wi
     ["remote access save", "button-save-remote-access"],
     ["repo sync action", "button-sync-repos"],
     ["fallback toggle", "checkbox-fallback-to-next-coding-agent"],
-    ["auto resolve conflicts toggle", "checkbox-auto-resolve-conflicts"],
+    ["auto fix conflicts toggle", "checkbox-auto-resolve-conflicts"],
     ["auto update docs toggle", "checkbox-auto-update-docs"],
     ["runtime drain button", "button-toggle-drain"],
     ["runtime drain status", "text-drain-status"],

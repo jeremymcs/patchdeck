@@ -638,17 +638,17 @@ export default function Settings() {
             </div>
           </section>
 
-          {/* Automation */}
+          {/* Auto fixes */}
           <section>
             <h2 className="mb-4 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              Automation
+              Auto fixes
             </h2>
             <div className="flex flex-col gap-4 rounded-md border border-border p-4">
               <label className="flex items-center justify-between gap-3 cursor-pointer">
                 <div>
-                  <div className="text-sm">Auto-resolve conflicts</div>
+                  <div className="text-sm">Auto-fix conflicts</div>
                   <div className="text-[11px] text-muted-foreground">
-                    Ask the agent to resolve merge conflicts when tracked PRs are not mergeable.
+                    Ask the agent to fix merge conflicts when tracked PRs are not mergeable.
                   </div>
                 </div>
                 <input
