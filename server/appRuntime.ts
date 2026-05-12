@@ -40,6 +40,7 @@ import { BackgroundJobQueue, buildBackgroundJobDedupeKey } from "./backgroundJob
 import { buildActivityPayload, readActivityPayload } from "./activityPayload";
 import { createWatcherScheduler, type WatcherScheduler } from "./watcherScheduler";
 import { startLogsRetentionJob, type RetentionJobHandle } from "./logsRetention";
+import { getRateLimitState } from "./rateLimitState";
 import { ReleaseManager } from "./releaseManager";
 import type { ReleaseAgentPullSummary } from "./releaseAgent";
 import { DeploymentHealingManager } from "./deploymentHealingManager";
@@ -629,6 +630,18 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
   let logsRetentionJob: RetentionJobHandle | null = null;
   const watcherScheduler = dependencies.watcherScheduler ?? createWatcherScheduler(
     async () => {
+      const rateLimit = getRateLimitState();
+      if (rateLimit.limited && rateLimit.resetAt) {
+        log.info(
+          {
+            resetAt: rateLimit.resetAt.toISOString(),
+            secondsUntilReset: Math.ceil((rateLimit.resetAt.getTime() - Date.now()) / 1000),
+          },
+          "Skipping watcher tick: GitHub rate limit gate active",
+        );
+        return;
+      }
+
       await scheduleBackgroundJob(
         "sync_watched_repos",
         "runtime:1",

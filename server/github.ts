@@ -5,6 +5,7 @@ import { runCommand } from "./agentRunner";
 import { normalizeCheckSnapshotsFromRef } from "./ciCheckIngestor";
 import { childLogger } from "./logger";
 import { renderGitHubMarkdown } from "./markdown";
+import { clearRateLimited, getRateLimitState, markRateLimited } from "./rateLimitState";
 
 const octokitLog = childLogger("octokit");
 
@@ -724,22 +725,73 @@ async function withGitHubErrorHandling<T>(
   throw toGitHubIntegrationError(lastError, context, resource);
 }
 
+class RateLimitGateError extends Error {
+  readonly status = 403;
+  readonly response: { headers: Record<string, string> };
+  constructor(resetAt: Date) {
+    super(`GitHub rate limit gate active until ${resetAt.toISOString()}`);
+    this.name = "RateLimitGateError";
+    this.response = {
+      headers: {
+        "x-ratelimit-remaining": "0",
+        "x-ratelimit-reset": String(Math.ceil(resetAt.getTime() / 1000)),
+      },
+    };
+  }
+}
+
+function attachRateLimitHook(client: Octokit): void {
+  client.hook.wrap("request", async (request, options) => {
+    const state = getRateLimitState();
+    if (state.limited && state.resetAt) {
+      throw new RateLimitGateError(state.resetAt);
+    }
+
+    try {
+      const response = await request(options);
+      const remainingRaw = response.headers?.["x-ratelimit-remaining"];
+      const remaining = typeof remainingRaw === "string" ? Number.parseInt(remainingRaw, 10) : Number.NaN;
+      if (Number.isFinite(remaining) && remaining > 0) {
+        clearRateLimited();
+      }
+      return response;
+    } catch (error) {
+      const status = (error as { status?: number } | undefined)?.status;
+      const headers = (error as { response?: { headers?: Record<string, string> } } | undefined)?.response?.headers ?? {};
+      const remainingRaw = headers["x-ratelimit-remaining"];
+      const message = error instanceof Error ? error.message.toLowerCase() : "";
+      const looksRateLimited = (status === 403 || status === 429)
+        && (remainingRaw === "0" || /rate limit/i.test(message));
+      if (looksRateLimited) {
+        const resetRaw = headers["x-ratelimit-reset"];
+        const reset = typeof resetRaw === "string" ? Number.parseInt(resetRaw, 10) : Number.NaN;
+        markRateLimited(Number.isFinite(reset) ? reset : undefined);
+      }
+      throw error;
+    }
+  });
+}
+
 export async function buildOctokit(
   config: Config,
   deps: BuildOctokitDeps = {},
 ): Promise<Octokit> {
   const envToken = process.env.GITHUB_TOKEN?.trim();
   const configuredToken = resolveConfiguredGitHubToken(config);
-  const buildClient = (authToken?: string) => new Octokit({
-    auth: authToken,
-    log: octokitLogger,
-    request: {
-      ...(deps.requestFetch ? { fetch: deps.requestFetch } : {}),
-      headers: {
-        "X-GitHub-Api-Version": GITHUB_API_VERSION,
+  const buildClient = (authToken?: string) => {
+    const client = new Octokit({
+      auth: authToken,
+      log: octokitLogger,
+      request: {
+        ...(deps.requestFetch ? { fetch: deps.requestFetch } : {}),
+        headers: {
+          "X-GitHub-Api-Version": GITHUB_API_VERSION,
+        },
       },
-    },
-  });
+    });
+    attachRateLimitHook(client);
+    return client;
+  };
 
   const primaryToken = configuredToken || envToken || (await resolveGhAuthToken(deps));
   const octokit = buildClient(primaryToken);

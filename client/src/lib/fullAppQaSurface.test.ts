@@ -280,6 +280,8 @@ test("dashboard keeps the QA-tested PR, repo, feedback, and side-panel workflows
     ["activity tab", "tab-activity"],
     ["ask input", "input-question"],
     ["ask submit", "button-ask"],
+    ["dashboard error pill", "dashboard-error-pill"],
+    ["dashboard errors panel", "dashboard-errors-panel"],
   ] satisfies SourceExpectation[]) {
     assertHasTestId(sourceFile, label, testId);
   }
@@ -309,7 +311,9 @@ test("dashboard keeps the QA-tested PR, repo, feedback, and side-panel workflows
   assertHasStringValue(sourceFile, "drained PR copy", "Background and manual runs are paused by drain mode.");
   assertHasStringValue(sourceFile, "drained ask copy", "Ask Agent is paused by drain mode.");
   assertHasStringValue(sourceFile, "queued drain copy", "Queued automation is paused until drain mode is disabled.");
+  assertHasStringValue(sourceFile, "dashboard errors heading", "Needs attention");
   assertHasExpression(sourceFile, "dashboard drain state", /\bglobalDrainMode\b/);
+  assertHasExpression(sourceFile, "dashboard active error count", /\bactiveErrorCount\b/);
 });
 
 test("issues page keeps the QA-tested issue monitor and work surface wired", async () => {

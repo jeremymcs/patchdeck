@@ -4,6 +4,8 @@ import { serveStatic } from "./static";
 import { configureWebAuth } from "./webAuth";
 import { createServer } from "http";
 import { childLogger, logger } from "./logger";
+import { acquireInstanceLock, InstanceLockError } from "./instanceLock";
+import { getCodeFactoryPaths } from "./paths";
 
 const serverLog = childLogger("server");
 
@@ -59,6 +61,16 @@ async function openDashboard(url: string) {
 }
 
 (async () => {
+  try {
+    acquireInstanceLock(getCodeFactoryPaths().rootDir);
+  } catch (err) {
+    if (err instanceof InstanceLockError) {
+      console.error(err.message);
+      process.exit(1);
+    }
+    throw err;
+  }
+
   await registerRoutes(httpServer, app);
 
   app.use((err: unknown, _req: Request, res: Response, next: NextFunction) => {
