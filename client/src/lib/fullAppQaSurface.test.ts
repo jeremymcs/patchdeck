@@ -268,8 +268,10 @@ test("dashboard keeps the QA-tested PR, repo, feedback, and side-panel workflows
 
   for (const [label, testId] of [
     ["active tab", "tab-active"],
+    ["on issues tab", "tab-on-issues"],
     ["archived tab", "tab-archived"],
     ["PR number search", "pr-number-search"],
+    ["PR on issues badge", "pr-on-issues-badge"],
     ["run-now action", "button-apply"],
     ["pause-resume watch action", "button-toggle-watch"],
     ["CI healing panel", "panel-ci-healing"],
@@ -279,6 +281,7 @@ test("dashboard keeps the QA-tested PR, repo, feedback, and side-panel workflows
     ["ask submit", "button-ask"],
     ["dashboard error pill", "dashboard-error-pill"],
     ["dashboard errors panel", "dashboard-errors-panel"],
+    ["dashboard clear failed activities", "dashboard-clear-failed-activities"],
     ["dashboard clear issue failure", "dashboard-clear-issue-failure"],
     ["dashboard errors roll-up toggle", "dashboard-errors-rollup-toggle"],
     ["dashboard errors roll-up summary", "dashboard-errors-rollup-summary"],
@@ -293,6 +296,7 @@ test("dashboard keeps the QA-tested PR, repo, feedback, and side-panel workflows
   for (const [label, endpoint] of [
     ["active PR API", "/api/prs"],
     ["archived PR API", "/api/prs/archived"],
+    ["issues API", "/api/issues"],
     ["repo settings API", "/api/repos/settings"],
     ["activity API", "/api/activities"],
     ["config API", "/api/config"],
@@ -313,6 +317,8 @@ test("dashboard keeps the QA-tested PR, repo, feedback, and side-panel workflows
   assertHasExpression(sourceFile, "queue status index", /\bqueueStatusById\b/);
   assertHasExpression(sourceFile, "PR number search helper", /\bmatchesNumberSearch\b/);
   assertHasStringValue(sourceFile, "PR number search placeholder", "Search #");
+  assertHasExpression(sourceFile, "issue-linked PR index", /\bbuildIssueLinkedPRIndex\b/);
+  assertHasStringValue(sourceFile, "on issues tab label", /On Issues/);
   assertHasStringValue(sourceFile, "drain mode action label", "Paused by drain mode");
   assertHasStringValue(sourceFile, "blocked manual copy", "Manual runs are blocked while global automation is paused.");
   assertHasStringValue(sourceFile, "drained PR copy", "Background and manual runs are paused by drain mode.");
@@ -335,12 +341,17 @@ test("issues page keeps the QA-tested issue monitor and work surface wired", asy
   assertHasQueryKey(sourceFile, "issue logs query", "/api/logs");
   assertHasApiRequest(sourceFile, "issue work mutation", "POST", "/api/issues/work");
   assertHasApiRequest(sourceFile, "issue evaluation mutation", "POST", "/api/issues/evaluate");
+  assertHasApiRequest(sourceFile, "issue label mutation", "PATCH", "/api/issues/labels");
 
   for (const [label, testId] of [
     ["refresh button", "button-refresh-issues"],
     ["issue number search", "issue-number-search"],
     ["work issue button", "button-work-issue"],
     ["evaluate issue button", "button-evaluate-issue"],
+    ["issue label editor", "issue-label-editor"],
+    ["issue label input", "issue-label-input"],
+    ["add issue label button", "button-add-issue-label"],
+    ["remove issue label button", "button-remove-issue-label"],
     ["repo filter bar", "repo-filter-bar"],
     ["auto eligible filter", "issue-auto-eligible-filter"],
     ["needs evaluation filter", "issue-needs-evaluation-filter"],

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { ExternalLink, Loader2, RefreshCw, ShieldCheck, Trash2, Wrench } from "lucide-react";
+import { ExternalLink, Loader2, Plus, RefreshCw, ShieldCheck, Trash2, Wrench, X } from "lucide-react";
 import { apiRequest, fetchJson, queryClient } from "@/lib/queryClient";
 import { AppHeader } from "@/components/AppHeader";
 import { UpdateBanner } from "@/components/UpdateBanner";
@@ -392,6 +392,7 @@ export default function Issues() {
   const [selectedRepo, setSelectedRepo] = useState<string>("all");
   const [selectedWorkFilter, setSelectedWorkFilter] = useState<IssueWorkFilter>("all");
   const [issueNumberSearch, setIssueNumberSearch] = useState("");
+  const [labelInput, setLabelInput] = useState("");
   const normalizedIssueNumberSearch = normalizeNumberSearch(issueNumberSearch);
   const filteredIssues = useMemo(
     () => issues
@@ -547,6 +548,30 @@ export default function Issues() {
     },
     onError: (error) => {
       toast({ variant: "destructive", description: `Could not queue issue evaluation: ${error.message}` });
+    },
+  });
+
+  const labelMutation = useMutation({
+    mutationFn: async ({ issue, add, remove }: { issue: Issue; add?: string[]; remove?: string[] }) => {
+      const res = await apiRequest("PATCH", "/api/issues/labels", {
+        repo: issue.repo,
+        number: issue.number,
+        add,
+        remove,
+      });
+      return res.json() as Promise<Issue>;
+    },
+    onSuccess: async (issue) => {
+      setLabelInput("");
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["/api/issues"] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/issues/detail", issue.repo, issue.number] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/logs", issue.id] }),
+      ]);
+      toast({ description: `Updated labels for #${issue.number}.` });
+    },
+    onError: (error) => {
+      toast({ variant: "destructive", description: `Could not update issue labels: ${error.message}` });
     },
   });
 
@@ -889,14 +914,52 @@ export default function Issues() {
                     </button>
                   </div>
                 </div>
-                <div className="flex flex-wrap gap-1">
+                <div data-testid="issue-label-editor" className="flex flex-wrap items-center gap-1">
                   {selectedIssue.labels.length > 0 ? selectedIssue.labels.map((label) => (
-                    <span key={label} className="border border-border px-1.5 py-0 text-[10px] uppercase tracking-wider text-muted-foreground">
-                      {label}
+                    <span key={label} className="inline-flex max-w-full items-center gap-1 border border-border pl-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+                      <span className="min-w-0 truncate">{label}</span>
+                      <button
+                        type="button"
+                        onClick={() => labelMutation.mutate({ issue: selectedIssue, remove: [label] })}
+                        disabled={labelMutation.isPending}
+                        title={`Remove ${label}`}
+                        data-testid="button-remove-issue-label"
+                        className="inline-flex h-5 w-5 items-center justify-center text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-40"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
                     </span>
                   )) : (
                     <span className="text-[11px] text-muted-foreground">No labels</span>
                   )}
+                  <form
+                    className="ml-1 inline-flex items-center gap-1"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      const label = labelInput.trim();
+                      if (!label || !selectedIssue || selectedIssue.labels.includes(label)) {
+                        return;
+                      }
+                      labelMutation.mutate({ issue: selectedIssue, add: [label] });
+                    }}
+                  >
+                    <input
+                      value={labelInput}
+                      onChange={(event) => setLabelInput(event.target.value)}
+                      placeholder="add label"
+                      data-testid="issue-label-input"
+                      className="h-6 w-44 border border-border bg-background px-2 text-[11px] text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    />
+                    <button
+                      type="submit"
+                      disabled={labelMutation.isPending || !labelInput.trim() || selectedIssue.labels.includes(labelInput.trim())}
+                      title="Add label"
+                      data-testid="button-add-issue-label"
+                      className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:border-foreground/30 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-40"
+                    >
+                      {labelMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+                    </button>
+                  </form>
                 </div>
                 {selectedIssue.workPrUrl && selectedIssue.workPrNumber !== undefined && selectedIssue.workPrNumber !== null && (() => {
                   const readiness = getWorkPrReadiness(selectedIssue);

@@ -62,6 +62,8 @@ import {
   type MergedPRSummary,
   parsePRUrl,
   parseRepoSlug,
+  addLabelsToIssue,
+  removeLabelsFromIssue,
   resolveNextSemverTag,
 } from "./github";
 
@@ -147,6 +149,7 @@ export type AppRuntime = {
   getReleaseSocialPost(jobId: string): Promise<ReleaseSocialPost>;
   listIssues(): Promise<Issue[]>;
   getIssue(repo: string, number: number): Promise<Issue>;
+  updateIssueLabels(repo: string, number: number, updates: { add?: string[]; remove?: string[] }): Promise<Issue>;
   evaluateIssue(repo: string, number: number): Promise<Issue>;
   workIssue(repo: string, number: number): Promise<Issue>;
   clearIssueWorkFailures(repo: string, number: number): Promise<{ repo: string; number: number; id: string; cleared: number }>;
@@ -1043,6 +1046,50 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
     return applyIssueWorkState(issue, { includePrMergeability: true });
   }
 
+  async function updateIssueLabelsInternal(
+    repoInput: string,
+    number: number,
+    updates: { add?: string[]; remove?: string[] },
+  ): Promise<Issue> {
+    const parsedRepo = parseRepoSlug(repoInput);
+    if (!parsedRepo) {
+      throw new AppRuntimeError(400, "Invalid repository. Use owner/repo or https://github.com/owner/repo");
+    }
+
+    const canonical = formatRepoSlug(parsedRepo);
+    const config = await storage.getConfig();
+    if (!config.watchedRepos.includes(canonical)) {
+      throw new AppRuntimeError(404, `Repository ${canonical} is not being watched`);
+    }
+
+    const add = Array.from(new Set((updates.add ?? []).map((label) => label.trim()).filter(Boolean)));
+    const remove = Array.from(new Set((updates.remove ?? []).map((label) => label.trim()).filter(Boolean)));
+    if (add.length === 0 && remove.length === 0) {
+      throw new AppRuntimeError(400, "At least one label is required");
+    }
+
+    const octokit = await buildOctokit(config);
+    await Promise.all([
+      addLabelsToIssue(octokit, { ...parsedRepo, number }, add),
+      removeLabelsFromIssue(octokit, { ...parsedRepo, number }, remove),
+    ]);
+
+    const issue = await fetchIssueSummary(octokit, { ...parsedRepo, number });
+    const targetId = formatIssueTargetId(issue.repoFullName, issue.number);
+    await storage.addLog(targetId, "info", `Updated labels for ${issue.repoFullName}#${issue.number}`, {
+      metadata: {
+        repo: issue.repoFullName,
+        issueNumber: issue.number,
+        addedLabels: add,
+        removedLabels: remove,
+        stage: "labels_updated",
+      },
+    });
+
+    notifyChange();
+    return applyIssueWorkState(issue, { includePrMergeability: true });
+  }
+
   async function clearIssueWorkFailuresInternal(
     repoInput: string,
     number: number,
@@ -1651,6 +1698,10 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
 
     async getIssue(repoInput, number) {
       return getIssueInternal(repoInput, number);
+    },
+
+    async updateIssueLabels(repoInput, number, updates) {
+      return updateIssueLabelsInternal(repoInput, number, updates);
     },
 
     async evaluateIssue(repoInput, number) {
