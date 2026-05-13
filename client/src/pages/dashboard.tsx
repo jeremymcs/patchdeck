@@ -4,7 +4,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import * as Collapsible from "@radix-ui/react-collapsible";
 import { Activity as ActivityIcon, AlertTriangle, Bot, ChevronDown, ChevronUp, Trash2 } from "lucide-react";
 import { queryClient, apiRequest, fetchJson } from "@/lib/queryClient";
-import type { ActivityItem, ActivitySnapshot, Config, FeedbackItem, HealingSession, LogEntry, OperatorWarning, PR, PRQuestion, RuntimeState, WatchedRepo } from "@shared/schema";
+import type { ActivityItem, ActivitySnapshot, Config, FeedbackItem, HealingSession, Issue, LogEntry, OperatorWarning, PR, PRQuestion, RuntimeState, WatchedRepo } from "@shared/schema";
 import { AppHeader } from "@/components/AppHeader";
 import { OnboardingPanel } from "@/components/OnboardingPanel";
 import { UpdateBanner } from "@/components/UpdateBanner";
@@ -39,6 +39,22 @@ function formatClock(timestamp: string | null): string | null {
 
 function isPRWatchEnabled(pr: PR): boolean {
   return pr.watchEnabled;
+}
+
+function prIssueLinkKey(repo: string, number: number): string {
+  return `${repo}#${number}`;
+}
+
+function buildIssueLinkedPRIndex(issues: Issue[]): Map<string, Issue> {
+  const index = new Map<string, Issue>();
+  for (const issue of issues) {
+    if (issue.workPrNumber === null || issue.workPrNumber === undefined) {
+      continue;
+    }
+
+    index.set(prIssueLinkKey(issue.repo, issue.workPrNumber), issue);
+  }
+  return index;
 }
 
 function formatStatusLabel(status: PR["status"]): string {
@@ -596,12 +612,14 @@ const PRRow = memo(function PRRow({
   onSelect,
   failureMessage,
   queueStatus,
+  issueLink,
 }: {
   pr: PR;
   isSelected: boolean;
   onSelect: (id: string) => void;
   failureMessage?: string | null;
   queueStatus: QueueStatusView | null;
+  issueLink?: Issue | null;
 }) {
   const checkedAt = formatClock(pr.lastChecked);
   const watchEnabled = isPRWatchEnabled(pr);
@@ -635,6 +653,15 @@ const PRRow = memo(function PRRow({
             <span className="w-12 shrink-0 font-mono text-[12px] text-muted-foreground">#{pr.number}</span>
             <span className="truncate">{pr.title}</span>
             <AgentIndicator pr={pr} />
+            {issueLink && (
+              <span
+                data-testid="pr-on-issues-badge"
+                className="shrink-0 rounded-md border border-primary/40 bg-primary/10 px-1.5 py-0 text-[10px] uppercase tracking-wider text-primary"
+                title={`Linked from issue #${issueLink.number}`}
+              >
+                issue <span className="font-mono">#{issueLink.number}</span>
+              </span>
+            )}
           </div>
           {readyToMerge && (
             <ReadyToMergeIndicator
@@ -1228,7 +1255,7 @@ function showMutationError(title: string, error: unknown) {
 
 export default function Dashboard() {
   const [selectedPRId, setSelectedPRId] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<"active" | "archived">("active");
+  const [viewMode, setViewMode] = useState<"active" | "issues" | "archived">("active");
   const [areErrorsRolledUp, setAreErrorsRolledUp] = useState(false);
 
   const { data: prs = [], isLoading } = useQuery<PR[]>({
@@ -1239,6 +1266,11 @@ export default function Dashboard() {
   const { data: archivedPRs = [], isLoading: isLoadingArchived } = useQuery<PR[]>({
     queryKey: ["/api/prs/archived"],
     refetchInterval: 10000,
+  });
+
+  const { data: issues = [], isLoading: isLoadingIssues } = useQuery<Issue[]>({
+    queryKey: ["/api/issues"],
+    refetchInterval: 30000,
   });
 
   const { data: config } = useQuery<Config>({
@@ -1268,8 +1300,18 @@ export default function Dashboard() {
     refetchInterval: 5000,
   });
 
-  const displayedPRs = viewMode === "active" ? prs : archivedPRs;
+  const issueLinkedPRByKey = useMemo(() => buildIssueLinkedPRIndex(issues), [issues]);
+  const issueLinkedPRs = useMemo(
+    () => prs.filter((pr) => issueLinkedPRByKey.has(prIssueLinkKey(pr.repo, pr.number))),
+    [prs, issueLinkedPRByKey],
+  );
+  const displayedPRs = viewMode === "archived"
+    ? archivedPRs
+    : viewMode === "issues"
+      ? issueLinkedPRs
+      : prs;
   const isArchived = viewMode === "archived";
+  const isLoadingCurrentView = isArchived ? isLoadingArchived : viewMode === "issues" ? isLoading || isLoadingIssues : isLoading;
 
   useEffect(() => {
     if (displayedPRs.length === 0) {
@@ -1462,6 +1504,18 @@ export default function Dashboard() {
             </button>
             <button
               type="button"
+              onClick={() => setViewMode("issues")}
+              data-testid="tab-on-issues"
+              className={`flex-1 px-3 py-2 text-[11px] uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset ${
+                viewMode === "issues"
+                  ? "bg-muted text-foreground shadow-[inset_0_-2px_0_0_hsl(var(--primary))]"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              On Issues ({issueLinkedPRs.length})
+            </button>
+            <button
+              type="button"
               onClick={() => setViewMode("archived")}
               data-testid="tab-archived"
               className={`flex-1 px-3 py-2 text-[11px] uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset ${
@@ -1474,12 +1528,14 @@ export default function Dashboard() {
             </button>
           </div>
           <div className="flex-1">
-            {(isArchived ? isLoadingArchived : isLoading) ? (
+            {isLoadingCurrentView ? (
               <div className="p-4 text-[12px] text-muted-foreground">Loading...</div>
             ) : displayedPRs.length === 0 ? (
               <div className="p-4 text-[12px] text-muted-foreground">
                 {isArchived
                   ? "No archived PRs. Closed PRs are archived automatically."
+                  : viewMode === "issues"
+                    ? "No active PRs are linked from Issues yet."
                   : "No PRs tracked yet. Add a repository or PR from Settings."}
               </div>
             ) : (
@@ -1490,6 +1546,7 @@ export default function Dashboard() {
                   isSelected={pr.id === selectedPRId}
                   onSelect={setSelectedPRId}
                   queueStatus={queueStatusById.get(pr.id) ?? null}
+                  issueLink={issueLinkedPRByKey.get(prIssueLinkKey(pr.repo, pr.number)) ?? null}
                   failureMessage={
                     pr.status === "error"
                       ? latestActivityForTarget(activities.failed, pr.id)?.lastError ?? getPRFeedbackFailureReason(pr)
