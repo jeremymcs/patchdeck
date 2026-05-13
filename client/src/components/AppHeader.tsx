@@ -100,7 +100,23 @@ function AutoModeButton() {
       const res = await apiRequest("PATCH", "/api/config", updates);
       return res.json();
     },
-    onSuccess: () => {
+    onMutate: async (updates) => {
+      await queryClient.cancelQueries({ queryKey: ["/api/config"] });
+      const previous = queryClient.getQueryData<Config>(["/api/config"]);
+      if (previous) {
+        queryClient.setQueryData<Config>(["/api/config"], { ...previous, ...updates });
+      }
+      return { previous };
+    },
+    onError: (_error, _updates, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData<Config>(["/api/config"], context.previous);
+      }
+    },
+    onSuccess: (updatedConfig) => {
+      queryClient.setQueryData<Config>(["/api/config"], updatedConfig);
+    },
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/config"] });
     },
   });
@@ -145,16 +161,15 @@ function AutoModeButton() {
         )}
 
         <div className="space-y-2">
-          <label
-            htmlFor="auto-mode-prs"
+          <div
             className="flex cursor-pointer items-center justify-between gap-3 rounded-md px-1 py-1.5"
           >
-            <span className="flex flex-col">
+            <label htmlFor="auto-mode-prs" className="flex min-w-0 cursor-pointer flex-col">
               <span className="text-[12px] font-medium text-foreground">Pull requests</span>
               <span className="text-[10px] text-muted-foreground">
                 Watcher runs the babysitter on watched PRs.
               </span>
-            </span>
+            </label>
             <Switch
               id="auto-mode-prs"
               checked={autoPrs}
@@ -162,18 +177,17 @@ function AutoModeButton() {
               onCheckedChange={(next) => updateConfigMutation.mutate({ autoPrs: next })}
               data-testid="auto-mode-prs-switch"
             />
-          </label>
+          </div>
 
-          <label
-            htmlFor="auto-mode-issues"
+          <div
             className="flex cursor-pointer items-center justify-between gap-3 rounded-md px-1 py-1.5"
           >
-            <span className="flex flex-col">
+            <label htmlFor="auto-mode-issues" className="flex min-w-0 cursor-pointer flex-col">
               <span className="text-[12px] font-medium text-foreground">Issues</span>
               <span className="text-[10px] text-muted-foreground">
                 Agent auto-evaluates and works eligible issues.
               </span>
-            </span>
+            </label>
             <Switch
               id="auto-mode-issues"
               checked={autoIssues}
@@ -181,7 +195,7 @@ function AutoModeButton() {
               onCheckedChange={(next) => updateConfigMutation.mutate({ autoIssues: next })}
               data-testid="auto-mode-issues-switch"
             />
-          </label>
+          </div>
         </div>
 
         <Link

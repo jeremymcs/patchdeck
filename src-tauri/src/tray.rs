@@ -24,6 +24,7 @@ const ID_TOGGLE_AUTO_PRS: &str = "patchdeck-toggle-auto-prs";
 const ID_TOGGLE_AUTO_ISSUES: &str = "patchdeck-toggle-auto-issues";
 const ID_OPEN_WINDOW: &str = "patchdeck-open-window";
 const ID_QUIT: &str = "patchdeck-quit";
+const RECENT_ACTIVITY_MAX_CHARS: usize = 96;
 
 /// Lightweight snapshot of server state polled every few seconds.
 #[derive(Default, Debug, Clone)]
@@ -131,8 +132,8 @@ fn build_menu(app: &AppHandle, status: &Status) -> tauri::Result<Menu<Wry>> {
             .enabled(false)
             .build(app)?;
 
-    let toggle_prs = MenuItemBuilder::with_id(ID_TOGGLE_AUTO_PRS, toggle_auto_prs_text(status))
-        .build(app)?;
+    let toggle_prs =
+        MenuItemBuilder::with_id(ID_TOGGLE_AUTO_PRS, toggle_auto_prs_text(status)).build(app)?;
     let toggle_issues =
         MenuItemBuilder::with_id(ID_TOGGLE_AUTO_ISSUES, toggle_auto_issues_text(status))
             .build(app)?;
@@ -199,10 +200,7 @@ fn issues_review_text(status: &Status) -> String {
     if status.issues_total == 0 {
         "No watched issues".to_string()
     } else if status.issues_review == 0 {
-        format!(
-            "{} watched issues — none flagged",
-            status.issues_total
-        )
+        format!("{} watched issues — none flagged", status.issues_total)
     } else if status.issues_review == 1 {
         "1 issue needs review".to_string()
     } else {
@@ -211,11 +209,13 @@ fn issues_review_text(status: &Status) -> String {
 }
 
 fn recent_activity_text(status: &Status) -> String {
-    status
-        .last_activity_label
-        .as_deref()
-        .unwrap_or("No recent activity")
-        .to_string()
+    truncate_for_menu(
+        status
+            .last_activity_label
+            .as_deref()
+            .unwrap_or("No recent activity"),
+        RECENT_ACTIVITY_MAX_CHARS,
+    )
 }
 
 fn toggle_auto_prs_text(status: &Status) -> String {
@@ -445,6 +445,9 @@ async fn fetch_status(client: &reqwest::Client, port: u16) -> Result<Status, Str
 }
 
 fn truncate_for_menu(input: &str, max: usize) -> String {
+    if max == 0 {
+        return String::new();
+    }
     if input.chars().count() <= max {
         input.to_string()
     } else {
@@ -454,14 +457,39 @@ fn truncate_for_menu(input: &str, max: usize) -> String {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recent_activity_text_caps_full_activity_detail() {
+        let status = Status {
+            last_activity_label: Some(format!(
+                "⋯ Babysitting PR #5860 — gsd-build/gsd-2 - {}",
+                "fix(issue): ".repeat(20)
+            )),
+            ..Status::default()
+        };
+
+        let text = recent_activity_text(&status);
+
+        assert_eq!(text.chars().count(), RECENT_ACTIVITY_MAX_CHARS);
+        assert!(text.ends_with('…'));
+    }
+
+    #[test]
+    fn recent_activity_text_preserves_empty_state() {
+        let text = recent_activity_text(&Status::default());
+
+        assert_eq!(text, "No recent activity");
+    }
+}
+
 fn apply_status(app: &AppHandle, status: &Status) -> tauri::Result<()> {
     let menu = build_menu(app, status)?;
     if let Some(tray) = app.tray_by_id("patchdeck-tray") {
         tray.set_menu(Some(menu))?;
-        tray.set_tooltip(Some(format!(
-            "PatchDeck — {}",
-            tooltip_for(status)
-        )))?;
+        tray.set_tooltip(Some(format!("PatchDeck — {}", tooltip_for(status))))?;
     }
     Ok(())
 }
