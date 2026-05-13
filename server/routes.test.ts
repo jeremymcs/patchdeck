@@ -1479,6 +1479,7 @@ test("GET and POST /api/issues proxy the runtime issue monitor and work action",
   const workCalls: Array<{ repo: string; number: number }> = [];
   const evaluateCalls: Array<{ repo: string; number: number }> = [];
   const clearFailureCalls: Array<{ repo: string; number: number }> = [];
+  const labelCalls: Array<{ repo: string; number: number; add?: string[]; remove?: string[] }> = [];
   const fakeRuntime = {
     start: async () => undefined,
     stop: () => undefined,
@@ -1496,6 +1497,10 @@ test("GET and POST /api/issues proxy the runtime issue monitor and work action",
     evaluateIssue: async (repo: string, number: number) => {
       evaluateCalls.push({ repo, number });
       return { ...issues[0], evaluationStatus: "approved", evaluationSummary: "Ready for automatic work" };
+    },
+    updateIssueLabels: async (repo: string, number: number, updates: { add?: string[]; remove?: string[] }) => {
+      labelCalls.push({ repo, number, ...updates });
+      return { ...issues[0], repo, number, labels: ["bug", ...(updates.add ?? [])] };
     },
     clearIssueWorkFailures: async (repo: string, number: number) => {
       clearFailureCalls.push({ repo, number });
@@ -1624,6 +1629,20 @@ test("GET and POST /api/issues proxy the runtime issue monitor and work action",
 
     assert.equal(evaluateResponse.status, 201);
     assert.deepEqual(evaluateCalls, [{ repo: "acme/widgets", number: 17 }]);
+
+    const labelResponse = await fetch(`${harness.baseUrl}/api/issues/labels`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ repo: "acme/widgets", number: 17, add: ["blocked-label:needs-maintainer-review"], remove: ["bug"] }),
+    });
+
+    assert.equal(labelResponse.status, 200);
+    assert.deepEqual(labelCalls, [{
+      repo: "acme/widgets",
+      number: 17,
+      add: ["blocked-label:needs-maintainer-review"],
+      remove: ["bug"],
+    }]);
 
     const clearResponse = await fetch(`${harness.baseUrl}/api/issues/work/failures`, {
       method: "DELETE",

@@ -333,11 +333,16 @@ test("issues page keeps the QA-tested issue monitor and work surface wired", asy
   assertHasQueryKey(sourceFile, "issue logs query", "/api/logs");
   assertHasApiRequest(sourceFile, "issue work mutation", "POST", "/api/issues/work");
   assertHasApiRequest(sourceFile, "issue evaluation mutation", "POST", "/api/issues/evaluate");
+  assertHasApiRequest(sourceFile, "issue label mutation", "PATCH", "/api/issues/labels");
 
   for (const [label, testId] of [
     ["refresh button", "button-refresh-issues"],
     ["work issue button", "button-work-issue"],
     ["evaluate issue button", "button-evaluate-issue"],
+    ["issue label editor", "issue-label-editor"],
+    ["issue label input", "issue-label-input"],
+    ["add issue label button", "button-add-issue-label"],
+    ["remove issue label button", "button-remove-issue-label"],
     ["repo filter bar", "repo-filter-bar"],
     ["auto eligible filter", "issue-auto-eligible-filter"],
     ["needs evaluation filter", "issue-needs-evaluation-filter"],

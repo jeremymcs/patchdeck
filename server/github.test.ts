@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import type { Config, FeedbackItem } from "@shared/schema";
 import {
+  addLabelsToIssue,
   buildGitHubCloneUrl,
   buildOctokit,
   GitHubIntegrationError,
@@ -29,6 +30,7 @@ import {
   resolveNextSemverTag,
   resolveReviewThread,
   selectLatestSemverTag,
+  removeLabelsFromIssue,
   updateStatusReply,
 } from "./github";
 
@@ -790,6 +792,59 @@ test("fetchIssueSummary normalizes direct issue metadata", async () => {
   assert.equal(issue.bodyHtml, null);
   assert.deepEqual(issue.labels, ["bug"]);
   assert.deepEqual(issue.assignees, []);
+});
+
+test("addLabelsToIssue sends label names to GitHub issues", async () => {
+  const calls: unknown[] = [];
+  const octokit = {
+    issues: {
+      addLabels: async (params: unknown) => {
+        calls.push(params);
+        return { data: {} };
+      },
+    },
+  };
+
+  await addLabelsToIssue(octokit as never, { owner: "owner", repo: "repo", number: 17 }, ["blocked"]);
+
+  assert.deepEqual(calls, [{
+    owner: "owner",
+    repo: "repo",
+    issue_number: 17,
+    labels: ["blocked"],
+  }]);
+});
+
+test("removeLabelsFromIssue removes each label from GitHub issues", async () => {
+  const calls: unknown[] = [];
+  const octokit = {
+    issues: {
+      removeLabel: async (params: unknown) => {
+        calls.push(params);
+        return { data: {} };
+      },
+    },
+  };
+
+  await removeLabelsFromIssue(octokit as never, { owner: "owner", repo: "repo", number: 17 }, [
+    "blocked",
+    "blocked-label:needs-maintainer-review",
+  ]);
+
+  assert.deepEqual(calls, [
+    {
+      owner: "owner",
+      repo: "repo",
+      issue_number: 17,
+      name: "blocked",
+    },
+    {
+      owner: "owner",
+      repo: "repo",
+      issue_number: 17,
+      name: "blocked-label:needs-maintainer-review",
+    },
+  ]);
 });
 
 test("fetchFeedbackItemsForPR keeps review bots that are not explicitly ignored", async () => {
