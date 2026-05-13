@@ -5,8 +5,10 @@ import { apiRequest, fetchJson, queryClient } from "@/lib/queryClient";
 import { AppHeader } from "@/components/AppHeader";
 import { UpdateBanner } from "@/components/UpdateBanner";
 import { toast } from "@/hooks/use-toast";
-import type { Issue, LogEntry, RuntimeState } from "@shared/schema";
+import type { ActivitySnapshot, Issue, LogEntry, RuntimeState } from "@shared/schema";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { buildQueueStatusIndex, type QueueStatusView } from "@/lib/activityQueue";
+import { QueueStatusBadge } from "@/components/QueueStatusBadge";
 
 function formatDateTime(value: string | null | undefined): string {
   if (!value) return "n/a";
@@ -132,6 +134,14 @@ function isStaleIssue(issue: Issue): boolean {
   return Date.now() - updatedAt > 7 * 24 * 60 * 60 * 1000;
 }
 
+const EMPTY_ACTIVITY_SNAPSHOT: ActivitySnapshot = {
+  failed: [],
+  inProgress: [],
+  queued: [],
+  warnings: [],
+  generatedAt: "",
+};
+
 function matchesIssueWorkFilter(issue: Issue, filter: IssueWorkFilter): boolean {
   if (filter === "ready") return Boolean(issue.workPrUrl);
   if (filter === "auto") return Boolean(issue.autoWorkEligible);
@@ -214,10 +224,12 @@ function IssueRow({
   issue,
   selected,
   onSelect,
+  queueStatus,
 }: {
   issue: Issue;
   selected: boolean;
   onSelect: (issueId: string) => void;
+  queueStatus: QueueStatusView | null;
 }) {
   const showInlineStatusBadge = issue.workStatus !== "queued" && issue.workStatus !== "in_progress";
   const rowAction =
@@ -279,6 +291,7 @@ function IssueRow({
             >
               {formatEvaluationState(issue)}
             </span>
+            <QueueStatusBadge status={queueStatus} />
             {issue.labels.slice(0, 3).map((label) => (
               <span key={label} className="border border-border px-1.5 py-0 text-[10px] uppercase tracking-wider text-muted-foreground">
                 {label}
@@ -350,6 +363,11 @@ export default function Issues() {
     queryKey: ["/api/runtime"],
     refetchInterval: 5000,
   });
+  const { data: activities = EMPTY_ACTIVITY_SNAPSHOT } = useQuery<ActivitySnapshot>({
+    queryKey: ["/api/activities"],
+    refetchInterval: 3000,
+  });
+  const queueStatusById = useMemo(() => buildQueueStatusIndex(activities), [activities]);
 
   const { data: issues = [], isLoading, refetch, isFetching } = useQuery<Issue[]>({
     queryKey: ["/api/issues"],
@@ -417,6 +435,7 @@ export default function Issues() {
   });
   const selectedIssue = selectedIssueDetail ?? selectedIssueFromList;
   const selectedIssueKey = selectedIssue ? issueKey(selectedIssue) : null;
+  const selectedIssueQueueStatus = selectedIssue ? queueStatusById.get(selectedIssue.id) ?? null : null;
   const repoGroups = useMemo(() => {
     const counts = new Map<string, Issue[]>();
     const source = issues
@@ -725,6 +744,7 @@ export default function Issues() {
                         issue={issue}
                         selected={issue.id === selectedIssueId}
                         onSelect={setSelectedIssueId}
+                        queueStatus={queueStatusById.get(issue.id) ?? null}
                       />
                     ))}
                   </div>
@@ -754,6 +774,7 @@ export default function Issues() {
                     </div>
                     <div className="mt-2 flex flex-wrap items-center gap-2">
                       <IssueStatusBadge issue={selectedIssue} />
+                      <QueueStatusBadge status={selectedIssueQueueStatus} />
                       {selectedIssue.workStage && selectedIssue.workStage !== selectedIssue.workStatus && (
                         <span
                           data-testid="issue-work-stage"

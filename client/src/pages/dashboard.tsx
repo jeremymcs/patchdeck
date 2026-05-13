@@ -26,6 +26,8 @@ import {
   getHealingSessionView,
   selectRelevantHealingSession,
 } from "@/lib/ciHealing";
+import { buildQueueStatusIndex, type QueueStatusView } from "@/lib/activityQueue";
+import { QueueStatusBadge } from "@/components/QueueStatusBadge";
 
 function formatClock(timestamp: string | null): string | null {
   if (!timestamp) {
@@ -153,7 +155,7 @@ function WatchPausedIndicator() {
   );
 }
 
-function ActivityRow({ activity }: { activity: ActivityItem }) {
+function ActivityRow({ activity, queueStatus }: { activity: ActivityItem; queueStatus: QueueStatusView | null }) {
   const timeLabel = activity.status === "failed"
     ? formatClock(activity.updatedAt)
     : activity.status === "in_progress"
@@ -175,6 +177,9 @@ function ActivityRow({ activity }: { activity: ActivityItem }) {
         {activity.detail && (
           <span className="block truncate text-[11px] leading-4 text-muted-foreground">{activity.detail}</span>
         )}
+        <div className="mt-1">
+          <QueueStatusBadge status={queueStatus} />
+        </div>
         {activity.status === "failed" && activity.lastError && (
           <span
             className="block whitespace-pre-wrap break-words text-[11px] leading-4 text-destructive"
@@ -210,10 +215,12 @@ function ActivitySection({
   title,
   items,
   emptyLabel,
+  queueStatusById,
 }: {
   title: string;
   items: ActivityItem[];
   emptyLabel: string;
+  queueStatusById: Map<string, QueueStatusView>;
 }) {
   return (
     <div className="py-1">
@@ -221,7 +228,7 @@ function ActivitySection({
       {items.length > 0 ? (
         <div className="max-h-52 overflow-y-auto">
           {items.map((activity) => (
-            <ActivityRow key={activity.id} activity={activity} />
+            <ActivityRow key={activity.id} activity={activity} queueStatus={queueStatusById.get(activity.targetId) ?? null} />
           ))}
         </div>
       ) : (
@@ -236,11 +243,13 @@ function ActivityMenu({
   onClearFailed,
   isClearingFailed,
   globalDrainMode,
+  queueStatusById,
 }: {
   activities: ActivitySnapshot;
   onClearFailed: () => void;
   isClearingFailed: boolean;
   globalDrainMode: boolean;
+  queueStatusById: Map<string, QueueStatusView>;
 }) {
   const failedCount = activities.failed.length;
   const inProgressCount = activities.inProgress.length;
@@ -282,18 +291,21 @@ function ActivityMenu({
           title="Failed"
           items={activities.failed}
           emptyLabel="No failed activities."
+          queueStatusById={queueStatusById}
         />
         <div className="border-t border-border" />
         <ActivitySection
           title="In progress"
           items={activities.inProgress}
           emptyLabel="No activities running right now."
+          queueStatusById={queueStatusById}
         />
         <div className="border-t border-border" />
         <ActivitySection
           title="Queued"
           items={activities.queued}
           emptyLabel="Queue is empty."
+          queueStatusById={queueStatusById}
         />
         {globalDrainMode && queuedCount > 0 && (
           <div
@@ -583,11 +595,13 @@ const PRRow = memo(function PRRow({
   isSelected,
   onSelect,
   failureMessage,
+  queueStatus,
 }: {
   pr: PR;
   isSelected: boolean;
   onSelect: (id: string) => void;
   failureMessage?: string | null;
+  queueStatus: QueueStatusView | null;
 }) {
   const checkedAt = formatClock(pr.lastChecked);
   const watchEnabled = isPRWatchEnabled(pr);
@@ -651,6 +665,7 @@ const PRRow = memo(function PRRow({
               {pr.repo}
             </a>
             <span>{formatStatusLabel(pr.status)}</span>
+            <QueueStatusBadge status={queueStatus} />
             {!watchEnabled && <WatchPausedIndicator />}
             {pr.feedbackItems.length > 0 && (() => {
               const counts = countActiveFeedbackStatuses(pr.feedbackItems);
@@ -1243,6 +1258,7 @@ export default function Dashboard() {
     queryKey: ["/api/activities"],
     refetchInterval: 3000,
   });
+  const queueStatusById = useMemo(() => buildQueueStatusIndex(activities), [activities]);
 
   const { data: runtimeState } = useQuery<RuntimeState>({
     queryKey: ["/api/runtime"],
@@ -1273,6 +1289,7 @@ export default function Dashboard() {
   const selectedPR = displayedPRs.find((pr) => pr.id === selectedPRId) ?? null;
   const selectedPRWatchEnabled = selectedPR ? isPRWatchEnabled(selectedPR) : true;
   const selectedFailedActivity = selectedPR ? latestActivityForTarget(activities.failed, selectedPR.id) : undefined;
+  const selectedPRQueueStatus = selectedPR ? queueStatusById.get(selectedPR.id) ?? null : null;
   const selectedPRErrorMessage = selectedPR?.status === "error"
     ? selectedFailedActivity?.lastError ?? getPRFeedbackFailureReason(selectedPR) ?? "Automation stopped on this PR. Check the activity log for the full failure context."
     : null;
@@ -1413,6 +1430,7 @@ export default function Dashboard() {
               onClearFailed={() => clearFailedActivitiesMutation.mutate()}
               isClearingFailed={clearFailedActivitiesMutation.isPending}
               globalDrainMode={globalDrainMode}
+              queueStatusById={queueStatusById}
             />
           </>
         )}
@@ -1473,6 +1491,7 @@ export default function Dashboard() {
                   pr={pr}
                   isSelected={pr.id === selectedPRId}
                   onSelect={setSelectedPRId}
+                  queueStatus={queueStatusById.get(pr.id) ?? null}
                   failureMessage={
                     pr.status === "error"
                       ? latestActivityForTarget(activities.failed, pr.id)?.lastError ?? getPRFeedbackFailureReason(pr)
@@ -1514,6 +1533,12 @@ export default function Dashboard() {
                       )}
                       <span className="text-border" aria-hidden="true">·</span>
                       <span><span className="font-mono text-foreground">{selectedPR.feedbackItems.length}</span> items</span>
+                      {selectedPRQueueStatus && (
+                        <>
+                          <span className="text-border" aria-hidden="true">·</span>
+                          <QueueStatusBadge status={selectedPRQueueStatus} />
+                        </>
+                      )}
                       {selectedPR.feedbackItems.length > 0 && (() => {
                         const counts = countActiveFeedbackStatuses(selectedPR.feedbackItems);
                         return (
