@@ -41,6 +41,15 @@ function isPRWatchEnabled(pr: PR): boolean {
   return pr.watchEnabled;
 }
 
+function normalizeNumberSearch(value: string): string {
+  return value.trim().replace(/^#/, "").trim();
+}
+
+function matchesNumberSearch(number: number, search: string): boolean {
+  const normalized = normalizeNumberSearch(search);
+  return normalized === "" || String(number).includes(normalized);
+}
+
 function formatStatusLabel(status: PR["status"]): string {
   if (status === "processing") {
     return "autonomous run active";
@@ -1229,6 +1238,7 @@ function showMutationError(title: string, error: unknown) {
 export default function Dashboard() {
   const [selectedPRId, setSelectedPRId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<"active" | "archived">("active");
+  const [prNumberSearch, setPrNumberSearch] = useState("");
   const [areErrorsRolledUp, setAreErrorsRolledUp] = useState(false);
 
   const { data: prs = [], isLoading } = useQuery<PR[]>({
@@ -1268,8 +1278,10 @@ export default function Dashboard() {
     refetchInterval: 5000,
   });
 
-  const displayedPRs = viewMode === "active" ? prs : archivedPRs;
+  const displayedPRs = (viewMode === "active" ? prs : archivedPRs)
+    .filter((pr) => matchesNumberSearch(pr.number, prNumberSearch));
   const isArchived = viewMode === "archived";
+  const normalizedPrNumberSearch = normalizeNumberSearch(prNumberSearch);
 
   useEffect(() => {
     if (displayedPRs.length === 0) {
@@ -1473,13 +1485,26 @@ export default function Dashboard() {
               Archived ({archivedPRs.length})
             </button>
           </div>
+          <div className="border-b border-border px-3 py-2">
+            <label htmlFor="pr-number-search" className="sr-only">Search PR number</label>
+            <input
+              id="pr-number-search"
+              value={prNumberSearch}
+              onChange={(event) => setPrNumberSearch(event.target.value)}
+              placeholder="Search #"
+              data-testid="pr-number-search"
+              className="h-7 w-full rounded-md border border-border bg-background px-2 font-mono text-[12px] text-foreground placeholder:font-sans placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            />
+          </div>
           <div className="flex-1">
             {(isArchived ? isLoadingArchived : isLoading) ? (
               <div className="p-4 text-[12px] text-muted-foreground">Loading...</div>
             ) : displayedPRs.length === 0 ? (
               <div className="p-4 text-[12px] text-muted-foreground">
-                {isArchived
-                  ? "No archived PRs. Closed PRs are archived automatically."
+                {normalizedPrNumberSearch
+                  ? `No PRs match #${normalizedPrNumberSearch}.`
+                  : isArchived
+                    ? "No archived PRs. Closed PRs are archived automatically."
                   : "No PRs tracked yet. Add a repository or PR from Settings."}
               </div>
             ) : (

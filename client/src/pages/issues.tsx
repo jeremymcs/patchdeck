@@ -42,6 +42,15 @@ function isActiveWorkStatus(status: Issue["workStatus"]): boolean {
   return status === "queued" || status === "in_progress";
 }
 
+function normalizeNumberSearch(value: string): string {
+  return value.trim().replace(/^#/, "").trim();
+}
+
+function matchesNumberSearch(number: number, search: string): boolean {
+  const normalized = normalizeNumberSearch(search);
+  return normalized === "" || String(number).includes(normalized);
+}
+
 function getWorkPrReadiness(issue: Issue): { label: string; detail: string; tone: "success" | "warning" | "neutral" } {
   if (issue.workPrMergeable === true) {
     return {
@@ -382,14 +391,23 @@ export default function Issues() {
   const [selectedIssueId, setSelectedIssueId] = useState<string | null>(null);
   const [selectedRepo, setSelectedRepo] = useState<string>("all");
   const [selectedWorkFilter, setSelectedWorkFilter] = useState<IssueWorkFilter>("all");
+  const [issueNumberSearch, setIssueNumberSearch] = useState("");
+  const normalizedIssueNumberSearch = normalizeNumberSearch(issueNumberSearch);
+  const filteredIssues = useMemo(
+    () => issues
+      .filter((issue) => selectedRepo === "all" || issue.repo === selectedRepo)
+      .filter((issue) => matchesIssueWorkFilter(issue, selectedWorkFilter))
+      .filter((issue) => matchesNumberSearch(issue.number, issueNumberSearch)),
+    [issues, selectedRepo, selectedWorkFilter, issueNumberSearch],
+  );
 
   useEffect(() => {
-    const filteredIssues = issues
-      .filter((issue) => selectedRepo === "all" || issue.repo === selectedRepo)
-      .filter((issue) => matchesIssueWorkFilter(issue, selectedWorkFilter));
     const nextIssue = filteredIssues[0];
 
     if (!nextIssue) {
+      if (selectedIssueId !== null) {
+        setSelectedIssueId(null);
+      }
       return;
     }
 
@@ -402,7 +420,7 @@ export default function Issues() {
     if (!selected) {
       setSelectedIssueId(nextIssue.id);
     }
-  }, [issues, selectedIssueId, selectedRepo, selectedWorkFilter]);
+  }, [filteredIssues, selectedIssueId]);
 
   const selectedIssueFromList = useMemo(
     () => {
@@ -411,15 +429,13 @@ export default function Issues() {
         baseIssue
         && (selectedRepo === "all" || baseIssue.repo === selectedRepo)
         && matchesIssueWorkFilter(baseIssue, selectedWorkFilter)
+        && matchesNumberSearch(baseIssue.number, issueNumberSearch)
       ) {
         return baseIssue;
       }
-      return issues.find((issue) =>
-        (selectedRepo === "all" || issue.repo === selectedRepo)
-        && matchesIssueWorkFilter(issue, selectedWorkFilter)
-      ) ?? null;
+      return filteredIssues[0] ?? null;
     },
-    [issues, selectedIssueId, selectedRepo, selectedWorkFilter],
+    [filteredIssues, issueNumberSearch, issues, selectedIssueId, selectedRepo, selectedWorkFilter],
   );
   const { data: selectedIssueDetail, refetch: refetchSelectedIssueDetail } = useQuery<Issue>({
     queryKey: ["/api/issues/detail", selectedIssueFromList?.repo ?? "", selectedIssueFromList?.number ?? 0],
@@ -438,10 +454,7 @@ export default function Issues() {
   const selectedIssueQueueStatus = selectedIssue ? queueStatusById.get(selectedIssue.id) ?? null : null;
   const repoGroups = useMemo(() => {
     const counts = new Map<string, Issue[]>();
-    const source = issues
-      .filter((issue) => selectedRepo === "all" || issue.repo === selectedRepo)
-      .filter((issue) => matchesIssueWorkFilter(issue, selectedWorkFilter));
-    for (const issue of source) {
+    for (const issue of filteredIssues) {
       const current = counts.get(issue.repo) ?? [];
       current.push(issue);
       counts.set(issue.repo, current);
@@ -450,7 +463,7 @@ export default function Issues() {
       repo,
       issues: repoIssues,
     }));
-  }, [issues, selectedRepo, selectedWorkFilter]);
+  }, [filteredIssues]);
   const repoCounts = useMemo(() => {
     const counts = new Map<string, number>();
     for (const issue of issues) {
@@ -538,9 +551,7 @@ export default function Issues() {
   });
 
   const activeIssueCount = issues.filter((issue) => isActiveWorkStatus(issue.workStatus)).length;
-  const visibleIssues = issues
-    .filter((issue) => selectedRepo === "all" || issue.repo === selectedRepo)
-    .filter((issue) => matchesIssueWorkFilter(issue, selectedWorkFilter));
+  const visibleIssues = filteredIssues;
   const readyIssueCount = issues.filter((issue) =>
     (selectedRepo === "all" || issue.repo === selectedRepo) && Boolean(issue.workPrUrl)
   ).length;
@@ -602,6 +613,20 @@ export default function Issues() {
             Watched issues
           </div>
           <div data-testid="repo-filter-bar" className="flex flex-col gap-2 border-b border-border px-4 py-2.5">
+            <div className="flex flex-wrap items-start gap-2">
+              <span className="mt-1 w-14 shrink-0 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                Search
+              </span>
+              <label htmlFor="issue-number-search" className="sr-only">Search issue number</label>
+              <input
+                id="issue-number-search"
+                value={issueNumberSearch}
+                onChange={(event) => setIssueNumberSearch(event.target.value)}
+                placeholder="Search #"
+                data-testid="issue-number-search"
+                className="h-7 min-w-0 flex-1 rounded-md border border-border bg-background px-2 font-mono text-[12px] text-foreground placeholder:font-sans placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              />
+            </div>
             <div className="flex flex-wrap items-start gap-2">
               <span className="mt-1 w-14 shrink-0 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
                 Repo
@@ -730,7 +755,9 @@ export default function Issues() {
                 <div className="p-4 text-[12px] text-muted-foreground">Loading...</div>
               ) : visibleIssues.length === 0 ? (
                 <div className="p-4 text-[12px] text-muted-foreground">
-                  No open issues found in watched repositories.
+                  {normalizedIssueNumberSearch
+                    ? `No issues match #${normalizedIssueNumberSearch}.`
+                    : "No open issues found in watched repositories."}
                 </div>
               ) : (
                 repoGroups.map((group) => (
