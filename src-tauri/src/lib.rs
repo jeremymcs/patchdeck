@@ -281,6 +281,7 @@ pub fn run() {
         .run(|app_handle, event| {
             match event {
                 // User clicked the Dock icon while the window was hidden — reveal it.
+                #[cfg(target_os = "macos")]
                 tauri::RunEvent::Reopen {
                     has_visible_windows,
                     ..
