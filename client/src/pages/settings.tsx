@@ -1097,6 +1097,15 @@ export default function Settings() {
               />
 
               <StringListRow
+                label="Priority issue authors"
+                description="GitHub logins whose issues are evaluated and worked before the regular issue queue."
+                placeholder="octocat"
+                values={config?.priorityIssueAuthors ?? []}
+                onChange={(next) => updateConfigMutation.mutate({ priorityIssueAuthors: next })}
+                disabled={!config || updateConfigMutation.isPending}
+              />
+
+              <StringListRow
                 label="Ignored bots"
                 description="Bot logins whose comments and reviews are ignored."
                 placeholder="dependabot[bot]"

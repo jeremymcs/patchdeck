@@ -34,6 +34,7 @@ import { generateReleaseSocialPost } from "./releaseSocialPostAgent";
 import { randomUUID } from "node:crypto";
 
 const log = childLogger("runtime");
+const PRIORITY_ISSUE_JOB_PRIORITY = 50;
 import { createBackgroundJobHandlers } from "./backgroundJobHandlers";
 import { BackgroundJobDispatcher } from "./backgroundJobDispatcher";
 import { BackgroundJobQueue, buildBackgroundJobDedupeKey } from "./backgroundJobQueue";
@@ -225,16 +226,44 @@ function normalizeIssueLabel(label: string): string {
   return label.trim().toLowerCase();
 }
 
+function normalizeGitHubLogin(login: string): string {
+  return login.trim().toLowerCase().replace(/^@/, "");
+}
+
+function isPriorityIssueAuthor(author: string | undefined, priorityIssueAuthors: readonly string[]): boolean {
+  const normalizedAuthor = normalizeGitHubLogin(author ?? "");
+  if (!normalizedAuthor) {
+    return false;
+  }
+
+  return priorityIssueAuthors.some((entry) => normalizeGitHubLogin(entry) === normalizedAuthor);
+}
+
+function compareIssueQueuePriority(
+  a: Pick<Issue, "author" | "updatedAt">,
+  b: Pick<Issue, "author" | "updatedAt">,
+  priorityIssueAuthors: readonly string[],
+): number {
+  const aPriority = isPriorityIssueAuthor(a.author, priorityIssueAuthors);
+  const bPriority = isPriorityIssueAuthor(b.author, priorityIssueAuthors);
+  if (aPriority !== bPriority) {
+    return aPriority ? -1 : 1;
+  }
+
+  return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+}
+
 export type PlanAutomaticIssueQueueInput = {
   repoSettings: Pick<WatchedRepo, "repo" | "issueAutoEvaluate" | "issueAutoWork">[];
   issues: Pick<
     Issue,
-    "id" | "repo" | "number" | "workStatus" | "workPrUrl" | "autoWorkEligible" | "evaluationStatus" | "updatedAt"
+    "id" | "repo" | "number" | "author" | "workStatus" | "workPrUrl" | "autoWorkEligible" | "evaluationStatus" | "updatedAt"
   >[];
   activeEvaluationTargets: Set<string>;
   activeWorkCount: number;
   maxConcurrentIssueEvaluations: number;
   maxConcurrentIssueWork: number;
+  priorityIssueAuthors?: string[];
 };
 
 export type PlanAutomaticIssueQueueActions = {
@@ -258,6 +287,7 @@ export function planAutomaticIssueQueueActions(
   let evaluationBudget = Math.max(0, input.maxConcurrentIssueEvaluations - input.activeEvaluationTargets.size);
   let workBudget = Math.max(0, input.maxConcurrentIssueWork - input.activeWorkCount);
   const claimed = new Set<string>();
+  const priorityIssueAuthors = input.priorityIssueAuthors ?? [];
 
   // Auto-work sweep first: budget is scarcer. Preserve per-repo single-flight semantics —
   // at most one work job per repo at a time, regardless of global budget.
@@ -269,7 +299,7 @@ export function planAutomaticIssueQueueActions(
     }
     const candidate = repoIssues
       .filter((issue) => issue.workStatus === "idle" && !issue.workPrUrl && issue.autoWorkEligible)
-      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())[0];
+      .sort((a, b) => compareIssueQueuePriority(a, b, priorityIssueAuthors))[0];
     if (!candidate) continue;
     result.work.push({ repo: candidate.repo, number: candidate.number, id: candidate.id });
     claimed.add(candidate.id);
@@ -289,7 +319,7 @@ export function planAutomaticIssueQueueActions(
           && !input.activeEvaluationTargets.has(issue.id)
           && !claimed.has(issue.id),
         )
-        .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+        .sort((a, b) => compareIssueQueuePriority(a, b, priorityIssueAuthors));
       if (pending.length > 0) {
         repoQueues.set(repo, pending);
       }
@@ -788,6 +818,9 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
     const octokit = await buildOctokit(config);
     const issue = await fetchIssueSummary(octokit, { ...parsedRepo, number });
     const targetId = formatIssueTargetId(issue.repoFullName, issue.number);
+    const priority = isPriorityIssueAuthor(issue.author, config.priorityIssueAuthors)
+      ? PRIORITY_ISSUE_JOB_PRIORITY
+      : undefined;
     const job = await scheduleBackgroundJob(
       "evaluate_issue",
       targetId,
@@ -803,6 +836,7 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
           targetUrl: issue.url,
         }),
       },
+      priority === undefined ? undefined : { priority },
     );
 
     await storage.addLog(targetId, "info", `${source === "automatic" ? "Queued automatic issue evaluation" : "Queued manual issue evaluation"} for ${issue.repoFullName}#${issue.number}`, {
@@ -846,6 +880,9 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
     const issue = await fetchIssueSummary(octokit, { ...parsedRepo, number });
     const baseBranch = await getDefaultBranchForRepo(octokit, parsedRepo);
     const targetId = formatIssueTargetId(issue.repoFullName, issue.number);
+    const priority = isPriorityIssueAuthor(issue.author, config.priorityIssueAuthors)
+      ? PRIORITY_ISSUE_JOB_PRIORITY
+      : undefined;
 
     const job = await scheduleBackgroundJob(
       "work_issue",
@@ -863,6 +900,7 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
           targetUrl: issue.url,
         }),
       },
+      priority === undefined ? undefined : { priority },
     );
 
     await storage.addLog(targetId, "info", `${source === "automatic" ? "Queued automatic issue work" : "Queued manual issue work"} for ${issue.repoFullName}#${issue.number}`, {
@@ -1080,6 +1118,7 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       activeWorkCount,
       maxConcurrentIssueEvaluations: config.maxConcurrentIssueEvaluations,
       maxConcurrentIssueWork: config.maxConcurrentIssueWork,
+      priorityIssueAuthors: config.priorityIssueAuthors,
     });
 
     for (const action of plan.work) {

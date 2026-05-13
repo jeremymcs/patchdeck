@@ -588,6 +588,7 @@ export const configSchema = z.object({
   maxConcurrentIssueWork: z.number().int().positive().default(1),
   watchedRepos: z.array(z.string()),
   trustedReviewers: z.array(z.string()),
+  priorityIssueAuthors: z.array(z.string()),
   ignoredBots: z.array(z.string()),
 });
 export type Config = z.infer<typeof configSchema>;

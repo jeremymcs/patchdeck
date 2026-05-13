@@ -308,6 +308,7 @@ function makePlanIssue(
     id: `${overrides.repo}#${overrides.number}`,
     repo: overrides.repo,
     number: overrides.number,
+    author: overrides.author ?? "alice",
     workStatus: overrides.workStatus ?? "idle",
     workPrUrl: overrides.workPrUrl ?? null,
     autoWorkEligible: overrides.autoWorkEligible ?? false,
@@ -344,6 +345,37 @@ test("planAutomaticIssueQueueActions sweeps every unevaluated issue up to the ev
   });
   assert.equal(plan.evaluations.length, 3, "must respect the evaluation cap exactly");
   assert.equal(plan.work.length, 0);
+});
+
+test("planAutomaticIssueQueueActions prioritizes configured issue authors", () => {
+  // Goal: when support-critical users report issues, their work should get the scarce
+  // auto-work slot before newer reports from the regular queue.
+  const plan = planAutomaticIssueQueueActions({
+    repoSettings: [{ repo: "acme/widgets", issueAutoEvaluate: true, issueAutoWork: true }],
+    issues: [
+      makePlanIssue({
+        repo: "acme/widgets",
+        number: 1,
+        author: "regular-user",
+        autoWorkEligible: true,
+        updatedAt: "2026-05-02T00:00:00.000Z",
+      }),
+      makePlanIssue({
+        repo: "acme/widgets",
+        number: 2,
+        author: "Priority-User",
+        autoWorkEligible: true,
+        updatedAt: "2026-05-01T00:00:00.000Z",
+      }),
+    ],
+    activeEvaluationTargets: new Set(),
+    activeWorkCount: 0,
+    maxConcurrentIssueEvaluations: 2,
+    maxConcurrentIssueWork: 1,
+    priorityIssueAuthors: ["priority-user"],
+  });
+
+  assert.deepEqual(plan.work.map((action) => action.number), [2]);
 });
 
 test("planAutomaticIssueQueueActions counts already-queued evaluations against the cap", () => {

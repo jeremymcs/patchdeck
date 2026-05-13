@@ -389,6 +389,7 @@ export function applyConfigUpdate(existing: Config, updates: Partial<Config>): C
     webUsername,
     watchedRepos: updates.watchedRepos ?? existing.watchedRepos,
     trustedReviewers: updates.trustedReviewers ?? existing.trustedReviewers,
+    priorityIssueAuthors: updates.priorityIssueAuthors ?? existing.priorityIssueAuthors,
     ignoredBots: updates.ignoredBots ?? existing.ignoredBots,
   });
 }
