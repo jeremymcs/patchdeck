@@ -270,6 +270,7 @@ test("dashboard keeps the QA-tested PR, repo, feedback, and side-panel workflows
     ["active tab", "tab-active"],
     ["on issues tab", "tab-on-issues"],
     ["archived tab", "tab-archived"],
+    ["PR number search", "pr-number-search"],
     ["PR on issues badge", "pr-on-issues-badge"],
     ["run-now action", "button-apply"],
     ["pause-resume watch action", "button-toggle-watch"],
@@ -314,6 +315,8 @@ test("dashboard keeps the QA-tested PR, repo, feedback, and side-panel workflows
   assertHasExpression(sourceFile, "queue status helper", /\bbuildQueueStatusIndex\b/);
   assertHasExpression(sourceFile, "queue status badge", /\bQueueStatusBadge\b/);
   assertHasExpression(sourceFile, "queue status index", /\bqueueStatusById\b/);
+  assertHasExpression(sourceFile, "PR number search helper", /\bmatchesNumberSearch\b/);
+  assertHasStringValue(sourceFile, "PR number search placeholder", "Search #");
   assertHasExpression(sourceFile, "issue-linked PR index", /\bbuildIssueLinkedPRIndex\b/);
   assertHasStringValue(sourceFile, "on issues tab label", /On Issues/);
   assertHasStringValue(sourceFile, "drain mode action label", "Paused by drain mode");
@@ -342,6 +345,7 @@ test("issues page keeps the QA-tested issue monitor and work surface wired", asy
 
   for (const [label, testId] of [
     ["refresh button", "button-refresh-issues"],
+    ["issue number search", "issue-number-search"],
     ["work issue button", "button-work-issue"],
     ["evaluate issue button", "button-evaluate-issue"],
     ["issue label editor", "issue-label-editor"],
@@ -389,6 +393,8 @@ test("issues page keeps the QA-tested issue monitor and work surface wired", asy
   assertHasExpression(sourceFile, "issue PR mergeability", /\bworkPrMergeable\b/);
   assertHasExpression(sourceFile, "issue queue helper", /\bbuildQueueStatusIndex\b/);
   assertHasExpression(sourceFile, "issue queue badge", /\bQueueStatusBadge\b/);
+  assertHasExpression(sourceFile, "issue filtered list", /\bfilteredIssues\b/);
+  assertHasStringValue(sourceFile, "issue number search placeholder", "Search #");
   assertHasStringValue(sourceFile, "issue body label", "Issue body");
 });
 
