@@ -40,7 +40,10 @@
     "resources": {
       "../dist": "dist/"
     },
-    "externalBin": []
+    "externalBin": [],
+    "macOS": {
+      "signingIdentity": "-"
+    }
   },
   "plugins": {
     "shell": {
