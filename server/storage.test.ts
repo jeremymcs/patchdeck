@@ -230,6 +230,7 @@ test("SqliteStorage reloads config and PR state from the same root", async () =>
     ownPrsOnly: false,
     issueAutoEvaluate: false,
     issueAutoWork: false,
+    prAutoMonitor: true,
   });
   assert.equal(runtime.drainMode, true);
   assert.equal(runtime.drainRequestedAt, "2026-03-18T10:00:00.000Z");
@@ -489,6 +490,7 @@ test("SqliteStorage updateRepoSettings tracks a previously untracked repo", asyn
       ownPrsOnly: false,
       issueAutoEvaluate: true,
       issueAutoWork: true,
+      prAutoMonitor: true,
     });
 
     const after = await storage.getConfig();
@@ -501,6 +503,7 @@ test("SqliteStorage updateRepoSettings tracks a previously untracked repo", asyn
       ownPrsOnly: false,
       issueAutoEvaluate: true,
       issueAutoWork: true,
+      prAutoMonitor: true,
     });
   } finally {
     storage.close();

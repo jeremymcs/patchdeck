@@ -2118,6 +2118,21 @@ export class PRBabysitter {
           continue;
         }
 
+        const repoPrAutoMonitor = repoSettingsByRepo.get(repoSlug)?.prAutoMonitor ?? true;
+        if (!repoPrAutoMonitor) {
+          if (!syncedFeedbackPrIds.has(local.id)) {
+            try {
+              await this.syncFeedbackForPR(local.id, { phase: "watcher" });
+              syncedFeedbackPrIds.add(local.id);
+            } catch (error) {
+              await this.storage.addLog(local.id, "warn", `Could not sync GitHub feedback while PR auto-monitor is manual: ${summarizeUnknownError(error)}`, {
+                phase: "watcher",
+              });
+            }
+          }
+          continue;
+        }
+
         await this.storage.addLog(local.id, "info", "Watcher queued autonomous babysitter run", {
           phase: "watcher",
           metadata: { repo: repoSlug },

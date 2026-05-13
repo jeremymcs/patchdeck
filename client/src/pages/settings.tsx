@@ -39,6 +39,10 @@ function getIssueEvaluateMode(issueAutoEvaluate?: boolean): IssueWorkMode {
   return issueAutoEvaluate ? "auto" : "manual";
 }
 
+function getPrMonitorMode(prAutoMonitor?: boolean): IssueWorkMode {
+  return prAutoMonitor === false ? "manual" : "auto";
+}
+
 function repoTestId(repo: string): string {
   return repo.replace("/", "-");
 }
@@ -213,7 +217,7 @@ export default function Settings() {
   });
 
   const updateRepoSettingsMutation = useMutation({
-    mutationFn: async (updates: { repo: string; autoCreateReleases?: boolean; ownPrsOnly?: boolean; issueAutoEvaluate?: boolean; issueAutoWork?: boolean }) => {
+    mutationFn: async (updates: { repo: string; autoCreateReleases?: boolean; ownPrsOnly?: boolean; issueAutoEvaluate?: boolean; issueAutoWork?: boolean; prAutoMonitor?: boolean }) => {
       const res = await apiRequest("PATCH", "/api/repos/settings", updates);
       return res.json();
     },
@@ -459,7 +463,7 @@ export default function Settings() {
                             {repo.repo}
                           </a>
                           <div className="mt-1 text-[11px] text-muted-foreground">
-                            {repo.ownPrsOnly === false ? "Tracking team PRs" : "Tracking your PRs"} · issue evaluate {repo.issueAutoEvaluate ? "auto" : "manual"} · issue work {repo.issueAutoWork ? "auto" : "manual"}
+                            {repo.ownPrsOnly === false ? "Tracking team PRs" : "Tracking your PRs"} · PR monitoring {repo.prAutoMonitor === false ? "manual" : "auto"} · issue evaluate {repo.issueAutoEvaluate ? "auto" : "manual"} · issue work {repo.issueAutoWork ? "auto" : "manual"}
                           </div>
                         </div>
                         <button
@@ -509,7 +513,7 @@ export default function Settings() {
                           Global Issues auto is off — these per-repo issue controls are paused. Re-enable from the AUTO MODE menu.
                         </div>
                       )}
-                      <div className="mt-4 grid gap-4 md:grid-cols-4">
+                      <div className="mt-4 grid gap-4 md:grid-cols-3">
                         <div>
                           <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
                             Track automatically
@@ -526,6 +530,26 @@ export default function Settings() {
                             name={`tracked-repo-scope-${repo.repo}`}
                             testIdPrefix={`tracked-repo-scope-${repo.repo.replace("/", "-")}`}
                           />
+                        </div>
+                        <div>
+                          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                            PR monitoring
+                          </div>
+                          <IssueWorkModeControl
+                            value={getPrMonitorMode(repo.prAutoMonitor)}
+                            onChange={(value) =>
+                              updateRepoSettingsMutation.mutate({
+                                repo: repo.repo,
+                                prAutoMonitor: value === "auto",
+                              })
+                            }
+                            disabled={updateRepoSettingsMutation.isPending}
+                            name={`tracked-repo-pr-monitor-${repo.repo}`}
+                            testIdPrefix={`tracked-repo-pr-monitor-${repo.repo.replace("/", "-")}`}
+                          />
+                          <div className="mt-1 text-[10px] text-muted-foreground">
+                            Manual still syncs PR status; skips auto babysit.
+                          </div>
                         </div>
                         <div>
                           <div className="text-[10px] uppercase tracking-wider text-muted-foreground">

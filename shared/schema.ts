@@ -599,6 +599,7 @@ export const watchedRepoSchema = z.object({
   ownPrsOnly: z.boolean(),
   issueAutoEvaluate: z.boolean(),
   issueAutoWork: z.boolean(),
+  prAutoMonitor: z.boolean(),
 });
 export type WatchedRepo = z.infer<typeof watchedRepoSchema>;
 
