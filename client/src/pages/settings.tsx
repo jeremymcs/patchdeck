@@ -32,6 +32,22 @@ const REPO_AGENT_OPTIONS = [
   { value: "claude", label: "claude" },
 ] as const;
 
+const CODEX_MODEL_OPTIONS = [
+  { value: "", label: "CLI default" },
+  { value: "gpt-5.5", label: "gpt-5.5" },
+  { value: "gpt-5.4", label: "gpt-5.4" },
+  { value: "gpt-5.4-mini", label: "gpt-5.4-mini" },
+  { value: "gpt-5.3-codex", label: "gpt-5.3-codex" },
+  { value: "gpt-5.3-codex-spark", label: "gpt-5.3-codex-spark" },
+  { value: "gpt-5.2", label: "gpt-5.2" },
+] as const;
+
+const CLAUDE_MODEL_OPTIONS = [
+  { value: "", label: "CLI default" },
+  { value: "opus", label: "opus" },
+  { value: "sonnet", label: "sonnet" },
+] as const;
+
 const CODEX_REASONING_OPTIONS = [
   { value: "default", label: "CLI default" },
   { value: "low", label: "Low" },
@@ -667,7 +683,7 @@ export default function Settings() {
                           <label htmlFor={`tracked-repo-codex-model-${id}`} className="text-[10px] uppercase tracking-wider text-muted-foreground">
                             Codex model
                           </label>
-                          <input
+                          <select
                             id={`tracked-repo-codex-model-${id}`}
                             value={repo.codexModel ?? ""}
                             onChange={(e) =>
@@ -677,9 +693,13 @@ export default function Settings() {
                               })
                             }
                             disabled={updateRepoSettingsMutation.isPending}
-                            placeholder={config?.codexModel || "Global"}
                             className="border border-border bg-transparent px-2 py-1 text-xs focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
-                          />
+                          >
+                            <option value="">Global</option>
+                            {CODEX_MODEL_OPTIONS.filter((option) => option.value !== "").map((option) => (
+                              <option key={option.value} value={option.value}>{option.label}</option>
+                            ))}
+                          </select>
                         </div>
                         <div className="grid gap-2">
                           <label htmlFor={`tracked-repo-codex-reasoning-${id}`} className="text-[10px] uppercase tracking-wider text-muted-foreground">
@@ -709,7 +729,7 @@ export default function Settings() {
                           <label htmlFor={`tracked-repo-claude-model-${id}`} className="text-[10px] uppercase tracking-wider text-muted-foreground">
                             Claude model
                           </label>
-                          <input
+                          <select
                             id={`tracked-repo-claude-model-${id}`}
                             value={repo.claudeModel ?? ""}
                             onChange={(e) =>
@@ -719,9 +739,13 @@ export default function Settings() {
                               })
                             }
                             disabled={updateRepoSettingsMutation.isPending}
-                            placeholder={config?.claudeModel || "Global"}
                             className="border border-border bg-transparent px-2 py-1 text-xs focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
-                          />
+                          >
+                            <option value="">Global</option>
+                            {CLAUDE_MODEL_OPTIONS.filter((option) => option.value !== "").map((option) => (
+                              <option key={option.value} value={option.value}>{option.label}</option>
+                            ))}
+                          </select>
                         </div>
                         <div className="grid gap-2">
                           <label htmlFor={`tracked-repo-claude-effort-${id}`} className="text-[10px] uppercase tracking-wider text-muted-foreground">
@@ -788,14 +812,17 @@ export default function Settings() {
                   <label htmlFor="settings-codex-model" className="text-xs uppercase tracking-wider text-muted-foreground">
                     Codex model
                   </label>
-                  <input
+                  <select
                     id="settings-codex-model"
                     value={config?.codexModel ?? ""}
                     onChange={(e) => updateConfigMutation.mutate({ codexModel: e.target.value })}
                     disabled={updateConfigMutation.isPending}
-                    placeholder="CLI default"
                     className="border border-border bg-transparent px-2 py-1 text-sm focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
-                  />
+                  >
+                    {CODEX_MODEL_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
                 </div>
                 <div className="grid gap-2">
                   <label htmlFor="settings-codex-reasoning" className="text-xs uppercase tracking-wider text-muted-foreground">
@@ -817,14 +844,17 @@ export default function Settings() {
                   <label htmlFor="settings-claude-model" className="text-xs uppercase tracking-wider text-muted-foreground">
                     Claude model
                   </label>
-                  <input
+                  <select
                     id="settings-claude-model"
                     value={config?.claudeModel ?? "opus"}
                     onChange={(e) => updateConfigMutation.mutate({ claudeModel: e.target.value })}
                     disabled={updateConfigMutation.isPending}
-                    placeholder="opus"
                     className="border border-border bg-transparent px-2 py-1 text-sm focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
-                  />
+                  >
+                    {CLAUDE_MODEL_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
                 </div>
                 <div className="grid gap-2">
                   <label htmlFor="settings-claude-effort" className="text-xs uppercase tracking-wider text-muted-foreground">
