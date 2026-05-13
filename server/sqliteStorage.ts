@@ -68,6 +68,10 @@ type ConfigRow = {
   coding_agent: Config["codingAgent"];
   fallback_to_next_coding_agent: number;
   model: string;
+  codex_model: string;
+  codex_reasoning_effort: Config["codexReasoningEffort"];
+  claude_model: string;
+  claude_effort: Config["claudeEffort"];
   max_turns: number;
   batch_window_ms: number;
   poll_interval_ms: number;
@@ -158,6 +162,11 @@ type WatchedRepoRow = {
   issue_auto_evaluate: number;
   issue_auto_work: number;
   pr_auto_monitor: number;
+  coding_agent_override: Config["codingAgent"] | null;
+  codex_model: string | null;
+  codex_reasoning_effort: Config["codexReasoningEffort"] | null;
+  claude_model: string | null;
+  claude_effort: Config["claudeEffort"] | null;
 };
 
 type FeedbackItemRow = {
@@ -524,6 +533,10 @@ export class SqliteStorage implements IStorage {
         coding_agent TEXT NOT NULL,
         fallback_to_next_coding_agent INTEGER NOT NULL DEFAULT 0,
         model TEXT NOT NULL,
+        codex_model TEXT NOT NULL DEFAULT '',
+        codex_reasoning_effort TEXT NOT NULL DEFAULT 'default',
+        claude_model TEXT NOT NULL DEFAULT 'opus',
+        claude_effort TEXT NOT NULL DEFAULT 'default',
         max_turns INTEGER NOT NULL,
         batch_window_ms INTEGER NOT NULL,
         poll_interval_ms INTEGER NOT NULL,
@@ -548,7 +561,12 @@ export class SqliteStorage implements IStorage {
         repo TEXT PRIMARY KEY,
         auto_create_releases INTEGER NOT NULL DEFAULT 0,
         own_prs_only INTEGER NOT NULL DEFAULT 1,
-        issue_auto_work INTEGER NOT NULL DEFAULT 0
+        issue_auto_work INTEGER NOT NULL DEFAULT 0,
+        coding_agent_override TEXT,
+        codex_model TEXT,
+        codex_reasoning_effort TEXT,
+        claude_model TEXT,
+        claude_effort TEXT
       );
 
       CREATE TABLE IF NOT EXISTS prs (
@@ -841,6 +859,10 @@ export class SqliteStorage implements IStorage {
     this.ensureColumn("config", "web_username", "TEXT NOT NULL DEFAULT ''");
     this.ensureColumn("config", "web_password", "TEXT NOT NULL DEFAULT ''");
     this.ensureColumn("config", "fallback_to_next_coding_agent", "INTEGER NOT NULL DEFAULT 0");
+    this.ensureColumn("config", "codex_model", "TEXT NOT NULL DEFAULT ''");
+    this.ensureColumn("config", "codex_reasoning_effort", "TEXT NOT NULL DEFAULT 'default'");
+    this.ensureColumn("config", "claude_model", "TEXT NOT NULL DEFAULT 'opus'");
+    this.ensureColumn("config", "claude_effort", "TEXT NOT NULL DEFAULT 'default'");
     this.ensureColumn("config", "auto_resolve_merge_conflicts", "INTEGER NOT NULL DEFAULT 1");
     this.ensureColumn("config", "auto_create_releases", "INTEGER NOT NULL DEFAULT 0");
     this.ensureColumn("config", "auto_update_docs", "INTEGER NOT NULL DEFAULT 1");
@@ -861,6 +883,11 @@ export class SqliteStorage implements IStorage {
     this.ensureColumn("watched_repos", "issue_auto_work", "INTEGER NOT NULL DEFAULT 0");
     this.ensureColumn("watched_repos", "issue_auto_evaluate", "INTEGER NOT NULL DEFAULT 0");
     this.ensureColumn("watched_repos", "pr_auto_monitor", "INTEGER NOT NULL DEFAULT 1");
+    this.ensureColumn("watched_repos", "coding_agent_override", "TEXT");
+    this.ensureColumn("watched_repos", "codex_model", "TEXT");
+    this.ensureColumn("watched_repos", "codex_reasoning_effort", "TEXT");
+    this.ensureColumn("watched_repos", "claude_model", "TEXT");
+    this.ensureColumn("watched_repos", "claude_effort", "TEXT");
     this.exec("UPDATE watched_repos SET issue_auto_evaluate = 1 WHERE issue_auto_work = 1 AND issue_auto_evaluate = 0");
     this.ensureColumn("config", "max_concurrent_issue_evaluations", "INTEGER NOT NULL DEFAULT 2");
     this.ensureColumn("config", "max_concurrent_issue_work", "INTEGER NOT NULL DEFAULT 1");
@@ -946,6 +973,10 @@ export class SqliteStorage implements IStorage {
       fallbackToNextCodingAgent: Boolean(
         row.fallback_to_next_coding_agent ?? Number(DEFAULT_CONFIG.fallbackToNextCodingAgent),
       ),
+      codexModel: row.codex_model ?? DEFAULT_CONFIG.codexModel,
+      codexReasoningEffort: row.codex_reasoning_effort ?? DEFAULT_CONFIG.codexReasoningEffort,
+      claudeModel: row.claude_model ?? DEFAULT_CONFIG.claudeModel,
+      claudeEffort: row.claude_effort ?? DEFAULT_CONFIG.claudeEffort,
       maxTurns: row.max_turns,
       batchWindowMs: row.batch_window_ms,
       pollIntervalMs: row.poll_interval_ms,
@@ -999,6 +1030,10 @@ export class SqliteStorage implements IStorage {
           coding_agent,
           fallback_to_next_coding_agent,
           model,
+          codex_model,
+          codex_reasoning_effort,
+          claude_model,
+          claude_effort,
           max_turns,
           batch_window_ms,
           poll_interval_ms,
@@ -1023,7 +1058,7 @@ export class SqliteStorage implements IStorage {
           trusted_reviewers_json,
           priority_issue_authors_json,
           ignored_bots_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           github_token = excluded.github_token,
           github_tokens_json = excluded.github_tokens_json,
@@ -1032,6 +1067,10 @@ export class SqliteStorage implements IStorage {
           coding_agent = excluded.coding_agent,
           fallback_to_next_coding_agent = excluded.fallback_to_next_coding_agent,
           model = excluded.model,
+          codex_model = excluded.codex_model,
+          codex_reasoning_effort = excluded.codex_reasoning_effort,
+          claude_model = excluded.claude_model,
+          claude_effort = excluded.claude_effort,
           max_turns = excluded.max_turns,
           batch_window_ms = excluded.batch_window_ms,
           poll_interval_ms = excluded.poll_interval_ms,
@@ -1065,6 +1104,10 @@ export class SqliteStorage implements IStorage {
         config.codingAgent,
         Number(config.fallbackToNextCodingAgent),
         legacyModelValue,
+        config.codexModel,
+        config.codexReasoningEffort,
+        config.claudeModel,
+        config.claudeEffort,
         config.maxTurns,
         config.batchWindowMs,
         config.pollIntervalMs,
@@ -1095,13 +1138,18 @@ export class SqliteStorage implements IStorage {
       for (const repo of config.watchedRepos) {
         const settings = watchedRepoSettings.get(repo);
         this.run(
-          "INSERT INTO watched_repos (repo, auto_create_releases, own_prs_only, issue_auto_evaluate, issue_auto_work, pr_auto_monitor) VALUES (?, ?, ?, ?, ?, ?)",
+          "INSERT INTO watched_repos (repo, auto_create_releases, own_prs_only, issue_auto_evaluate, issue_auto_work, pr_auto_monitor, coding_agent_override, codex_model, codex_reasoning_effort, claude_model, claude_effort) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
           repo,
           settings?.auto_create_releases ?? 0,
           settings?.own_prs_only ?? 1,
           settings?.issue_auto_evaluate ?? 0,
           settings?.issue_auto_work ?? 0,
           settings?.pr_auto_monitor ?? 1,
+          settings?.coding_agent_override ?? null,
+          settings?.codex_model ?? null,
+          settings?.codex_reasoning_effort ?? null,
+          settings?.claude_model ?? null,
+          settings?.claude_effort ?? null,
         );
       }
     });
@@ -1115,12 +1163,17 @@ export class SqliteStorage implements IStorage {
       issueAutoEvaluate: Boolean(row.issue_auto_evaluate ?? 0),
       issueAutoWork: Boolean(row.issue_auto_work ?? 0),
       prAutoMonitor: Boolean(row.pr_auto_monitor ?? 1),
+      codingAgentOverride: row.coding_agent_override ?? null,
+      codexModel: row.codex_model ?? null,
+      codexReasoningEffort: row.codex_reasoning_effort ?? null,
+      claudeModel: row.claude_model ?? null,
+      claudeEffort: row.claude_effort ?? null,
     };
   }
 
   private getWatchedRepoRows(): WatchedRepoRow[] {
     return this.all<WatchedRepoRow>(
-      "SELECT repo, auto_create_releases, own_prs_only, issue_auto_evaluate, issue_auto_work, pr_auto_monitor FROM watched_repos ORDER BY repo ASC",
+      "SELECT repo, auto_create_releases, own_prs_only, issue_auto_evaluate, issue_auto_work, pr_auto_monitor, coding_agent_override, codex_model, codex_reasoning_effort, claude_model, claude_effort FROM watched_repos ORDER BY repo ASC",
     );
   }
 
@@ -1742,7 +1795,8 @@ export class SqliteStorage implements IStorage {
 
   async getConfig(): Promise<Config> {
     const row = this.get<ConfigRow>(`
-      SELECT github_token, github_tokens_json, web_username, web_password, coding_agent, fallback_to_next_coding_agent, model, max_turns, batch_window_ms,
+      SELECT github_token, github_tokens_json, web_username, web_password, coding_agent, fallback_to_next_coding_agent, model,
+             codex_model, codex_reasoning_effort, claude_model, claude_effort, max_turns, batch_window_ms,
              poll_interval_ms, max_changes_per_run, auto_resolve_merge_conflicts, auto_create_releases,
              auto_update_docs, include_repository_links_in_github_comments, github_comment_app_name,
              post_github_progress_replies,
@@ -1771,7 +1825,7 @@ export class SqliteStorage implements IStorage {
 
   async getRepoSettings(repo: string): Promise<WatchedRepo | undefined> {
     const row = this.get<WatchedRepoRow>(
-      "SELECT repo, auto_create_releases, own_prs_only, issue_auto_evaluate, issue_auto_work, pr_auto_monitor FROM watched_repos WHERE repo = ?",
+      "SELECT repo, auto_create_releases, own_prs_only, issue_auto_evaluate, issue_auto_work, pr_auto_monitor, coding_agent_override, codex_model, codex_reasoning_effort, claude_model, claude_effort FROM watched_repos WHERE repo = ?",
       repo,
     );
     return row ? this.parseWatchedRepoRow(row) : undefined;
@@ -1788,20 +1842,30 @@ export class SqliteStorage implements IStorage {
       issueAutoEvaluate: false,
       issueAutoWork: false,
       prAutoMonitor: true,
+      codingAgentOverride: null,
+      codexModel: null,
+      codexReasoningEffort: null,
+      claudeModel: null,
+      claudeEffort: null,
     };
     const next = applyWatchedRepoUpdate(existing, updates);
 
     this.withWriteTransaction(() => {
       this.run(
         `
-          INSERT INTO watched_repos (repo, auto_create_releases, own_prs_only, issue_auto_evaluate, issue_auto_work, pr_auto_monitor)
-          VALUES (?, ?, ?, ?, ?, ?)
+          INSERT INTO watched_repos (repo, auto_create_releases, own_prs_only, issue_auto_evaluate, issue_auto_work, pr_auto_monitor, coding_agent_override, codex_model, codex_reasoning_effort, claude_model, claude_effort)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(repo) DO UPDATE SET
             auto_create_releases = excluded.auto_create_releases,
             own_prs_only = excluded.own_prs_only,
             issue_auto_evaluate = excluded.issue_auto_evaluate,
             issue_auto_work = excluded.issue_auto_work,
-            pr_auto_monitor = excluded.pr_auto_monitor
+            pr_auto_monitor = excluded.pr_auto_monitor,
+            coding_agent_override = excluded.coding_agent_override,
+            codex_model = excluded.codex_model,
+            codex_reasoning_effort = excluded.codex_reasoning_effort,
+            claude_model = excluded.claude_model,
+            claude_effort = excluded.claude_effort
         `,
         next.repo,
         Number(next.autoCreateReleases),
@@ -1809,6 +1873,11 @@ export class SqliteStorage implements IStorage {
         Number(next.issueAutoEvaluate),
         Number(next.issueAutoWork),
         Number(next.prAutoMonitor),
+        next.codingAgentOverride,
+        next.codexModel,
+        next.codexReasoningEffort,
+        next.claudeModel,
+        next.claudeEffort,
       );
     });
 

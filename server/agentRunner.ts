@@ -4,6 +4,14 @@ import path from "path";
 import { spawn } from "child_process";
 
 export type CodingAgent = "codex" | "claude";
+export type CodexReasoningEffort = "default" | "low" | "medium" | "high" | "xhigh";
+export type ClaudeEffort = "default" | "low" | "medium" | "high" | "xhigh" | "max";
+export type AgentRuntimeSettings = {
+  codexModel?: string | null;
+  codexReasoningEffort?: CodexReasoningEffort | null;
+  claudeModel?: string | null;
+  claudeEffort?: ClaudeEffort | null;
+};
 
 export type EvaluationResult = {
   needsFix: boolean;
@@ -180,8 +188,9 @@ export async function evaluateFixNecessityWithAgent(params: {
   agent: CodingAgent;
   cwd: string;
   prompt: string;
+  settings?: AgentRuntimeSettings;
 }): Promise<EvaluationResult> {
-  const { agent, cwd, prompt } = params;
+  const { agent, cwd, prompt, settings } = params;
 
   const extractionPrompt = [
     "Respond with ONLY valid JSON and nothing else.",
@@ -196,7 +205,7 @@ export async function evaluateFixNecessityWithAgent(params: {
     try {
       const result = await runAgentCommand(
         "codex",
-        [
+        buildAgentCommandArgs("codex", [
           "exec",
           "--skip-git-repo-check",
           "--sandbox",
@@ -204,7 +213,7 @@ export async function evaluateFixNecessityWithAgent(params: {
           "-o",
           outputFile,
           extractionPrompt,
-        ],
+        ], settings),
         { cwd, timeoutMs: 180000 },
       );
 
@@ -231,12 +240,12 @@ export async function evaluateFixNecessityWithAgent(params: {
     }
   }
 
-  const claudeArgs = [
+  const claudeArgs = buildAgentCommandArgs("claude", [
     "-p",
     "--output-format",
     "text",
     extractionPrompt,
-  ];
+  ], settings);
 
   const result = await runAgentCommand(
     "claude",
@@ -255,23 +264,24 @@ export async function applyFixesWithAgent(params: {
   agent: CodingAgent;
   cwd: string;
   prompt: string;
+  settings?: AgentRuntimeSettings;
   env?: NodeJS.ProcessEnv;
   timeoutMs?: number;
   onStdoutChunk?: (chunk: string) => void;
   onStderrChunk?: (chunk: string) => void;
 }): Promise<CommandResult> {
-  const { agent, cwd, prompt, env, timeoutMs = 900000, onStdoutChunk, onStderrChunk } = params;
+  const { agent, cwd, prompt, settings, env, timeoutMs = 900000, onStdoutChunk, onStderrChunk } = params;
 
   if (agent === "codex") {
     const result = await runAgentCommand(
       "codex",
-      [
+      buildAgentCommandArgs("codex", [
         "exec",
         "--skip-git-repo-check",
         "--sandbox",
         "workspace-write",
         prompt,
-      ],
+      ], settings),
       { cwd, env, timeoutMs, onStdoutChunk, onStderrChunk },
     );
 
@@ -280,13 +290,73 @@ export async function applyFixesWithAgent(params: {
 
   return runAgentCommand(
     "claude",
-    [
+    buildAgentCommandArgs("claude", [
       "-p",
       "--dangerously-skip-permissions",
       prompt,
-    ],
+    ], settings),
     { cwd, env, timeoutMs, onStdoutChunk, onStderrChunk },
   );
+}
+
+export function buildAgentCommandArgs(
+  agent: CodingAgent,
+  args: string[],
+  settings?: AgentRuntimeSettings,
+): string[] {
+  if (agent === "codex") {
+    const additions: string[] = [];
+    const model = settings?.codexModel?.trim();
+    const effort = settings?.codexReasoningEffort;
+    if (model) {
+      additions.push("--model", model);
+    }
+    if (effort && effort !== "default") {
+      additions.push("-c", `model_reasoning_effort="${effort}"`);
+    }
+    return insertAfterCommand(args, "exec", additions);
+  }
+
+  const additions: string[] = [];
+  const model = settings?.claudeModel?.trim();
+  const effort = settings?.claudeEffort;
+  if (model) {
+    additions.push("--model", model);
+  }
+  if (effort && effort !== "default") {
+    additions.push("--effort", effort);
+  }
+  return insertBeforePrompt(args, additions);
+}
+
+function insertAfterCommand(args: string[], command: string, additions: string[]): string[] {
+  if (additions.length === 0) {
+    return args;
+  }
+  const index = args.indexOf(command);
+  if (index === -1) {
+    return [...additions, ...args];
+  }
+  return [
+    ...args.slice(0, index + 1),
+    ...additions,
+    ...args.slice(index + 1),
+  ];
+}
+
+function insertBeforePrompt(args: string[], additions: string[]): string[] {
+  if (additions.length === 0) {
+    return args;
+  }
+  const prompt = args.at(-1);
+  if (!prompt) {
+    return [...args, ...additions];
+  }
+  return [
+    ...args.slice(0, -1),
+    ...additions,
+    prompt,
+  ];
 }
 
 function parseEvaluationOutput(output: string): EvaluationResult {

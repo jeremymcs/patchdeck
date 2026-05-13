@@ -1,7 +1,7 @@
 import type { Express, Response } from "express";
 import type { Server } from "http";
 import { z } from "zod";
-import { configSchema, startReleaseSocialPostSchema } from "@shared/schema";
+import { claudeEffortSchema, codexReasoningEffortSchema, codingAgentSchema, configSchema, startReleaseSocialPostSchema } from "@shared/schema";
 import type { Config } from "@shared/schema";
 import {
   createAppRuntime,
@@ -263,6 +263,11 @@ export async function registerRoutes(
         issueAutoEvaluate: z.boolean().optional(),
         issueAutoWork: z.boolean().optional(),
         prAutoMonitor: z.boolean().optional(),
+        codingAgentOverride: codingAgentSchema.nullable().optional(),
+        codexModel: z.string().nullable().optional(),
+        codexReasoningEffort: codexReasoningEffortSchema.nullable().optional(),
+        claudeModel: z.string().nullable().optional(),
+        claudeEffort: claudeEffortSchema.nullable().optional(),
       }).refine(
         (value) => (
           value.autoCreateReleases !== undefined
@@ -270,6 +275,11 @@ export async function registerRoutes(
           || value.issueAutoEvaluate !== undefined
           || value.issueAutoWork !== undefined
           || value.prAutoMonitor !== undefined
+          || value.codingAgentOverride !== undefined
+          || value.codexModel !== undefined
+          || value.codexReasoningEffort !== undefined
+          || value.claudeModel !== undefined
+          || value.claudeEffort !== undefined
         ),
         "At least one repository setting must be provided",
       ).parse(req.body);

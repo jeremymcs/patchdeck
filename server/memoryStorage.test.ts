@@ -487,6 +487,11 @@ describe("MemStorage", () => {
         issueAutoEvaluate: false,
         issueAutoWork: false,
         prAutoMonitor: true,
+        codingAgentOverride: null,
+        codexModel: null,
+        codexReasoningEffort: null,
+        claudeModel: null,
+        claudeEffort: null,
       }]);
     });
 
@@ -505,6 +510,11 @@ describe("MemStorage", () => {
         issueAutoEvaluate: true,
         issueAutoWork: true,
         prAutoMonitor: true,
+        codingAgentOverride: null,
+        codexModel: null,
+        codexReasoningEffort: null,
+        claudeModel: null,
+        claudeEffort: null,
       });
 
       const config = await storage.getConfig();
@@ -518,6 +528,11 @@ describe("MemStorage", () => {
         issueAutoEvaluate: true,
         issueAutoWork: true,
         prAutoMonitor: true,
+        codingAgentOverride: null,
+        codexModel: null,
+        codexReasoningEffort: null,
+        claudeModel: null,
+        claudeEffort: null,
       });
     });
   });

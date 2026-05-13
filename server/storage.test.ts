@@ -77,6 +77,10 @@ test("SqliteStorage reloads config and PR state from the same root", async () =>
     githubTokens: ["ghs_first", "ghs_second"],
     pollIntervalMs: 45000,
     fallbackToNextCodingAgent: true,
+    codexModel: "gpt-5.5",
+    codexReasoningEffort: "high",
+    claudeModel: "sonnet",
+    claudeEffort: "xhigh",
     autoCreateReleases: false,
     autoUpdateDocs: false,
     includeRepositoryLinksInGitHubComments: false,
@@ -93,6 +97,9 @@ test("SqliteStorage reloads config and PR state from the same root", async () =>
   await first.updateRepoSettings("alex-morgan-o/lolodex", {
     autoCreateReleases: false,
     ownPrsOnly: false,
+    codingAgentOverride: "codex",
+    codexModel: "gpt-5.4",
+    codexReasoningEffort: "medium",
   });
   await first.updateConfig({
     pollIntervalMs: 45000,
@@ -211,6 +218,10 @@ test("SqliteStorage reloads config and PR state from the same root", async () =>
 
   assert.equal(config.pollIntervalMs, 45000);
   assert.equal(config.fallbackToNextCodingAgent, true);
+  assert.equal(config.codexModel, "gpt-5.5");
+  assert.equal(config.codexReasoningEffort, "high");
+  assert.equal(config.claudeModel, "sonnet");
+  assert.equal(config.claudeEffort, "xhigh");
   assert.equal(config.autoCreateReleases, false);
   assert.equal(config.autoUpdateDocs, false);
   assert.equal(config.includeRepositoryLinksInGitHubComments, false);
@@ -231,6 +242,11 @@ test("SqliteStorage reloads config and PR state from the same root", async () =>
     issueAutoEvaluate: false,
     issueAutoWork: false,
     prAutoMonitor: true,
+    codingAgentOverride: "codex",
+    codexModel: "gpt-5.4",
+    codexReasoningEffort: "medium",
+    claudeModel: null,
+    claudeEffort: null,
   });
   assert.equal(runtime.drainMode, true);
   assert.equal(runtime.drainRequestedAt, "2026-03-18T10:00:00.000Z");
@@ -491,6 +507,11 @@ test("SqliteStorage updateRepoSettings tracks a previously untracked repo", asyn
       issueAutoEvaluate: true,
       issueAutoWork: true,
       prAutoMonitor: true,
+      codingAgentOverride: null,
+      codexModel: null,
+      codexReasoningEffort: null,
+      claudeModel: null,
+      claudeEffort: null,
     });
 
     const after = await storage.getConfig();
@@ -504,6 +525,11 @@ test("SqliteStorage updateRepoSettings tracks a previously untracked repo", asyn
       issueAutoEvaluate: true,
       issueAutoWork: true,
       prAutoMonitor: true,
+      codingAgentOverride: null,
+      codexModel: null,
+      codexReasoningEffort: null,
+      claudeModel: null,
+      claudeEffort: null,
     });
   } finally {
     storage.close();

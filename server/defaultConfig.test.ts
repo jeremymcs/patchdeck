@@ -23,6 +23,10 @@ describe("DEFAULT_CONFIG", () => {
       "webPassword",
       "codingAgent",
       "fallbackToNextCodingAgent",
+      "codexModel",
+      "codexReasoningEffort",
+      "claudeModel",
+      "claudeEffort",
       "maxTurns",
       "batchWindowMs",
       "pollIntervalMs",
@@ -130,6 +134,12 @@ describe("DEFAULT_CONFIG", () => {
 
   it("does not fall back to another coding agent by default", () => {
     assert.equal(DEFAULT_CONFIG.fallbackToNextCodingAgent, false);
+  });
+
+  it("uses CLI defaults for thinking unless configured", () => {
+    assert.equal(DEFAULT_CONFIG.codexReasoningEffort, "default");
+    assert.equal(DEFAULT_CONFIG.claudeEffort, "default");
+    assert.equal(DEFAULT_CONFIG.claudeModel, "opus");
   });
 
   it("enables docs auto-update by default", () => {

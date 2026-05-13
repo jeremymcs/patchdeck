@@ -3,7 +3,7 @@ import { chmod, copyFile, mkdtemp, readFile, rm, writeFile } from "node:fs/promi
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { applyFixesWithAgent, checkAgentHealth, detectAgentUnavailability, evaluateFixNecessityWithAgent, resolveAgent, resolveCommandPath, runCommand, summarizeAgentCommandFailure } from "./agentRunner";
+import { applyFixesWithAgent, buildAgentCommandArgs, checkAgentHealth, detectAgentUnavailability, evaluateFixNecessityWithAgent, resolveAgent, resolveCommandPath, runCommand, summarizeAgentCommandFailure } from "./agentRunner";
 
 test("runCommand reports a timeout even when the child exits 0 after SIGTERM", async () => {
   const result = await runCommand(
@@ -209,6 +209,36 @@ test("applyFixesWithAgent runs codex without deprecated full-auto flag", async (
     process.env.PATH = originalPath;
     await rm(tempRoot, { recursive: true, force: true });
   }
+});
+
+test("buildAgentCommandArgs applies model and thinking flags for each agent", () => {
+  assert.deepEqual(
+    buildAgentCommandArgs(
+      "codex",
+      ["exec", "--sandbox", "read-only", "Prompt"],
+      {
+        codexModel: "gpt-5.5",
+        codexReasoningEffort: "high",
+        claudeModel: "opus",
+        claudeEffort: "xhigh",
+      },
+    ),
+    ["exec", "--model", "gpt-5.5", "-c", "model_reasoning_effort=\"high\"", "--sandbox", "read-only", "Prompt"],
+  );
+
+  assert.deepEqual(
+    buildAgentCommandArgs(
+      "claude",
+      ["-p", "--output-format", "text", "Prompt"],
+      {
+        codexModel: "gpt-5.5",
+        codexReasoningEffort: "high",
+        claudeModel: "opus",
+        claudeEffort: "xhigh",
+      },
+    ),
+    ["-p", "--output-format", "text", "--model", "opus", "--effort", "xhigh", "Prompt"],
+  );
 });
 
 test("resolveAgent does not fall back when fallback is disabled", async () => {

@@ -1174,6 +1174,11 @@ test("GET/PATCH /api/repos/settings exposes repo-level settings", async () => {
       issueAutoEvaluate: boolean;
       issueAutoWork: boolean;
       prAutoMonitor: boolean;
+      codingAgentOverride: "codex" | "claude" | null;
+      codexModel: string | null;
+      codexReasoningEffort: "default" | "low" | "medium" | "high" | "xhigh" | null;
+      claudeModel: string | null;
+      claudeEffort: "default" | "low" | "medium" | "high" | "xhigh" | "max" | null;
     }>;
     assert.deepEqual(initial, [{
       repo: "acme/widgets",
@@ -1182,6 +1187,11 @@ test("GET/PATCH /api/repos/settings exposes repo-level settings", async () => {
       issueAutoEvaluate: false,
       issueAutoWork: false,
       prAutoMonitor: true,
+      codingAgentOverride: null,
+      codexModel: null,
+      codexReasoningEffort: null,
+      claudeModel: null,
+      claudeEffort: null,
     }]);
 
     const updateResponse = await fetch(`${harness.baseUrl}/api/repos/settings`, {
@@ -1194,6 +1204,11 @@ test("GET/PATCH /api/repos/settings exposes repo-level settings", async () => {
         autoCreateReleases: false,
         ownPrsOnly: false,
         issueAutoWork: true,
+        codingAgentOverride: "codex",
+        codexModel: "gpt-5.5",
+        codexReasoningEffort: "high",
+        claudeModel: "sonnet",
+        claudeEffort: "xhigh",
       }),
     });
     assert.equal(updateResponse.status, 200);
@@ -1204,6 +1219,11 @@ test("GET/PATCH /api/repos/settings exposes repo-level settings", async () => {
       issueAutoEvaluate: boolean;
       issueAutoWork: boolean;
       prAutoMonitor: boolean;
+      codingAgentOverride: "codex" | "claude" | null;
+      codexModel: string | null;
+      codexReasoningEffort: "default" | "low" | "medium" | "high" | "xhigh" | null;
+      claudeModel: string | null;
+      claudeEffort: "default" | "low" | "medium" | "high" | "xhigh" | "max" | null;
     };
     // Enabling auto-work implicitly enables auto-evaluate — they're dependent settings,
     // not independent flags. Verifies coercion in applyWatchedRepoUpdate.
@@ -1214,6 +1234,11 @@ test("GET/PATCH /api/repos/settings exposes repo-level settings", async () => {
       issueAutoEvaluate: true,
       issueAutoWork: true,
       prAutoMonitor: true,
+      codingAgentOverride: "codex",
+      codexModel: "gpt-5.5",
+      codexReasoningEffort: "high",
+      claudeModel: "sonnet",
+      claudeEffort: "xhigh",
     });
 
     const persisted = await harness.storage.getRepoSettings("acme/widgets");
@@ -1224,6 +1249,11 @@ test("GET/PATCH /api/repos/settings exposes repo-level settings", async () => {
       issueAutoEvaluate: true,
       issueAutoWork: true,
       prAutoMonitor: true,
+      codingAgentOverride: "codex",
+      codexModel: "gpt-5.5",
+      codexReasoningEffort: "high",
+      claudeModel: "sonnet",
+      claudeEffort: "xhigh",
     });
   } finally {
     await harness.close();
@@ -1257,6 +1287,11 @@ test("PATCH /api/repos/settings can update only ownPrsOnly", async () => {
       issueAutoEvaluate: boolean;
       issueAutoWork: boolean;
       prAutoMonitor: boolean;
+      codingAgentOverride: "codex" | "claude" | null;
+      codexModel: string | null;
+      codexReasoningEffort: "default" | "low" | "medium" | "high" | "xhigh" | null;
+      claudeModel: string | null;
+      claudeEffort: "default" | "low" | "medium" | "high" | "xhigh" | "max" | null;
     };
     assert.deepEqual(updated, {
       repo: "acme/widgets",
@@ -1265,6 +1300,11 @@ test("PATCH /api/repos/settings can update only ownPrsOnly", async () => {
       issueAutoEvaluate: false,
       issueAutoWork: false,
       prAutoMonitor: true,
+      codingAgentOverride: null,
+      codexModel: null,
+      codexReasoningEffort: null,
+      claudeModel: null,
+      claudeEffort: null,
     });
   } finally {
     await harness.close();

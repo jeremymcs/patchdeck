@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, rm } from "fs/promises";
 import { tmpdir } from "os";
 import path from "path";
-import { resolveAgent, runAgentCommand, type CodingAgent } from "./agentRunner";
+import { buildAgentCommandArgs, resolveAgent, runAgentCommand, type AgentRuntimeSettings, type CodingAgent } from "./agentRunner";
 
 const DEFAULT_RELEASE_AGENT_TIMEOUT_MS = 120_000;
 
@@ -32,6 +32,7 @@ export async function evaluateReleaseWorthinessWithAgent(params: {
   latestTag: string | null;
   triggerPr: ReleaseAgentPullSummary;
   includedPulls: ReleaseAgentPullSummary[];
+  agentSettings?: AgentRuntimeSettings;
   cwd?: string;
   timeoutMs?: number;
 }): Promise<ReleaseEvaluationDecision> {
@@ -47,7 +48,7 @@ export async function evaluateReleaseWorthinessWithAgent(params: {
     try {
       const result = await runAgentCommand(
         "codex",
-        [
+        buildAgentCommandArgs("codex", [
           "exec",
           "--skip-git-repo-check",
           "--sandbox",
@@ -55,7 +56,7 @@ export async function evaluateReleaseWorthinessWithAgent(params: {
           "-o",
           outputFile,
           prompt,
-        ],
+        ], params.agentSettings),
         { cwd, timeoutMs },
       );
 
@@ -72,12 +73,12 @@ export async function evaluateReleaseWorthinessWithAgent(params: {
 
   const result = await runAgentCommand(
     "claude",
-    [
+    buildAgentCommandArgs("claude", [
       "-p",
       "--output-format",
       "text",
       prompt,
-    ],
+    ], params.agentSettings),
     { cwd, timeoutMs },
   );
 

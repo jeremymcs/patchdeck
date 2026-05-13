@@ -1,5 +1,6 @@
 import type { BackgroundJob, DeploymentPlatform } from "@shared/schema";
 import type { CodingAgent } from "./agentRunner";
+import { resolveRepoAgentRuntimeSettings, resolveRepoCodingAgent } from "./agentSettings";
 import { TerminalBabysitterError, type PRBabysitter } from "./babysitter";
 import { CancelBackgroundJobError, TerminalBackgroundJobError, type BackgroundJobHandlers } from "./backgroundJobDispatcher";
 import { createAdapter } from "./deploymentAdapters";
@@ -130,10 +131,13 @@ export function createBackgroundJobHandlers(params: {
           throw new CancelBackgroundJobError(`PR ${job.targetId} no longer exists`);
         }
 
+        const config = await storage.getConfig();
+        const repoSettings = await storage.getRepoSettings(pr.repo);
         const preferredAgent = readCodingAgentPayload(job, "preferredAgent")
-          ?? (await storage.getConfig()).codingAgent;
+          ?? resolveRepoCodingAgent(config, repoSettings);
+        const agentSettings = resolveRepoAgentRuntimeSettings(config, repoSettings);
         try {
-          await babysitter.runQueuedBabysitPR(pr.id, preferredAgent);
+          await babysitter.runQueuedBabysitPR(pr.id, preferredAgent, agentSettings);
         } catch (error) {
           if (error instanceof TerminalBabysitterError) {
             throw new TerminalBackgroundJobError(error.message);
@@ -274,6 +278,9 @@ export function createBackgroundJobHandlers(params: {
           `Running issue repair for ${issue.repoFullName}#${issue.number}`,
           baseMetadata,
         );
+        const repoSettings = await storage.getRepoSettings(issue.repoFullName);
+        const agent = resolveRepoCodingAgent(config, repoSettings);
+        const agentSettings = resolveRepoAgentRuntimeSettings(config, repoSettings);
         repairResult = await runIssueWorkRepairFn({
           repo: issue.repoFullName,
           issueNumber: issue.number,
@@ -284,7 +291,8 @@ export function createBackgroundJobHandlers(params: {
           author: issue.author,
           baseBranch,
           repoCloneUrl: buildGitHubCloneUrl(issue.repoFullName, githubToken),
-          agent: config.codingAgent,
+          agent,
+          agentSettings,
         });
       } catch (error) {
         if (progressRepliesEnabled) {
@@ -449,12 +457,15 @@ export function createBackgroundJobHandlers(params: {
       }
 
       const config = await storage.getConfig();
+      const pr = await storage.getPR(question.prId);
+      const repoSettings = pr ? await storage.getRepoSettings(pr.repo) : undefined;
       await questionAnswerer({
         storage,
         prId: question.prId,
         questionId: question.id,
         question: question.question,
-        preferredAgent: config.codingAgent,
+        preferredAgent: resolveRepoCodingAgent(config, repoSettings),
+        agentSettings: resolveRepoAgentRuntimeSettings(config, repoSettings),
       });
     },
 
@@ -568,6 +579,9 @@ export function createBackgroundJobHandlers(params: {
           const githubToken = await resolveGitHubAuthTokenFn(config);
           const octokit = await buildOctokitFn(config);
 
+          const repoSettings = await storage.getRepoSettings(repo);
+          const agent = resolveRepoCodingAgent(config, repoSettings);
+          const agentSettings = resolveRepoAgentRuntimeSettings(config, repoSettings);
           const repairResult = await runDeploymentHealingRepairFn({
             repo,
             platform,
@@ -578,7 +592,8 @@ export function createBackgroundJobHandlers(params: {
             deploymentLog,
             baseBranch,
             repoCloneUrl: buildGitHubCloneUrl(repo, githubToken),
-            agent: config.codingAgent,
+            agent,
+            agentSettings,
             githubToken: githubToken ?? "",
           });
 

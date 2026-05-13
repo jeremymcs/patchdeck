@@ -1,6 +1,6 @@
 import type { IStorage } from "./storage";
-import type { CodingAgent } from "./agentRunner";
-import { resolveAgent, runAgentCommand, summarizeCommandResult } from "./agentRunner";
+import type { AgentRuntimeSettings, CodingAgent } from "./agentRunner";
+import { buildAgentCommandArgs, resolveAgent, runAgentCommand, summarizeCommandResult } from "./agentRunner";
 
 /**
  * Answers a user question about a PR by gathering context (PR state, feedback,
@@ -12,8 +12,9 @@ export async function answerPRQuestion(params: {
   questionId: string;
   question: string;
   preferredAgent: CodingAgent;
+  agentSettings?: AgentRuntimeSettings;
 }): Promise<void> {
-  const { storage, prId, questionId, question, preferredAgent } = params;
+  const { storage, prId, questionId, question, preferredAgent, agentSettings } = params;
 
   await storage.updateQuestion(questionId, { status: "answering" });
 
@@ -25,8 +26,8 @@ export async function answerPRQuestion(params: {
     const result = await runAgentCommand(
       agent,
       agent === "claude"
-        ? ["-p", "--output-format", "text", prompt]
-        : ["exec", "--skip-git-repo-check", "--sandbox", "read-only", prompt],
+        ? buildAgentCommandArgs("claude", ["-p", "--output-format", "text", prompt], agentSettings)
+        : buildAgentCommandArgs("codex", ["exec", "--skip-git-repo-check", "--sandbox", "read-only", prompt], agentSettings),
       { timeoutMs: 180_000 },
     );
 

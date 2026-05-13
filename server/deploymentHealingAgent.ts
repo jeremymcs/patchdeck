@@ -1,4 +1,4 @@
-import type { CodingAgent, CommandResult } from "./agentRunner";
+import type { AgentRuntimeSettings, CodingAgent, CommandResult } from "./agentRunner";
 import { applyFixesWithAgent, runCommand, summarizeCommandResult } from "./agentRunner";
 import { ensureRepoCache } from "./repoWorkspace";
 import type { DeploymentPlatform } from "@shared/schema";
@@ -17,6 +17,7 @@ export type DeploymentHealingPromptInput = {
 export type DeploymentHealingRepairInput = DeploymentHealingPromptInput & {
   repoCloneUrl: string;
   agent: CodingAgent;
+  agentSettings?: AgentRuntimeSettings;
   githubToken: string;
   rootDir?: string;
 };
@@ -129,6 +130,7 @@ export async function runDeploymentHealingRepair(
   try {
     const agentResult = await deps.applyFixesWithAgent({
       agent: input.agent,
+      settings: input.agentSettings,
       cwd: repoCacheDir,
       prompt,
       env: input.env,
