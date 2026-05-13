@@ -1577,6 +1577,27 @@ export async function addLabelsToIssue(
   );
 }
 
+export async function removeLabelsFromIssue(
+  octokit: Octokit,
+  parsed: ParsedRepoSlug & { number: number },
+  labels: string[],
+): Promise<void> {
+  if (labels.length === 0) {
+    return;
+  }
+
+  await Promise.all(labels.map((name) =>
+    withGitHubErrorHandling("issue labels", parsed, () =>
+      octokit.issues.removeLabel({
+        owner: parsed.owner,
+        repo: parsed.repo,
+        issue_number: parsed.number,
+        name,
+      }),
+    )
+  ));
+}
+
 export async function postPRComment(
   octokit: Octokit,
   parsed: ParsedPRUrl,

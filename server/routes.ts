@@ -436,6 +436,24 @@ export async function registerRoutes(
     }
   });
 
+  app.patch("/api/issues/labels", async (req, res) => {
+    try {
+      const payload = z.object({
+        repo: z.string().min(1),
+        number: z.number().int().positive(),
+        add: z.array(z.string().min(1)).optional(),
+        remove: z.array(z.string().min(1)).optional(),
+      }).parse(req.body);
+
+      res.json(await runtime.updateIssueLabels(payload.repo, payload.number, {
+        add: payload.add,
+        remove: payload.remove,
+      }));
+    } catch (error: unknown) {
+      sendAppAwareError(res, error);
+    }
+  });
+
   app.post("/api/issues/work", async (req, res) => {
     try {
       const payload = z.object({
