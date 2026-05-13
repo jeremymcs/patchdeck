@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { getRepoHref } from "@/lib/repoHref";
@@ -161,6 +161,139 @@ function IssueWorkModeControl(props: {
   testIdPrefix: string;
 }) {
   return <SegmentControl options={ISSUE_WORK_MODE_OPTIONS} {...props} />;
+}
+
+type SettingsTocItem = { id: string; label: string };
+type SettingsTocGroup = { id: string; label: string; items: SettingsTocItem[] };
+
+const SETTINGS_TOC: SettingsTocGroup[] = [
+  {
+    id: "sources",
+    label: "Sources",
+    items: [
+      { id: "sources-add", label: "Add" },
+      { id: "sources-repos", label: "Repositories" },
+    ],
+  },
+  {
+    id: "agent",
+    label: "Agent",
+    items: [
+      { id: "agent-models", label: "Models" },
+      { id: "agent-autofix", label: "Auto fixes" },
+      { id: "agent-tuning", label: "Tuning" },
+      { id: "agent-ci", label: "CI Healing" },
+    ],
+  },
+  {
+    id: "delivery",
+    label: "Delivery",
+    items: [
+      { id: "delivery-releases", label: "Releases" },
+      { id: "delivery-github", label: "GitHub" },
+    ],
+  },
+  {
+    id: "system",
+    label: "System",
+    items: [
+      { id: "system-runtime", label: "Runtime" },
+      { id: "system-remote", label: "Remote access" },
+    ],
+  },
+];
+
+function scrollToSettingsSection(id: string) {
+  document.getElementById(id)?.scrollIntoView({ block: "start" });
+}
+
+function SettingsTOC() {
+  return (
+    <aside className="hidden w-48 shrink-0 lg:block">
+      <nav className="sticky top-6 text-[12px]" aria-label="Settings sections">
+        <div className="mb-3 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+          On this page
+        </div>
+        <ul className="space-y-0.5">
+          {SETTINGS_TOC.flatMap((group, gi) => [
+            <li key={group.id} className={gi > 0 ? "mt-2" : ""}>
+              <button
+                type="button"
+                onClick={() => scrollToSettingsSection(group.id)}
+                className="block w-full rounded px-2 py-1 text-left text-foreground transition-colors hover:bg-muted"
+              >
+                {group.label}
+              </button>
+            </li>,
+            ...group.items.map((item) => (
+              <li key={item.id} className="pl-3">
+                <button
+                  type="button"
+                  onClick={() => scrollToSettingsSection(item.id)}
+                  className="block w-full rounded px-2 py-1 text-left text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                >
+                  {item.label}
+                </button>
+              </li>
+            )),
+          ])}
+        </ul>
+      </nav>
+    </aside>
+  );
+}
+
+function SettingsGroup({
+  id,
+  title,
+  description,
+  children,
+}: {
+  id: string;
+  title: string;
+  description?: string;
+  children: ReactNode;
+}) {
+  return (
+    <section id={id} className="scroll-mt-6">
+      <header className="mb-5 border-b border-border pb-3">
+        <h2 className="text-base font-semibold text-foreground">{title}</h2>
+        {description ? (
+          <p className="mt-1 text-xs text-muted-foreground">{description}</p>
+        ) : null}
+      </header>
+      <div className="space-y-6">{children}</div>
+    </section>
+  );
+}
+
+function SettingsSubsection({
+  id,
+  title,
+  description,
+  action,
+  children,
+}: {
+  id: string;
+  title: string;
+  description?: string;
+  action?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <div id={id} className="scroll-mt-6">
+      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-medium text-foreground">{title}</h3>
+          {description ? (
+            <p className="mt-0.5 text-[11px] text-muted-foreground">{description}</p>
+          ) : null}
+        </div>
+        {action}
+      </div>
+      {children}
+    </div>
+  );
 }
 
 export default function Settings() {
@@ -378,16 +511,20 @@ export default function Settings() {
       <AppHeader active="settings" />
 
       <div className="flex-1 overflow-y-auto p-6">
-        <div className="mx-auto flex max-w-5xl flex-col gap-8">
-          <section>
-            <div className="mb-4">
-              <h2 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                Add
-              </h2>
-              <p className="mt-1 text-[11px] text-muted-foreground">
-                Add a PR or watch another repo.
+        <div className="mx-auto max-w-6xl">
+          <div className="mb-8 flex flex-wrap items-end justify-between gap-3 border-b border-border pb-4">
+            <div>
+              <h1 className="text-xl font-semibold tracking-tight text-foreground">Settings</h1>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Configure what PatchDeck watches, how the agent behaves, and how releases ship.
               </p>
             </div>
+          </div>
+          <div className="flex gap-8">
+            <SettingsTOC />
+            <div className="min-w-0 flex-1 space-y-12">
+              <SettingsGroup id="sources" title="Sources" description="What PatchDeck watches.">
+                <SettingsSubsection id="sources-add" title="Add" description="Add a PR or watch another repo.">
             <div className="grid gap-3 md:grid-cols-2">
               <form
                 onSubmit={(e) => {
@@ -463,28 +600,24 @@ export default function Settings() {
                 </div>
               </form>
             </div>
-          </section>
+                </SettingsSubsection>
 
-          <section>
-            <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
-              <div>
-                <h2 className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                  Repositories
-                </h2>
-                <p className="mt-1 text-[11px] text-muted-foreground">
-                  Repo-level automation, issue work, and release controls.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => syncReposMutation.mutate()}
-                disabled={syncReposMutation.isPending}
-                data-testid="button-sync-repos"
-                className="cursor-pointer rounded-md border border-primary bg-primary px-3 py-1 text-xs font-medium uppercase tracking-wider text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {syncReposMutation.isPending ? "Fetching..." : "Fetch"}
-              </button>
-            </div>
+                <SettingsSubsection
+                  id="sources-repos"
+                  title="Repositories"
+                  description="Repo-level automation, issue work, and release controls."
+                  action={
+                    <button
+                      type="button"
+                      onClick={() => syncReposMutation.mutate()}
+                      disabled={syncReposMutation.isPending}
+                      data-testid="button-sync-repos"
+                      className="cursor-pointer rounded-md border border-primary bg-primary px-3 py-1 text-xs font-medium uppercase tracking-wider text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      {syncReposMutation.isPending ? "Fetching..." : "Fetch"}
+                    </button>
+                  }
+                >
             {repos.length === 0 ? (
               <div className="rounded-md border border-border p-4 text-[12px] text-muted-foreground">
                 No repositories being watched yet.
@@ -777,13 +910,11 @@ export default function Settings() {
                 })}
               </div>
             )}
-          </section>
+                </SettingsSubsection>
+              </SettingsGroup>
 
-          {/* Agent */}
-          <section>
-            <h2 className="mb-4 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              Agent
-            </h2>
+              <SettingsGroup id="agent" title="Agent" description="How the agent runs across watched work.">
+                <SettingsSubsection id="agent-models" title="Models">
             <div className="flex flex-col gap-4 rounded-md border border-border p-4">
               <div className="flex items-center justify-between">
                 <div>
@@ -894,13 +1025,9 @@ export default function Settings() {
                 />
               </label>
             </div>
-          </section>
+                </SettingsSubsection>
 
-          {/* Auto fixes */}
-          <section>
-            <h2 className="mb-4 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              Auto fixes
-            </h2>
+                <SettingsSubsection id="agent-autofix" title="Auto fixes">
             <div className="flex flex-col gap-4 rounded-md border border-border p-4">
               <label className="flex items-center justify-between gap-3 cursor-pointer">
                 <div>
@@ -943,13 +1070,9 @@ export default function Settings() {
                 />
               </label>
             </div>
-          </section>
+                </SettingsSubsection>
 
-          {/* Tuning */}
-          <section>
-            <h2 className="mb-4 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              Tuning
-            </h2>
+                <SettingsSubsection id="agent-tuning" title="Tuning">
             <div className="flex flex-col gap-4 rounded-md border border-border p-4">
               <SettingRow
                 label="Max turns"
@@ -980,12 +1103,9 @@ export default function Settings() {
                 disabled={updateConfigMutation.isPending}
               />
             </div>
-          </section>
+                </SettingsSubsection>
 
-          <section>
-            <h2 className="mb-4 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              CI Healing
-            </h2>
+                <SettingsSubsection id="agent-ci" title="CI Healing">
             <div className="flex flex-col gap-4 rounded-md border border-border p-4">
               <div className="flex items-center justify-between gap-3">
                 <div>
@@ -1036,12 +1156,11 @@ export default function Settings() {
                 disabled={updateConfigMutation.isPending}
               />
             </div>
-          </section>
+                </SettingsSubsection>
+              </SettingsGroup>
 
-          <section>
-            <h2 className="mb-4 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              Releases
-            </h2>
+              <SettingsGroup id="delivery" title="Delivery" description="Releases and GitHub integration.">
+                <SettingsSubsection id="delivery-releases" title="Releases">
             <div className="flex flex-col gap-4 rounded-md border border-border p-4">
               <label className="flex items-start justify-between gap-3">
                 <div>
@@ -1060,117 +1179,9 @@ export default function Settings() {
                 />
               </label>
             </div>
-          </section>
+                </SettingsSubsection>
 
-          <section>
-            <h2 className="mb-4 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              Remote Access
-            </h2>
-            <div className="rounded-md border border-border p-4">
-              <div className="grid gap-3 md:grid-cols-[1fr_1fr_auto] md:items-end">
-                <div>
-                  <label htmlFor="settings-web-username" className="text-sm">Username</label>
-                  <input
-                    id="settings-web-username"
-                    type="text"
-                    value={webUsernameDraft}
-                    onChange={(e) => setWebUsernameDraft(e.target.value)}
-                    placeholder="operator"
-                    aria-label="Remote access username"
-                    data-testid="input-remote-access-username"
-                    className="mt-2 w-full rounded-md border border-border bg-transparent px-2 py-1 text-sm placeholder:text-muted-foreground/50 focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
-                  />
-                </div>
-                <div>
-                  <label htmlFor="settings-web-password" className="text-sm">Password</label>
-                  <input
-                    id="settings-web-password"
-                    type="password"
-                    value={webPasswordDraft}
-                    onChange={(e) => setWebPasswordDraft(e.target.value)}
-                    placeholder="not configured"
-                    aria-label="Remote access password"
-                    data-testid="input-remote-access-password"
-                    className="mt-2 w-full rounded-md border border-border bg-transparent px-2 py-1 text-sm placeholder:text-muted-foreground/50 focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
-                  />
-                </div>
-                <button
-                  type="button"
-                  onClick={() =>
-                    updateConfigMutation.mutate({
-                      webUsername: webUsernameDraft,
-                      webPassword: webPasswordDraft,
-                    })
-                  }
-                  disabled={updateConfigMutation.isPending}
-                  data-testid="button-save-remote-access"
-                  className="cursor-pointer rounded-md border border-primary bg-primary px-3 py-1 text-xs font-medium uppercase tracking-wider text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  Save
-                </button>
-              </div>
-              <p className="mt-3 text-[11px] text-muted-foreground">
-                Remote network users must sign in with these credentials. Local loopback access remains open.
-              </p>
-            </div>
-          </section>
-
-          {/* Runtime */}
-          <section>
-            <h2 className="mb-4 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              Runtime
-            </h2>
-            <div className="flex flex-col gap-4 rounded-md border border-border p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="text-sm">Automation</div>
-                  <div className="text-[11px] text-muted-foreground">
-                    Drain mode blocks new agent runs. In-flight runs continue until they finish.
-                  </div>
-                  <div
-                    className="mt-2 text-[11px]"
-                    aria-live="polite"
-                    data-testid="text-drain-status"
-                  >
-                    <span className={drainStatusView.className}>{drainStatusView.label}</span>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() =>
-                    drainMutation.mutate(
-                      runtimeState?.drainMode
-                        ? { enabled: false }
-                        : { enabled: true, reason: "Manually paused via web settings" },
-                    )
-                  }
-                  disabled={!runtimeState || drainMutation.isPending}
-                  data-testid="button-toggle-drain"
-                  className="shrink-0 border border-border px-2 py-1 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
-                >
-                  {getDrainActionLabel(runtimeState)}
-                </button>
-              </div>
-              {runtimeState?.drainMode && (runtimeState.drainReason || runtimeState.drainRequestedAt) ? (
-                <div className="border-l-2 border-destructive bg-muted/30 px-3 py-2 text-[11px]">
-                  {runtimeState.drainReason ? (
-                    <div className="text-foreground">{runtimeState.drainReason}</div>
-                  ) : null}
-                  {runtimeState.drainRequestedAt ? (
-                    <div className="mt-1 text-muted-foreground">
-                      since {new Date(runtimeState.drainRequestedAt).toLocaleString()}
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
-          </section>
-
-          {/* GitHub Tokens */}
-          <section>
-            <h2 className="mb-4 text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              GitHub
-            </h2>
+                <SettingsSubsection id="delivery-github" title="GitHub">
             <div className="flex flex-col gap-4 rounded-md border border-border p-4">
               <div className="flex flex-col gap-3">
                 <div className="flex items-center justify-between gap-3">
@@ -1372,7 +1383,109 @@ export default function Settings() {
                 disabled={!config || updateConfigMutation.isPending}
               />
             </div>
-          </section>
+                </SettingsSubsection>
+              </SettingsGroup>
+
+              <SettingsGroup id="system" title="System" description="Runtime and process-level controls.">
+                <SettingsSubsection id="system-runtime" title="Runtime">
+            <div className="flex flex-col gap-4 rounded-md border border-border p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-sm">Automation</div>
+                  <div className="text-[11px] text-muted-foreground">
+                    Drain mode blocks new agent runs. In-flight runs continue until they finish.
+                  </div>
+                  <div
+                    className="mt-2 text-[11px]"
+                    aria-live="polite"
+                    data-testid="text-drain-status"
+                  >
+                    <span className={drainStatusView.className}>{drainStatusView.label}</span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() =>
+                    drainMutation.mutate(
+                      runtimeState?.drainMode
+                        ? { enabled: false }
+                        : { enabled: true, reason: "Manually paused via web settings" },
+                    )
+                  }
+                  disabled={!runtimeState || drainMutation.isPending}
+                  data-testid="button-toggle-drain"
+                  className="shrink-0 border border-border px-2 py-1 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
+                >
+                  {getDrainActionLabel(runtimeState)}
+                </button>
+              </div>
+              {runtimeState?.drainMode && (runtimeState.drainReason || runtimeState.drainRequestedAt) ? (
+                <div className="border-l-2 border-destructive bg-muted/30 px-3 py-2 text-[11px]">
+                  {runtimeState.drainReason ? (
+                    <div className="text-foreground">{runtimeState.drainReason}</div>
+                  ) : null}
+                  {runtimeState.drainRequestedAt ? (
+                    <div className="mt-1 text-muted-foreground">
+                      since {new Date(runtimeState.drainRequestedAt).toLocaleString()}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+                </SettingsSubsection>
+
+                <SettingsSubsection id="system-remote" title="Remote access">
+            <div className="rounded-md border border-border p-4">
+              <div className="grid gap-3 md:grid-cols-[1fr_1fr_auto] md:items-end">
+                <div>
+                  <label htmlFor="settings-web-username" className="text-sm">Username</label>
+                  <input
+                    id="settings-web-username"
+                    type="text"
+                    value={webUsernameDraft}
+                    onChange={(e) => setWebUsernameDraft(e.target.value)}
+                    placeholder="operator"
+                    aria-label="Remote access username"
+                    data-testid="input-remote-access-username"
+                    className="mt-2 w-full rounded-md border border-border bg-transparent px-2 py-1 text-sm placeholder:text-muted-foreground/50 focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="settings-web-password" className="text-sm">Password</label>
+                  <input
+                    id="settings-web-password"
+                    type="password"
+                    value={webPasswordDraft}
+                    onChange={(e) => setWebPasswordDraft(e.target.value)}
+                    placeholder="not configured"
+                    aria-label="Remote access password"
+                    data-testid="input-remote-access-password"
+                    className="mt-2 w-full rounded-md border border-border bg-transparent px-2 py-1 text-sm placeholder:text-muted-foreground/50 focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() =>
+                    updateConfigMutation.mutate({
+                      webUsername: webUsernameDraft,
+                      webPassword: webPasswordDraft,
+                    })
+                  }
+                  disabled={updateConfigMutation.isPending}
+                  data-testid="button-save-remote-access"
+                  className="cursor-pointer rounded-md border border-primary bg-primary px-3 py-1 text-xs font-medium uppercase tracking-wider text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Save
+                </button>
+              </div>
+              <p className="mt-3 text-[11px] text-muted-foreground">
+                Remote network users must sign in with these credentials. Local loopback access remains open.
+              </p>
+            </div>
+                </SettingsSubsection>
+              </SettingsGroup>
+            </div>
+          </div>
         </div>
       </div>
     </div>

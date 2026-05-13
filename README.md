@@ -5,154 +5,198 @@
 [![Node.js 22+](https://img.shields.io/badge/Node.js-22%2B-green.svg)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-blue.svg)](https://www.typescriptlang.org/)
 
-PatchDeck is a local-first GitHub workbench for pull requests and issues. It watches the stuff you care about, figures out what needs action, then sends your local coding agent into an isolated worktree to fix it and push the result back to GitHub.
+PatchDeck is a local-first workbench for keeping GitHub pull requests and issues moving. It watches the repositories you choose, syncs review feedback and failed checks into one dashboard, then runs your local coding agent in an isolated worktree when something should be fixed.
 
-If your PRs die slowly from review comments, flaky checks, merge conflicts, "one tiny follow-up", and the usual pre-merge paperwork, this is the tool for that.
+The goal is simple: fewer stale PRs, fewer forgotten review comments, and less time bouncing between GitHub tabs just to figure out what still needs action.
 
 ![PatchDeck PRs dashboard](docs/assets/PatchDeck-PRs.png)
 
 ![PatchDeck Issues dashboard](docs/assets/PatchDeck-Issues.png)
 
-> ⚠ PatchDeck is built for tokenmaxing. It can save real engineering time, but it will happily spend agent tokens doing the boring work. Watch your provider bill like an adult.
+PatchDeck can spend paid agent usage when automation is enabled. Start manually, watch the logs, and only turn on the automatic paths you actually trust.
 
-## Why it exists
+## What It Does
 
-Pull requests usually do not stall because the hard part is hard. They stall because the boring stuff keeps showing back up:
+PatchDeck gives you one place to manage the repetitive work around PRs and issues:
 
-- review comments arrive after you have already moved on
-- CI fails after the victory lap
-- merge conflicts show up wearing a fake mustache
-- issues are clear enough to fix, but still need someone to do the plumbing
-- release notes, status replies, and follow-up PRs turn into tiny paper cuts
+- Watch GitHub repositories or individual PR URLs.
+- Sync review comments, review threads, PR status, mergeability, CI state, and activity logs.
+- Triage feedback into accepted work, rejected/no-op feedback, or items that need human review.
+- Run accepted work in isolated git worktrees under the PatchDeck home directory.
+- Commit and push verified fixes back to the PR branch.
+- Reply to GitHub review threads and resolve conversations when work is complete.
+- Monitor GitHub issues and open fix PRs for issues that are marked ready.
+- Queue release runs for merged PRs and publish GitHub releases when enabled.
+- Track CI healing sessions and bounded retry attempts for repairable failures.
+- Monitor supported post-merge deployments and open follow-up fix PRs when enabled.
+- Ask natural-language questions about tracked PR state through the dashboard, API, or MCP.
 
-PatchDeck keeps that loop moving from your machine. You add the repos, keep control of when work runs, and let the app handle the repeatable cleanup.
+It is intentionally local-first. State lives on the machine running PatchDeck, Git work happens in app-owned worktrees, and remote dashboard access is opt-in.
 
-## Quick start
+## Install
 
 Prerequisites:
 
 - Node.js 22+
-- `git`
-- GitHub auth via `gh auth login` **or** `GITHUB_TOKEN`
-- one of the `codex` or `claude` CLIs installed and authenticated locally
+- Git
+- GitHub auth through one of: saved dashboard token, `GITHUB_TOKEN`, or `gh auth login`
+- A supported local coding CLI installed and authenticated: `claude` or `codex`
 
-Install from npm and launch:
+Install from npm:
 
 ```bash
 npm install -g @jeremymcs/patchdeck
 patchdeck
 ```
 
-The package name is scoped because `patchdeck` is already taken on npm. The CLI command is still `patchdeck`, because we are not monsters.
+The npm package is scoped as `@jeremymcs/patchdeck`; the installed command is `patchdeck`.
 
-That starts the dashboard server and opens the browser dashboard. From there:
+By default, the dashboard starts on `http://localhost:5001` and opens in your browser.
 
-1. Add a GitHub repository to watch (or paste a single PR URL).
-2. Choose whether PatchDeck should track only your PRs or your team's PRs too.
-3. Review PRs on the PRs page and repository issues on the Issues page.
-4. Use manual **Work issue** / PR actions until you trust the setup.
-5. Turn on auto mode when you are ready to let it cook.
+## First Run
 
-## What it does
+1. Open the dashboard.
+2. Add a repository to watch, or paste a single PR URL.
+3. Confirm GitHub auth in Settings if the app cannot read a token automatically.
+4. Keep repo discovery on **My PRs only** until you want team-wide monitoring.
+5. For a cautious first run, turn off **Auto PRs** and **Auto Issues** before adding busy repositories.
+6. Use manual PR and issue actions until the behavior looks right for your repos, then re-enable the automatic paths you want.
 
-### PR monitoring
+Direct PR URLs stay tracked even if a repository is still set to **My PRs only**.
 
-PatchDeck monitors tracked pull requests from repositories you watch or PR URLs you paste directly. It syncs PR metadata, review threads, top-level comments, failing checks, mergeability, docs assessment state, and release readiness into one dashboard. The goal is simple: one place to see why a PR is not merged yet.
+## Pull Requests
 
-It triages every comment before touching code. PatchDeck decides whether feedback needs a code fix, an acknowledgement, or no action. Comments from **trusted reviewers** can skip the evaluation entirely and go straight to the fix queue, because some people have earned the fast lane.
+PatchDeck monitors open PRs from watched repositories and PRs added directly by URL. It stores the PR metadata, comments, review threads, failing checks, mergeability, docs-assessment state, release-readiness state, and local activity logs.
 
-Every PR fix runs in an app-owned repo cache and an isolated git worktree under `~/.patchdeck`. Agent changes stay scoped to the PR branch, never your day-to-day checkout.
+Each feedback item moves through a visible lifecycle:
 
-PatchDeck pushes verified fixes back to the PR branch, posts threaded replies on the GitHub conversation, and resolves conversations when the fix lands. Less tab juggling, fewer "what was I doing here?" moments.
+```text
+pending -> queued -> in_progress -> resolved
+       \-> rejected
+       \-> flagged
+       \-> failed / warning
+```
 
-### Issues monitoring
+When work is accepted, PatchDeck prepares a clean worktree, runs the configured local coding agent with the relevant PR context, records the run, and handles the follow-up. Depending on the situation, that can include pushing commits, posting GitHub replies, resolving review threads, and polling CI.
 
-PatchDeck also monitors open GitHub issues for watched repositories. The Issues page shows the full issue body, labels, author, comments, latest work state, failed attempts, ready-to-merge PR links, and auto-work eligibility. It is not trying to be Jira. Nobody asked for that.
+You can pause background automation for a single PR without removing it. Paused PRs remain visible and can still be worked manually.
 
-Manual issue work starts only when you press **Work issue**. PatchDeck creates an isolated worktree, honors repository guidance such as `CONTRIBUTING.md` when present, works the issue, verifies the fix, pushes a branch, and opens a linked PR. If the resulting PR becomes mergeable, the Issues page shows that readiness in both the issue detail view and list view.
+## Issues
 
-Auto issue work is opt-in per repository and gated by labels and safety checks. Issues need an agent-ready label such as `ready-for-agent`, `ready-to-work`, `agent-ready`, or `ready`, and PatchDeck skips blocked/discussion labels such as `blocked`, `question`, `needs-maintainer-review`, `needs-author-feedback`, and `needs-discussion`.
+PatchDeck can watch open issues for each repository. The Issues page shows the issue body, labels, author, comments, work state, failed attempts, linked PRs, and auto-work eligibility.
 
-**Generates release artifacts** — when a merged PR is significant enough to release, PatchDeck can propose a version bump, write release notes, and create the GitHub release. The Releases page surfaces PatchDeck pipeline runs and actual GitHub releases, including ones created outside the app. There is also a one-click **Generate social post** button, because apparently we live here now.
+Manual issue work starts with **Work issue**. PatchDeck creates an isolated worktree, works from the issue context, pushes a branch, opens a linked PR, and records the result.
 
-**Heals CI failures** — optional bounded-attempt healing for failing PR heads, plus deployment health monitoring for merged changes on Vercel and Railway. It will retry with limits, not vibes.
+Automatic issue work is opt-in per repository. It is gated by labels and safety checks:
 
-**Answers questions** about tracked PRs through the dashboard or MCP. Ask "did this fail review?" or "what's the agent doing?" and PatchDeck reads the stored activity logs and feedback instead of making you spelunk through tabs.
+- Ready labels include `ready-for-agent`, `ready-to-work`, `agent-ready`, and `ready`.
+- Blocking labels include `blocked`, `question`, `needs-maintainer-review`, `needs-author-feedback`, and `needs-discussion`.
+
+Priority issue authors can be configured so issues from specific GitHub users are evaluated and worked before the regular queue.
+
+## Releases
+
+PatchDeck can evaluate merged PRs for release-worthiness, propose a version bump, write release notes, and create a GitHub release.
+
+Release creation is off by default. You can keep automatic releases disabled and still use the manual **Release** button on a watched repository. The Releases page shows both PatchDeck release runs and GitHub releases, including releases created outside the app.
+
+The Releases page also includes social-post generation for release runs when you want a short shareable summary.
+
+## CI and Deployment Healing
+
+Automatic CI healing is off by default. When enabled, PatchDeck classifies failing checks, creates healing sessions, and only attempts bounded repairs for failures it considers repairable in the PR branch. Retry limits and concurrency are configurable.
+
+Deployment healing is also off by default. When enabled through config, PatchDeck can monitor merged PRs for supported deployment platforms and open a follow-up fix PR if the deployment fails. Current platform detection supports Vercel and Railway markers, and the matching platform CLI must be installed and authenticated on the same machine.
 
 ## Interfaces
 
-PatchDeck talks to you in four ways. Pick the one that annoys you least.
-
-| Interface | How to launch | What it's for |
+| Interface | Command | Use it for |
 | --- | --- | --- |
-| Web dashboard | `patchdeck` | Primary UI. PRs, issues, releases, settings. |
-| Desktop app | `npm run tauri:build` then open `PatchDeck.app` | Same UI plus a **menu-bar tray** with live PR/issue counts, auto-mode toggles, and quick actions without surfacing the window. |
-| MCP server | `patchdeck mcp` | Drive every capability from an MCP-compatible host (Claude Desktop, etc.). |
-| Local REST API | bundled with the dashboard server | Same surface programmatically; see [LOCAL_API.md](LOCAL_API.md). |
+| Web dashboard | `patchdeck` or `patchdeck web` | Primary UI for PRs, issues, releases, logs, and settings |
+| MCP server | `patchdeck mcp` | Tool access from an MCP-compatible host |
+| Local REST API | Started with the dashboard server | Programmatic access to the same local app state |
+| Desktop app | `npm run tauri:build` from source | Native shell with the same dashboard and a menu-bar tray |
 
-### Menu-bar tray (macOS)
-
-The desktop build adds a tray icon to your menu bar that:
-
-- shows live PR + issue counts and the most recent activity
-- exposes **Auto mode** — independent on/off switches for "Auto PRs" and "Auto Issues" so you can pause one stream without pausing the other
-- click the icon → drop-down with "Open PatchDeck" and "Quit PatchDeck"
-- closing the main window **hides** it instead of quitting; the tray keeps everything alive until you explicitly quit
-
-The tray polls the local server every 5s, so toggles taken in the web UI reflect immediately in the menu and vice versa.
-
-## Configuration
-
-PatchDeck reads its config from `~/.patchdeck/state.sqlite`. Override the home directory with `PATCHDECK_HOME` if you want the state somewhere else.
-
-Key controls (all editable in Settings):
-
-- **Trusted reviewers** — comments from these GitHub logins skip evaluation and go straight to the agent fix queue
-- **Priority issue authors** — issues from these GitHub logins are evaluated and worked before the regular issue queue
-- **Ignored bots** — bot logins whose comments and reviews are ignored entirely
-- **Auto mode** — global toggles for PR babysitting and issue auto-work; the header chip in the web UI shows current state
-- **Drain mode** — emergency pause across all automation (kept separate from the per-area auto toggles)
-- **Coding agent** — `codex` or `claude` (per install), plus optional fallback to the other if the primary fails
-- **Per-repo settings** — `My PRs only` vs `My PRs + teammates`, auto-create releases on merge, auto-evaluate issues
-
-## Authentication
-
-PatchDeck authenticates to GitHub with the first of these it finds:
-
-1. App config (paste a Personal Access Token into Settings)
-2. `GITHUB_TOKEN` environment variable
-3. `gh auth token` (the GitHub CLI's stored credential)
-
-The desktop build captures these from your login shell on macOS — `gh` and `GITHUB_TOKEN` defined in `~/.zshrc`/`~/.zshenv`/`~/.bash_profile` resolve correctly even when the app is launched from Finder.
+The desktop build keeps PatchDeck running from the macOS menu bar, shows live PR and issue counts, and exposes quick toggles for automatic PR and issue work.
 
 ## Commands
 
 ```bash
-patchdeck              # web dashboard
-patchdeck mcp          # MCP server
-patchdeck --help       # help
-patchdeck --version    # version
+patchdeck              # start the dashboard server
+patchdeck web          # start the dashboard server
+patchdeck mcp          # start the MCP server
+patchdeck --help       # show help
+patchdeck --version    # print version
 ```
 
-These commands are available after the npm install flow above.
-
-Logging flags work with both subcommands and can appear before or after the subcommand:
+Logging flags work before or after the subcommand:
 
 ```bash
-patchdeck -q                    # errors only
-patchdeck --verbose             # debug level
-patchdeck --debug               # alias for --verbose
-patchdeck --trace               # maximum verbosity
-patchdeck --log-level warn      # explicit level
-patchdeck --log-file ./out.log  # override file destination
-patchdeck --no-log-file         # disable file logging entirely
+patchdeck -q
+patchdeck --verbose
+patchdeck --debug
+patchdeck --trace
+patchdeck --log-level warn
+patchdeck --log-file ./patchdeck.log
+patchdeck --no-log-file
 ```
 
-Set `PORT` to change the dashboard port (default `5001`). For `patchdeck mcp` connecting to a non-default port, set `PATCHDECK_PORT`.
+Set `PORT` to change the dashboard server port. The default is `5001`.
 
-## Remote dashboard access
+If the MCP server needs to talk to a dashboard server on a non-default port, set `PATCHDECK_PORT`.
 
-Loopback (local) browser and API access need no login. To use the dashboard from another machine, set credentials before starting the server:
+## Configuration
+
+PatchDeck stores local state in:
+
+```text
+~/.patchdeck/state.sqlite
+```
+
+Set `PATCHDECK_HOME` to use a different directory.
+
+Most configuration is editable in Settings:
+
+- GitHub tokens
+- Web dashboard credentials for remote access
+- Coding agent and optional fallback behavior
+- Model/runtime settings exposed by the app
+- Trusted reviewers
+- Ignored bots
+- Priority issue authors
+- Watched repositories and per-repo watch scope
+- Auto PRs and auto issues
+- Drain mode
+- Merge-conflict handling
+- Release automation
+- Docs assessment
+- GitHub comment branding
+- GitHub progress replies
+- CI healing
+- Theme
+
+Key defaults:
+
+- New watched repos start as **My PRs only**.
+- Auto PRs and auto issues are enabled globally, but per-repo issue work still needs the repo-level settings and labels.
+- Automatic release creation is disabled.
+- Automatic CI healing is disabled.
+- Automatic deployment healing is disabled.
+- Drain mode pauses new agent work without deleting tracked state.
+
+## Authentication
+
+PatchDeck uses the first available GitHub credential in this order:
+
+1. Tokens saved in the dashboard.
+2. `GITHUB_TOKEN`.
+3. `gh auth token`.
+
+Saved dashboard tokens can be added, removed, and reordered in Settings.
+
+## Remote Dashboard Access
+
+Local browser and local API access do not require a web login. To open the dashboard from another computer on the network, configure credentials before starting PatchDeck:
 
 ```bash
 PATCHDECK_WEB_USERNAME=operator \
@@ -161,25 +205,27 @@ PATCHDECK_SESSION_SECRET='choose-a-long-random-secret' \
 patchdeck
 ```
 
-Remote API requests then require a signed dashboard session. Put TLS in front of the server before exposing it over an untrusted network. The internet remains undefeated.
+`PATCHDECK_SESSION_SECRET` is optional, but setting one keeps remote dashboard sessions stable across restarts.
+
+You can also save remote-access credentials from Settings.
+
+PatchDeck binds the dashboard server to the configured port on all interfaces. Remote browsers must sign in before API data loads. Use TLS before exposing the dashboard outside a trusted network.
 
 ## Logging
 
-Server output is structured (pino) and ships to two destinations by default:
+PatchDeck writes structured server logs to stdout and, by default, to:
 
-- stdout (pretty-printed in dev, JSON in production)
-- `~/.patchdeck/log/server.log` (or under `PATCHDECK_HOME`)
+```text
+~/.patchdeck/log/server.log
+```
 
-Override the file path with `--log-file <path>` or `PATCHDECK_LOG_FILE`. Disable file logging with `--no-log-file` or `PATCHDECK_NO_LOG_FILE=1`. Set the level with `--log-level <trace|debug|info|warn|error|fatal>` or `LOG_LEVEL`. Defaults: `info` in production, `debug` in development.
+Use `--log-file`, `PATCHDECK_LOG_FILE`, `--no-log-file`, or `PATCHDECK_NO_LOG_FILE=1` to change file logging. Use `--log-level` or `LOG_LEVEL` to change verbosity.
 
-GitHub tokens are redacted before any log line is written. The sanitizer replaces these values with `[REDACTED]`:
+The dashboard also includes a Logs page with filtering, search, and live tailing for recent server log records.
 
-- `ghp_/gho_/ghs_/ghu_/ghr_` prefixes
-- `github_pat_…` tokens
-- `x-access-token:…@` URLs
-- `Bearer …` / `token …` authorization values
+GitHub tokens are redacted from logs before they are written.
 
-## Run from source
+## Run From Source
 
 ```bash
 git clone https://github.com/jeremymcs/patchdeck.git
@@ -188,22 +234,20 @@ npm install
 npm run dev
 ```
 
-Dashboard at `http://localhost:5001` by default. Loopback API requests work without login; remote access requires `PATCHDECK_WEB_USERNAME` and `PATCHDECK_WEB_PASSWORD`, or the Settings-page credentials once that config is saved.
-
-## Development
+Common development commands:
 
 | Command | Purpose |
 | --- | --- |
 | `npm run dev` | Start the development server |
 | `npm run build` | Build the production bundle |
 | `npm run start` | Run the production build |
-| `npm run mcp` | Start the MCP server |
-| `npm run check` | TypeScript check |
-| `npm run lint` | ESLint |
-| `npm run test` | Server test suite |
-| `npm run test:all` | Server tests + client library tests |
-| `npm run tauri:dev` | Start the Tauri desktop app in development |
-| `npm run tauri:build` | Build the Tauri desktop app + DMG |
+| `npm run mcp` | Start the MCP server from source |
+| `npm run check` | Run TypeScript checks |
+| `npm run lint` | Run ESLint |
+| `npm run test` | Run server tests |
+| `npm run test:all` | Run server tests and client utility tests |
+| `npm run tauri:dev` | Start the desktop app in development |
+| `npm run tauri:build` | Build the desktop app |
 
 ## Docs
 
@@ -217,7 +261,7 @@ Dashboard at `http://localhost:5001` by default. Loopback API requests work with
 
 ## Credits
 
-PatchDeck began as a fork of [yungookim/oh-my-pr](https://github.com/yungookim/oh-my-pr) by KimY. Thanks for the foundation this builds on.
+PatchDeck began as a fork of [yungookim/oh-my-pr](https://github.com/yungookim/oh-my-pr) by KimY. The foundation is appreciated.
 
 ## License
 

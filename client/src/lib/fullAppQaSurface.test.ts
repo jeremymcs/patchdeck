@@ -444,6 +444,12 @@ test("settings keeps the QA-tested configuration, token, and runtime controls wi
   }
   assertHasJsxTag(sourceFile, "repo tracking scope control", "WatchScopeControl");
   assertHasJsxTag(sourceFile, "issue work mode control", "IssueWorkModeControl");
+  assertHasExpression(sourceFile, "settings TOC scroll action", /\bscrollToSettingsSection\b/);
+  assert.doesNotMatch(
+    sourceFile.getFullText(),
+    /href=\{?\s*(?:`#|"#|'#)/,
+    "Settings in-page navigation must not use hash hrefs because the app uses hash routing",
+  );
   assertHasTestId(sourceFile, "tracked repo settings", /tracked-repo-\$\{repo\.repo\.replace\(\s*["']\/["']\s*,\s*["']-["']\s*\)\}/);
   assertHasTestId(sourceFile, "tracked repo soft remove", /tracked-repo-soft-remove-\$\{repo\.repo\.replace\(\s*["']\/["']\s*,\s*["']-["']\s*\)\}/);
   assertHasTestId(sourceFile, "tracked repo hard remove", /tracked-repo-hard-remove-\$\{repo\.repo\.replace\(\s*["']\/["']\s*,\s*["']-["']\s*\)\}/);

@@ -117,6 +117,48 @@ test("remote callers must log in before using protected API routes", async () =>
   }
 });
 
+test("production remote HTTP login keeps the session cookie usable", async () => {
+  const originalNodeEnv = process.env.NODE_ENV;
+  process.env.NODE_ENV = "production";
+  const harness = await createHarness();
+  const remoteHeaders = { "X-Forwarded-For": "203.0.113.10" };
+
+  try {
+    const login = await fetch(`${harness.baseUrl}/api/auth/login`, {
+      method: "POST",
+      headers: {
+        ...remoteHeaders,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        username: "operator",
+        password: "correct horse battery staple",
+      }),
+    });
+    assert.equal(login.status, 200);
+
+    const cookie = login.headers.get("set-cookie");
+    assert.ok(cookie, "expected remote HTTP login to set a session cookie");
+    assert.match(cookie, /patchdeck\.sid=/);
+    assert.doesNotMatch(cookie, /;\s*Secure\b/i);
+
+    const allowed = await fetch(`${harness.baseUrl}/api/secret`, {
+      headers: {
+        ...remoteHeaders,
+        Cookie: cookie,
+      },
+    });
+    assert.equal(allowed.status, 200);
+  } finally {
+    if (originalNodeEnv === undefined) {
+      delete process.env.NODE_ENV;
+    } else {
+      process.env.NODE_ENV = originalNodeEnv;
+    }
+    await harness.close();
+  }
+});
+
 test("logout clears remote API access for the current session", async () => {
   const harness = await createHarness();
   const remoteHeaders = { "X-Forwarded-For": "203.0.113.10" };
