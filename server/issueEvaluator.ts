@@ -19,6 +19,15 @@ export type IssueEvaluationDecision = {
   recommendedLabels: string[];
 };
 
+export type IssueEvaluationConfidenceGrade = "very_high" | "high" | "medium" | "low";
+
+const CONFIDENCE = {
+  veryHigh: 0.95,
+  high: 0.82,
+  needsReviewHigh: 0.75,
+  medium: 0.55,
+} as const;
+
 const BLOCKED_LABELS = new Set([
   "blocked",
   "question",
@@ -88,6 +97,37 @@ const ACTIONABLE_PATTERNS = [
   /\bsteps?\s+to\s+reproduce\b/i,
 ];
 
+const ACTIONABLE_DETAIL_PATTERNS = [
+  /\bexpected\b.*\bactual\b/i,
+  /\bactual\b.*\bexpected\b/i,
+  /\bsteps?\s+to\s+reproduce\b/i,
+  /\brepro(duce|duction)?\b/i,
+  /\bafter\s+(refresh|reload|click|submit|save|login|sign in|sign out|deploy|build)\b/i,
+  /\bwhen\s+i\b/i,
+  /\bthrows?\b/i,
+  /\bstack trace\b/i,
+  /\bstatus\s+code\b/i,
+  /\bconsole\b/i,
+];
+
+const BROAD_BLAST_RADIUS_PATTERNS = [
+  /\brewrite\b/i,
+  /\bredesign\b/i,
+  /\bre-?architect\b/i,
+  /\barchitecture\b/i,
+  /\brefactor\b/i,
+  /\bmigrat(e|ion)\b/i,
+  /\breplace\b.*\b(system|framework|database|auth|authentication|api)\b/i,
+  /\b(entire|whole)\s+(app|application|codebase|system|dashboard|backend|frontend)\b/i,
+  /\ball\s+(pages|routes|components|endpoints|models|tables|repos|repositories)\b/i,
+  /\bevery(where|thing| page| route| component| endpoint| model| table)\b/i,
+  /\bcross-?cutting\b/i,
+  /\bbreaking\s+change\b/i,
+  /\bdatabase\s+(schema|migration)\b/i,
+  /\bauth(entication)?\s+(flow|system|layer)\b/i,
+  /\bpermission\s+(model|system)\b/i,
+];
+
 const DISCUSSION_PATTERNS = [
   /\bhow\s+do\s+i\b/i,
   /\bquestion\b/i,
@@ -112,6 +152,17 @@ function addFlag(flags: string[], flag: string): void {
   }
 }
 
+export function gradeIssueEvaluationConfidence(confidence: number): IssueEvaluationConfidenceGrade {
+  if (confidence >= 0.9) return "very_high";
+  if (confidence >= 0.75) return "high";
+  if (confidence >= 0.5) return "medium";
+  return "low";
+}
+
+export function formatIssueEvaluationConfidence(confidence: number): string {
+  return `${gradeIssueEvaluationConfidence(confidence).replace("_", " ")} (${Math.round(confidence * 100)}%)`;
+}
+
 export function evaluateIssueForAutomation(input: IssueEvaluationInput): IssueEvaluationDecision {
   const labels = normalizeLabels(input.labels);
   const text = `${input.title}\n${input.body ?? ""}\n${labels.join("\n")}`;
@@ -125,6 +176,7 @@ export function evaluateIssueForAutomation(input: IssueEvaluationInput): IssueEv
   if (matchesAny(text, EXFILTRATION_PATTERNS)) addFlag(safetyFlags, "exfiltration-risk");
   if (matchesAny(text, DESTRUCTIVE_PATTERNS)) addFlag(safetyFlags, "destructive-request");
   if (matchesAny(text, PRIVILEGED_PATTERNS)) addFlag(safetyFlags, "privileged-area");
+  if (matchesAny(text, BROAD_BLAST_RADIUS_PATTERNS)) addFlag(safetyFlags, "broad-blast-radius");
 
   const hardBlock = safetyFlags.some((flag) =>
     flag === "secret-access" || flag === "exfiltration-risk" || flag === "destructive-request"
@@ -132,7 +184,7 @@ export function evaluateIssueForAutomation(input: IssueEvaluationInput): IssueEv
   if (hardBlock || blockedLabel) {
     return {
       status: "blocked",
-      confidence: 0.9,
+      confidence: CONFIDENCE.veryHigh,
       summary: hardBlock
         ? "Blocked from automatic work because the issue asks for risky secret, network, or destructive behavior."
         : `Blocked from automatic work by label: ${blockedLabel}.`,
@@ -141,27 +193,34 @@ export function evaluateIssueForAutomation(input: IssueEvaluationInput): IssueEv
     };
   }
 
-  const needsReview = safetyFlags.includes("privileged-area") || matchesAny(text, DISCUSSION_PATTERNS);
+  const needsReview = safetyFlags.includes("privileged-area")
+    || safetyFlags.includes("broad-blast-radius")
+    || matchesAny(text, DISCUSSION_PATTERNS);
   if (needsReview) {
+    const recommendedLabels = safetyFlags.includes("broad-blast-radius")
+      ? ["needs-maintainer-review", "large-scope"]
+      : ["needs-maintainer-review"];
     return {
       status: "needs_review",
-      confidence: 0.75,
-      summary: safetyFlags.includes("privileged-area")
+      confidence: CONFIDENCE.needsReviewHigh,
+      summary: safetyFlags.includes("broad-blast-radius")
+        ? "Needs maintainer review because the issue appears larger than a surgical fix and may have broad blast radius."
+        : safetyFlags.includes("privileged-area")
         ? "Needs maintainer review because it touches a privileged area."
         : "Needs maintainer review because the issue looks like discussion or support, not direct implementation work.",
       safetyFlags,
-      recommendedLabels: ["needs-maintainer-review"],
+      recommendedLabels,
     };
   }
 
-  const actionable = labels.some((label) => label === "bug" || label === "regression")
-    || matchesAny(text, ACTIONABLE_PATTERNS);
+  const concreteReport = matchesAny(text, ACTIONABLE_DETAIL_PATTERNS);
+  const actionable = matchesAny(text, ACTIONABLE_PATTERNS) && concreteReport;
 
   if (actionable) {
     return {
       status: "approved",
-      confidence: 0.82,
-      summary: "Approved for automatic work: actionable bug report with no safety flags.",
+      confidence: CONFIDENCE.high,
+      summary: "Approved for automatic work: the evaluator could not disprove a concrete, surgical issue report and found no safety flags.",
       safetyFlags,
       recommendedLabels: ["ready-for-agent"],
     };
@@ -169,8 +228,8 @@ export function evaluateIssueForAutomation(input: IssueEvaluationInput): IssueEv
 
   return {
     status: "needs_review",
-    confidence: 0.55,
-    summary: "Needs maintainer review because the issue is not clearly actionable yet.",
+    confidence: CONFIDENCE.medium,
+    summary: "Needs maintainer review because the evaluator could not find enough concrete detail to treat the report as proven actionable.",
     safetyFlags,
     recommendedLabels: ["needs-maintainer-review"],
   };
@@ -208,6 +267,8 @@ export function buildIssueEvaluationComment(input: {
     `Issue: [${input.issueTitle}](${input.issueUrl})`,
     "",
     input.decision.summary,
+    "",
+    `Confidence: ${formatIssueEvaluationConfidence(input.decision.confidence)}`,
     "",
     "**Safety flags**",
     flags,

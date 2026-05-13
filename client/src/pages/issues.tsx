@@ -96,6 +96,18 @@ function formatEvaluationState(issue: Issue): string {
   return issue.evaluationStatus.replace("_", " ");
 }
 
+function formatEvaluationConfidence(confidence: number): string {
+  const grade = confidence >= 0.9
+    ? "very high"
+    : confidence >= 0.75
+    ? "high"
+    : confidence >= 0.5
+    ? "medium"
+    : "low";
+
+  return `${grade} (${Math.round(confidence * 100)}%)`;
+}
+
 function getEvaluationBadgeClass(issue: Issue): string {
   if (issue.evaluationStatus === "approved") {
     return "border-success-border bg-success-muted text-success-foreground";
@@ -922,7 +934,7 @@ export default function Issues() {
                     </span>
                     {typeof selectedIssue.evaluationConfidence === "number" && (
                       <span className="border border-border/60 px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
-                        confidence: {Math.round(selectedIssue.evaluationConfidence * 100)}%
+                        confidence: {formatEvaluationConfidence(selectedIssue.evaluationConfidence)}
                       </span>
                     )}
                     {selectedIssue.evaluationUpdatedAt && (
