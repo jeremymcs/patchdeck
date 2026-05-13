@@ -25,6 +25,7 @@ import { addPRSchema, askQuestionSchema } from "@shared/schema";
 import type { IStorage } from "./storage";
 import { getDefaultStorage } from "./storage";
 import { PRBabysitter } from "./babysitter";
+import { resolveRepoAgentRuntimeSettings, resolveRepoCodingAgent } from "./agentSettings";
 import { detectAgentUnavailability, type AgentUnavailabilityKind } from "./agentRunner";
 import { applyEvaluationDecision, applyFlagDecision } from "./feedbackLifecycle";
 import { applyManualFeedbackDecision } from "./manualFeedback";
@@ -1427,6 +1428,11 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
     );
   };
 
+  const queueBabysitForRepo = async (pr: PR, config: Config) => {
+    const repoSettings = await storage.getRepoSettings(pr.repo);
+    await queueBabysitWithAgent(pr, resolveRepoCodingAgent(config, repoSettings));
+  };
+
   const buildManualDrainBlockMessage = (runtimeState: RuntimeState): string => {
     const base = "Drain mode is enabled. Manual runs are blocked until drain mode is disabled.";
     return runtimeState.drainReason ? `${base} Reason: ${runtimeState.drainReason}` : base;
@@ -1780,7 +1786,7 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
         });
       }
 
-      await queueBabysitWithAgent(pr, config.codingAgent);
+      await queueBabysitForRepo(pr, config);
       notifyChange();
       return pr;
     },
@@ -1890,9 +1896,11 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       }
 
       const config = await storage.getConfig();
+      const repoSettings = await storage.getRepoSettings(pr.repo);
+      const selectedAgent = resolveRepoCodingAgent(config, repoSettings);
       await storage.updatePR(pr.id, { status: "processing" });
-      await storage.addLog(pr.id, "info", `Launching autonomous babysitter run using ${config.codingAgent}`);
-      await queueBabysitWithAgent(pr, config.codingAgent);
+      await storage.addLog(pr.id, "info", `Launching autonomous babysitter run using ${selectedAgent}`);
+      await queueBabysitForRepo(pr, config);
 
       const updated = await storage.getPR(pr.id);
       notifyChange();
@@ -1910,8 +1918,10 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       }
 
       const config = await storage.getConfig();
-      await storage.addLog(pr.id, "info", `Manual babysitter trigger using ${config.codingAgent}`);
-      await queueBabysitWithAgent(pr, config.codingAgent);
+      const repoSettings = await storage.getRepoSettings(pr.repo);
+      const selectedAgent = resolveRepoCodingAgent(config, repoSettings);
+      await storage.addLog(pr.id, "info", `Manual babysitter trigger using ${selectedAgent}`);
+      await queueBabysitForRepo(pr, config);
 
       const updated = await storage.getPR(pr.id);
       notifyChange();
@@ -1969,7 +1979,7 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
 
       await storage.addLog(prId, "info", `Feedback item ${feedbackId} queued for retry`);
       const config = await storage.getConfig();
-      await queueBabysitWithAgent(result.updated, config.codingAgent);
+      await queueBabysitForRepo(result.updated, config);
       notifyChange();
       return result.updated;
     },
@@ -2156,7 +2166,6 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
 
     async startReleaseSocialPost(request) {
       const config = await storage.getConfig();
-      const preferredAgent = config.codingAgent ?? "codex";
 
       let input;
       if (request.kind === "internal") {
@@ -2195,6 +2204,9 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
           includedPrs: [],
         };
       }
+      const repoSettings = await storage.getRepoSettings(input.repo);
+      const preferredAgent = resolveRepoCodingAgent(config, repoSettings);
+      const agentSettings = resolveRepoAgentRuntimeSettings(config, repoSettings);
 
       const jobId = randomUUID();
       const job: ReleaseSocialPost = {
@@ -2211,7 +2223,7 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
 
       void (async () => {
         try {
-          const output = await generateReleaseSocialPost({ input, preferredAgent });
+          const output = await generateReleaseSocialPost({ input, preferredAgent, agentSettings });
           socialPostJobs.set(jobId, {
             ...job,
             status: "done",

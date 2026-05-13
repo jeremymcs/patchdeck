@@ -556,13 +556,21 @@ export const deploymentHealingSessionSchema = z.object({
 });
 export type DeploymentHealingSession = z.infer<typeof deploymentHealingSessionSchema>;
 
+export const codingAgentSchema = z.enum(["codex", "claude"]);
+export const codexReasoningEffortSchema = z.enum(["default", "low", "medium", "high", "xhigh"]);
+export const claudeEffortSchema = z.enum(["default", "low", "medium", "high", "xhigh", "max"]);
+
 export const configSchema = z.object({
   githubTokens: z.array(z.string()),
   githubToken: z.string().optional(),
   webUsername: z.string(),
   webPassword: z.string(),
-  codingAgent: z.enum(["codex", "claude"]),
+  codingAgent: codingAgentSchema,
   fallbackToNextCodingAgent: z.boolean(),
+  codexModel: z.string(),
+  codexReasoningEffort: codexReasoningEffortSchema,
+  claudeModel: z.string(),
+  claudeEffort: claudeEffortSchema,
   maxTurns: z.number(),
   batchWindowMs: z.number(),
   pollIntervalMs: z.number(),
@@ -600,6 +608,11 @@ export const watchedRepoSchema = z.object({
   issueAutoEvaluate: z.boolean(),
   issueAutoWork: z.boolean(),
   prAutoMonitor: z.boolean(),
+  codingAgentOverride: codingAgentSchema.nullable(),
+  codexModel: z.string().nullable(),
+  codexReasoningEffort: codexReasoningEffortSchema.nullable(),
+  claudeModel: z.string().nullable(),
+  claudeEffort: claudeEffortSchema.nullable(),
 });
 export type WatchedRepo = z.infer<typeof watchedRepoSchema>;
 

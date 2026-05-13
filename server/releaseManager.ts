@@ -1,6 +1,7 @@
 import type { Octokit } from "@octokit/rest";
 import type { Config, ReleaseRun, ReleaseRunIncludedPR } from "@shared/schema";
 import type { CodingAgent } from "./agentRunner";
+import { resolveRepoAgentRuntimeSettings, resolveRepoCodingAgent } from "./agentSettings";
 import { parseRepoSlug } from "./github";
 import type { IStorage } from "./storage";
 import { buildBackgroundJobDedupeKey, type ScheduleBackgroundJob } from "./backgroundJobQueue";
@@ -302,13 +303,15 @@ export class ReleaseManager {
         const triggerPr = toTriggerSummary(run);
         const includedPulls = await this.loadIncludedPulls(octokit, parsedRepo, run, triggerPr);
         const includedPrs = includedPulls.map(toIncludedPR);
+        const agentSettings = resolveRepoAgentRuntimeSettings(config, repoSettings);
         const decision = await this.evaluateRelease({
-          preferredAgent: config.codingAgent as CodingAgent,
+          preferredAgent: resolveRepoCodingAgent(config, repoSettings) as CodingAgent,
           repo: run.repo,
           baseBranch: run.baseBranch,
           latestTag,
           triggerPr,
           includedPulls: includedPulls,
+          agentSettings,
         });
         const releaseDecision = decision.shouldRelease || !isManualRelease
           ? decision

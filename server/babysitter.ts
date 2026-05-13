@@ -13,6 +13,7 @@ import {
   runCommand,
   STDIN_PRELUDE_PATTERN,
   summarizeCommandResult,
+  type AgentRuntimeSettings,
   type AgentHealthResult,
   type CodingAgent,
 } from "./agentRunner";
@@ -1539,6 +1540,7 @@ export class PRBabysitter {
   async runQueuedBabysitPR(
     prId: string,
     preferredAgent: CodingAgent,
+    agentSettings?: AgentRuntimeSettings,
   ): Promise<void> {
     const interruptedRun = (await this.storage.listAgentRuns({ status: "running", prId }))
       .slice()
@@ -1546,6 +1548,7 @@ export class PRBabysitter {
 
     if (!interruptedRun) {
       await this.babysitPR(prId, preferredAgent, {
+        agentSettings,
         allowDuringDrain: true,
         rethrowOnFailure: true,
       });
@@ -1567,6 +1570,7 @@ export class PRBabysitter {
         updatedAt: now,
       });
       await this.babysitPR(prId, preferredAgent, {
+        agentSettings,
         allowDuringDrain: true,
         rethrowOnFailure: true,
       });
@@ -1579,6 +1583,7 @@ export class PRBabysitter {
       forceAgentPrompt: interruptedRun.prompt,
       forceResolvedAgent: interruptedRun.resolvedAgent,
       replayInitialHeadSha: interruptedRun.initialHeadSha,
+      agentSettings,
       allowDuringDrain: true,
       rethrowOnFailure: true,
     });
@@ -2226,6 +2231,7 @@ export class PRBabysitter {
       forceAgentPrompt?: string | null;
       forceResolvedAgent?: CodingAgent | null;
       replayInitialHeadSha?: string | null;
+      agentSettings?: AgentRuntimeSettings;
       allowDuringDrain?: boolean;
       rethrowOnFailure?: boolean;
     },
@@ -2625,6 +2631,7 @@ export class PRBabysitter {
 
           const result = await this.runtime.applyFixesWithAgent({
             agent,
+            settings: agentSettings,
             cwd,
             prompt,
             env: agentEnv,
@@ -2675,6 +2682,7 @@ export class PRBabysitter {
     const forcedFixPrompt = options?.forceAgentPrompt ?? null;
     const forcedResolvedAgent = options?.forceResolvedAgent ?? null;
     const replayInitialHeadSha = options?.replayInitialHeadSha ?? null;
+    const agentSettings = options?.agentSettings;
     const recoveryMode = Boolean(options?.recoveryMode);
     let skipForcedReplay = false;
     let branchMoved = false;
@@ -2796,6 +2804,7 @@ export class PRBabysitter {
         try {
           return await this.runtime.evaluateFixNecessityWithAgent({
             agent,
+            settings: agentSettings,
             cwd: params.cwd,
             prompt: params.prompt,
           });
@@ -2803,6 +2812,7 @@ export class PRBabysitter {
           if (await tryFallbackToNextAgent(error, params.phase)) {
             return this.runtime.evaluateFixNecessityWithAgent({
               agent,
+              settings: agentSettings,
               cwd: params.cwd,
               prompt: params.prompt,
             });
@@ -3041,6 +3051,7 @@ export class PRBabysitter {
         const { phase, onFallback, ...agentParams } = params;
         const result = await this.runtime.applyFixesWithAgent({
           agent,
+          settings: agentSettings,
           ...agentParams,
         });
         if (result.code === 0) {
@@ -3061,6 +3072,7 @@ export class PRBabysitter {
 
         return this.runtime.applyFixesWithAgent({
           agent,
+          settings: agentSettings,
           ...agentParams,
         });
       };

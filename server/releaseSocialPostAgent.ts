@@ -1,5 +1,5 @@
 import type { CodingAgent } from "./agentRunner";
-import { resolveAgent, runAgentCommand, summarizeCommandResult } from "./agentRunner";
+import { buildAgentCommandArgs, resolveAgent, runAgentCommand, summarizeCommandResult, type AgentRuntimeSettings } from "./agentRunner";
 
 export type ReleaseSocialPostInput = {
   repo: string;
@@ -86,9 +86,10 @@ function buildPrompt(input: ReleaseSocialPostInput): string {
 export async function generateReleaseSocialPost(params: {
   input: ReleaseSocialPostInput;
   preferredAgent: CodingAgent;
+  agentSettings?: AgentRuntimeSettings;
   timeoutMs?: number;
 }): Promise<ReleaseSocialPostOutput> {
-  const { input, preferredAgent, timeoutMs = 180_000 } = params;
+  const { input, preferredAgent, agentSettings, timeoutMs = 180_000 } = params;
 
   const agent = await resolveAgent(preferredAgent);
   const prompt = buildPrompt(input);
@@ -96,8 +97,8 @@ export async function generateReleaseSocialPost(params: {
   const result = await runAgentCommand(
     agent,
     agent === "claude"
-      ? ["-p", "--output-format", "text", prompt]
-      : ["exec", "--skip-git-repo-check", "--sandbox", "read-only", prompt],
+      ? buildAgentCommandArgs("claude", ["-p", "--output-format", "text", prompt], agentSettings)
+      : buildAgentCommandArgs("codex", ["exec", "--skip-git-repo-check", "--sandbox", "read-only", prompt], agentSettings),
     { timeoutMs },
   );
 

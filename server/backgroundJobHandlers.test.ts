@@ -113,14 +113,14 @@ test("babysit_pr handler delegates to the babysitter with the queued preferred a
     `babysit_pr:${prId}`,
     { preferredAgent: "codex" },
   );
-  const calls: Array<{ prId: string; preferredAgent: string }> = [];
+  const calls: Array<{ prId: string; preferredAgent: string; settings?: unknown }> = [];
 
   const handlers = createBackgroundJobHandlers({
     storage,
     babysitter: {
       syncAndBabysitTrackedRepos: async () => undefined,
-      runQueuedBabysitPR: async (queuedPrId, preferredAgent) => {
-        calls.push({ prId: queuedPrId, preferredAgent });
+      runQueuedBabysitPR: async (queuedPrId, preferredAgent, settings) => {
+        calls.push({ prId: queuedPrId, preferredAgent, settings });
       },
     },
   });
@@ -130,6 +130,12 @@ test("babysit_pr handler delegates to the babysitter with the queued preferred a
   assert.deepEqual(calls, [{
     prId,
     preferredAgent: "codex",
+    settings: {
+      codexModel: "",
+      codexReasoningEffort: "default",
+      claudeModel: "opus",
+      claudeEffort: "default",
+    },
   }]);
 });
 

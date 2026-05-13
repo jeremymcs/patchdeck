@@ -83,6 +83,27 @@ test("runtime queueBabysit enqueues a babysit job using the configured agent", a
   assert.equal(jobs[0]?.payload.activityTargetUrl, pr.url);
 });
 
+test("runtime queueBabysit uses repo agent override when configured", async () => {
+  const storage = new MemStorage();
+  const runtime = createAppRuntime({
+    storage,
+    startBackgroundServices: false,
+    startWatcher: false,
+  });
+  const pr = await seedPR(storage);
+  await storage.updateRepoSettings(pr.repo, {
+    codingAgentOverride: "codex",
+  });
+
+  await runtime.queueBabysit(pr.id);
+
+  const jobs = await storage.listBackgroundJobs({
+    kind: "babysit_pr",
+    status: "queued",
+  });
+  assert.equal(jobs[0]?.payload.preferredAgent, "codex");
+});
+
 test("runtime setWatchEnabled updates the PR and emits a change event", async () => {
   const storage = new MemStorage();
   const runtime = createAppRuntime({

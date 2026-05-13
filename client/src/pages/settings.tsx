@@ -21,11 +21,52 @@ const ISSUE_WORK_MODE_OPTIONS = [
   { value: "auto", label: "Auto" },
 ] as const;
 
+const AGENT_OPTIONS = [
+  { value: "codex", label: "codex" },
+  { value: "claude", label: "claude" },
+] as const;
+
+const REPO_AGENT_OPTIONS = [
+  { value: "inherit", label: "Global" },
+  { value: "codex", label: "codex" },
+  { value: "claude", label: "claude" },
+] as const;
+
+const CODEX_MODEL_OPTIONS = [
+  { value: "", label: "CLI default" },
+  { value: "gpt-5.5", label: "gpt-5.5" },
+  { value: "gpt-5.4", label: "gpt-5.4" },
+  { value: "gpt-5.4-mini", label: "gpt-5.4-mini" },
+  { value: "gpt-5.3-codex", label: "gpt-5.3-codex" },
+  { value: "gpt-5.3-codex-spark", label: "gpt-5.3-codex-spark" },
+  { value: "gpt-5.2", label: "gpt-5.2" },
+] as const;
+
+const CLAUDE_MODEL_OPTIONS = [
+  { value: "", label: "CLI default" },
+  { value: "opus", label: "opus" },
+  { value: "sonnet", label: "sonnet" },
+] as const;
+
+const CODEX_REASONING_OPTIONS = [
+  { value: "default", label: "CLI default" },
+  { value: "low", label: "Low" },
+  { value: "medium", label: "Medium" },
+  { value: "high", label: "High" },
+  { value: "xhigh", label: "XHigh" },
+] as const;
+
+const CLAUDE_EFFORT_OPTIONS = [
+  ...CODEX_REASONING_OPTIONS,
+  { value: "max", label: "Max" },
+] as const;
+
 const DRAIN_PAUSED_LABEL = "Paused";
 const DRAIN_PAUSED_TITLE = "Paused by drain mode";
 
 type WatchScope = (typeof WATCH_SCOPE_OPTIONS)[number]["value"];
 type IssueWorkMode = (typeof ISSUE_WORK_MODE_OPTIONS)[number]["value"];
+type RepoAgentOption = (typeof REPO_AGENT_OPTIONS)[number]["value"];
 
 function getWatchScope(ownPrsOnly?: boolean): WatchScope {
   return ownPrsOnly === false ? "team" : "mine";
@@ -41,6 +82,15 @@ function getIssueEvaluateMode(issueAutoEvaluate?: boolean): IssueWorkMode {
 
 function getPrMonitorMode(prAutoMonitor?: boolean): IssueWorkMode {
   return prAutoMonitor === false ? "manual" : "auto";
+}
+
+function getRepoAgentOption(agent?: WatchedRepo["codingAgentOverride"]): RepoAgentOption {
+  return agent ?? "inherit";
+}
+
+function emptyToNull(value: string): string | null {
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 function repoTestId(repo: string): string {
@@ -217,7 +267,7 @@ export default function Settings() {
   });
 
   const updateRepoSettingsMutation = useMutation({
-    mutationFn: async (updates: { repo: string; autoCreateReleases?: boolean; ownPrsOnly?: boolean; issueAutoEvaluate?: boolean; issueAutoWork?: boolean; prAutoMonitor?: boolean }) => {
+    mutationFn: async (updates: { repo: string } & Partial<Omit<WatchedRepo, "repo">>) => {
       const res = await apiRequest("PATCH", "/api/repos/settings", updates);
       return res.json();
     },
@@ -605,6 +655,123 @@ export default function Settings() {
                           Auto-release
                         </label>
                       </div>
+                      <div className="mt-4 grid gap-3 border-t border-border pt-4 md:grid-cols-5">
+                        <div className="grid gap-2">
+                          <label htmlFor={`tracked-repo-agent-${id}`} className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                            Agent
+                          </label>
+                          <select
+                            id={`tracked-repo-agent-${id}`}
+                            value={getRepoAgentOption(repo.codingAgentOverride)}
+                            onChange={(e) =>
+                              updateRepoSettingsMutation.mutate({
+                                repo: repo.repo,
+                                codingAgentOverride: e.target.value === "inherit"
+                                  ? null
+                                  : e.target.value as WatchedRepo["codingAgentOverride"],
+                              })
+                            }
+                            disabled={updateRepoSettingsMutation.isPending}
+                            className="border border-border bg-transparent px-2 py-1 text-xs focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
+                          >
+                            {REPO_AGENT_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>{option.label}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="grid gap-2">
+                          <label htmlFor={`tracked-repo-codex-model-${id}`} className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                            Codex model
+                          </label>
+                          <select
+                            id={`tracked-repo-codex-model-${id}`}
+                            value={repo.codexModel ?? ""}
+                            onChange={(e) =>
+                              updateRepoSettingsMutation.mutate({
+                                repo: repo.repo,
+                                codexModel: emptyToNull(e.target.value),
+                              })
+                            }
+                            disabled={updateRepoSettingsMutation.isPending}
+                            className="border border-border bg-transparent px-2 py-1 text-xs focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
+                          >
+                            <option value="">Global</option>
+                            {CODEX_MODEL_OPTIONS.filter((option) => option.value !== "").map((option) => (
+                              <option key={option.value} value={option.value}>{option.label}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="grid gap-2">
+                          <label htmlFor={`tracked-repo-codex-reasoning-${id}`} className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                            Codex thinking
+                          </label>
+                          <select
+                            id={`tracked-repo-codex-reasoning-${id}`}
+                            value={repo.codexReasoningEffort ?? ""}
+                            onChange={(e) =>
+                              updateRepoSettingsMutation.mutate({
+                                repo: repo.repo,
+                                codexReasoningEffort: e.target.value === ""
+                                  ? null
+                                  : e.target.value as WatchedRepo["codexReasoningEffort"],
+                              })
+                            }
+                            disabled={updateRepoSettingsMutation.isPending}
+                            className="border border-border bg-transparent px-2 py-1 text-xs focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
+                          >
+                            <option value="">Global</option>
+                            {CODEX_REASONING_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>{option.label}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="grid gap-2">
+                          <label htmlFor={`tracked-repo-claude-model-${id}`} className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                            Claude model
+                          </label>
+                          <select
+                            id={`tracked-repo-claude-model-${id}`}
+                            value={repo.claudeModel ?? ""}
+                            onChange={(e) =>
+                              updateRepoSettingsMutation.mutate({
+                                repo: repo.repo,
+                                claudeModel: emptyToNull(e.target.value),
+                              })
+                            }
+                            disabled={updateRepoSettingsMutation.isPending}
+                            className="border border-border bg-transparent px-2 py-1 text-xs focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
+                          >
+                            <option value="">Global</option>
+                            {CLAUDE_MODEL_OPTIONS.filter((option) => option.value !== "").map((option) => (
+                              <option key={option.value} value={option.value}>{option.label}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="grid gap-2">
+                          <label htmlFor={`tracked-repo-claude-effort-${id}`} className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                            Claude thinking
+                          </label>
+                          <select
+                            id={`tracked-repo-claude-effort-${id}`}
+                            value={repo.claudeEffort ?? ""}
+                            onChange={(e) =>
+                              updateRepoSettingsMutation.mutate({
+                                repo: repo.repo,
+                                claudeEffort: e.target.value === ""
+                                  ? null
+                                  : e.target.value as WatchedRepo["claudeEffort"],
+                              })
+                            }
+                            disabled={updateRepoSettingsMutation.isPending}
+                            className="border border-border bg-transparent px-2 py-1 text-xs focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
+                          >
+                            <option value="">Global</option>
+                            {CLAUDE_EFFORT_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>{option.label}</option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
                     </div>
                   );
                 })}
@@ -635,9 +802,76 @@ export default function Settings() {
                   disabled={updateConfigMutation.isPending}
                   className="border border-border bg-transparent px-2 py-1 text-sm focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
                 >
-                  <option value="codex">codex</option>
-                  <option value="claude">claude</option>
+                  {AGENT_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
                 </select>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="grid gap-2">
+                  <label htmlFor="settings-codex-model" className="text-xs uppercase tracking-wider text-muted-foreground">
+                    Codex model
+                  </label>
+                  <select
+                    id="settings-codex-model"
+                    value={config?.codexModel ?? ""}
+                    onChange={(e) => updateConfigMutation.mutate({ codexModel: e.target.value })}
+                    disabled={updateConfigMutation.isPending}
+                    className="border border-border bg-transparent px-2 py-1 text-sm focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
+                  >
+                    {CODEX_MODEL_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="grid gap-2">
+                  <label htmlFor="settings-codex-reasoning" className="text-xs uppercase tracking-wider text-muted-foreground">
+                    Codex thinking
+                  </label>
+                  <select
+                    id="settings-codex-reasoning"
+                    value={config?.codexReasoningEffort ?? "default"}
+                    onChange={(e) => updateConfigMutation.mutate({ codexReasoningEffort: e.target.value as Config["codexReasoningEffort"] })}
+                    disabled={updateConfigMutation.isPending}
+                    className="border border-border bg-transparent px-2 py-1 text-sm focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
+                  >
+                    {CODEX_REASONING_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="grid gap-2">
+                  <label htmlFor="settings-claude-model" className="text-xs uppercase tracking-wider text-muted-foreground">
+                    Claude model
+                  </label>
+                  <select
+                    id="settings-claude-model"
+                    value={config?.claudeModel ?? "opus"}
+                    onChange={(e) => updateConfigMutation.mutate({ claudeModel: e.target.value })}
+                    disabled={updateConfigMutation.isPending}
+                    className="border border-border bg-transparent px-2 py-1 text-sm focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
+                  >
+                    {CLAUDE_MODEL_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="grid gap-2">
+                  <label htmlFor="settings-claude-effort" className="text-xs uppercase tracking-wider text-muted-foreground">
+                    Claude thinking
+                  </label>
+                  <select
+                    id="settings-claude-effort"
+                    value={config?.claudeEffort ?? "default"}
+                    onChange={(e) => updateConfigMutation.mutate({ claudeEffort: e.target.value as Config["claudeEffort"] })}
+                    disabled={updateConfigMutation.isPending}
+                    className="border border-border bg-transparent px-2 py-1 text-sm focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
+                  >
+                    {CLAUDE_EFFORT_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
               <label className="flex items-start justify-between gap-3">
                 <div>

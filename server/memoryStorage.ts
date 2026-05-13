@@ -268,6 +268,11 @@ export class MemStorage implements IStorage {
       issueAutoEvaluate: false,
       issueAutoWork: false,
       prAutoMonitor: true,
+      codingAgentOverride: null,
+      codexModel: null,
+      codexReasoningEffort: null,
+      claudeModel: null,
+      claudeEffort: null,
     };
     const next = applyWatchedRepoUpdate(existing, updates);
     this.repoSettings.set(repo, next);
@@ -303,6 +308,11 @@ export class MemStorage implements IStorage {
           issueAutoEvaluate: false,
           issueAutoWork: false,
           prAutoMonitor: true,
+          codingAgentOverride: null,
+          codexModel: null,
+          codexReasoningEffort: null,
+          claudeModel: null,
+          claudeEffort: null,
         });
       }
     }

@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import type { CodingAgent, CommandResult } from "./agentRunner";
+import type { AgentRuntimeSettings, CodingAgent, CommandResult } from "./agentRunner";
 import { applyFixesWithAgent, runCommand, summarizeCommandResult } from "./agentRunner";
 import { preparePrWorktree, removePrWorktree } from "./repoWorkspace";
 import path from "node:path";
@@ -17,6 +17,7 @@ export type IssueWorkPromptInput = {
   author: string;
   baseBranch: string;
   agent: CodingAgent;
+  agentSettings?: AgentRuntimeSettings;
   contributionGuidance?: string | null;
 };
 
@@ -281,6 +282,7 @@ export async function runIssueWorkRepair(
 
     const agentResult = await deps.applyFixesWithAgent({
       agent: input.agent,
+      settings: input.agentSettings,
       cwd: worktreePath,
       prompt: repoPrompt,
       env: input.env,
