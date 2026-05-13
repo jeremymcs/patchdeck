@@ -64,6 +64,14 @@ jobs:
 
       - run: npm ci
 
+      - name: Bundle Windows Node runtime
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force vendor/node | Out-Null
+          $nodePath = (Get-Command node).Source
+          Copy-Item $nodePath vendor/node/node.exe
+
       - name: Build Tauri app
         if: github.event_name != 'release'
         uses: tauri-apps/tauri-action@v0
