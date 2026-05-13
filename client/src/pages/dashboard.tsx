@@ -401,12 +401,16 @@ function OperatorWarningsBanner({ warnings }: { warnings: OperatorWarning[] }) {
 
 function DashboardErrorsPanel({
   activities,
+  onClearFailed,
+  isClearingFailed,
   onClearIssueFailure,
   isClearingIssueFailure,
   rolledUp,
   onToggleRolledUp,
 }: {
   activities: ActivitySnapshot;
+  onClearFailed: () => void;
+  isClearingFailed: boolean;
   onClearIssueFailure: (activity: ActivityItem) => void;
   isClearingIssueFailure: boolean;
   rolledUp: boolean;
@@ -434,6 +438,22 @@ function DashboardErrorsPanel({
           <div className="text-[11px] text-muted-foreground">
             Failed jobs stay here until retried or cleared from activity.
           </div>
+          <button
+            type="button"
+            onClick={onClearFailed}
+            disabled={isClearingFailed}
+            data-testid="dashboard-clear-failed-activities"
+            className="inline-flex items-center gap-1 rounded-md border border-destructive/50 px-2 py-0.5 text-[10px] uppercase tracking-wider text-destructive transition-colors hover:bg-destructive hover:text-background disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+          >
+            {isClearingFailed ? (
+              "Clearing"
+            ) : (
+              <>
+                <Trash2 className="h-3 w-3" aria-hidden="true" />
+                Clear failed
+              </>
+            )}
+          </button>
           <button
             type="button"
             onClick={onToggleRolledUp}
@@ -1438,6 +1458,8 @@ export default function Dashboard() {
       <OperatorWarningsBanner warnings={activities.warnings} />
       <DashboardErrorsPanel
         activities={activities}
+        onClearFailed={() => clearFailedActivitiesMutation.mutate()}
+        isClearingFailed={clearFailedActivitiesMutation.isPending}
         onClearIssueFailure={(activity) => clearIssueFailureMutation.mutate(activity)}
         isClearingIssueFailure={clearIssueFailureMutation.isPending}
         rolledUp={areErrorsRolledUp}

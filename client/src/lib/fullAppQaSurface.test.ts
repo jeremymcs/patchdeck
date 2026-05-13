@@ -278,6 +278,7 @@ test("dashboard keeps the QA-tested PR, repo, feedback, and side-panel workflows
     ["ask submit", "button-ask"],
     ["dashboard error pill", "dashboard-error-pill"],
     ["dashboard errors panel", "dashboard-errors-panel"],
+    ["dashboard clear failed activities", "dashboard-clear-failed-activities"],
     ["dashboard clear issue failure", "dashboard-clear-issue-failure"],
     ["dashboard errors roll-up toggle", "dashboard-errors-rollup-toggle"],
     ["dashboard errors roll-up summary", "dashboard-errors-rollup-summary"],
