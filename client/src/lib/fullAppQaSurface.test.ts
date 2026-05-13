@@ -307,6 +307,9 @@ test("dashboard keeps the QA-tested PR, repo, feedback, and side-panel workflows
   assertHasTestId(sourceFile, "dashboard drain banner", "dashboard-drain-banner");
   assertHasTestId(sourceFile, "dashboard drain reason", "dashboard-drain-reason");
   assertHasTestId(sourceFile, "activity drain note", "activity-drain-note");
+  assertHasExpression(sourceFile, "queue status helper", /\bbuildQueueStatusIndex\b/);
+  assertHasExpression(sourceFile, "queue status badge", /\bQueueStatusBadge\b/);
+  assertHasExpression(sourceFile, "queue status index", /\bqueueStatusById\b/);
   assertHasStringValue(sourceFile, "drain mode action label", "Paused by drain mode");
   assertHasStringValue(sourceFile, "blocked manual copy", "Manual runs are blocked while global automation is paused.");
   assertHasStringValue(sourceFile, "drained PR copy", "Background and manual runs are paused by drain mode.");
@@ -373,6 +376,8 @@ test("issues page keeps the QA-tested issue monitor and work surface wired", asy
   assertHasExpression(sourceFile, "stale issue helper", /\bisStaleIssue\b/);
   assertHasExpression(sourceFile, "issue detail refresh", /\brefetchSelectedIssueDetail\b/);
   assertHasExpression(sourceFile, "issue PR mergeability", /\bworkPrMergeable\b/);
+  assertHasExpression(sourceFile, "issue queue helper", /\bbuildQueueStatusIndex\b/);
+  assertHasExpression(sourceFile, "issue queue badge", /\bQueueStatusBadge\b/);
   assertHasStringValue(sourceFile, "issue body label", "Issue body");
 });
 
