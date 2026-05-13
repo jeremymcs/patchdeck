@@ -79,6 +79,8 @@ type ConfigRow = {
   auto_resolve_merge_conflicts: number;
   auto_create_releases: number;
   auto_update_docs: number;
+  auto_prs: number;
+  auto_issues: number;
   include_repository_links_in_github_comments: number;
   github_comment_app_name: string;
   post_github_progress_replies: number;
@@ -544,6 +546,8 @@ export class SqliteStorage implements IStorage {
         auto_resolve_merge_conflicts INTEGER NOT NULL DEFAULT 1,
         auto_create_releases INTEGER NOT NULL DEFAULT 0,
         auto_update_docs INTEGER NOT NULL DEFAULT 1,
+        auto_prs INTEGER NOT NULL DEFAULT 1,
+        auto_issues INTEGER NOT NULL DEFAULT 1,
         include_repository_links_in_github_comments INTEGER NOT NULL DEFAULT 1,
         github_comment_app_name TEXT NOT NULL DEFAULT 'patchdeck',
         post_github_progress_replies INTEGER NOT NULL DEFAULT 0,
@@ -866,6 +870,8 @@ export class SqliteStorage implements IStorage {
     this.ensureColumn("config", "auto_resolve_merge_conflicts", "INTEGER NOT NULL DEFAULT 1");
     this.ensureColumn("config", "auto_create_releases", "INTEGER NOT NULL DEFAULT 0");
     this.ensureColumn("config", "auto_update_docs", "INTEGER NOT NULL DEFAULT 1");
+    this.ensureColumn("config", "auto_prs", "INTEGER NOT NULL DEFAULT 1");
+    this.ensureColumn("config", "auto_issues", "INTEGER NOT NULL DEFAULT 1");
     this.ensureColumn("config", "include_repository_links_in_github_comments", "INTEGER NOT NULL DEFAULT 1");
     this.ensureColumn("config", "github_comment_app_name", "TEXT NOT NULL DEFAULT 'patchdeck'");
     this.ensureColumn("config", "post_github_progress_replies", "INTEGER NOT NULL DEFAULT 0");
@@ -984,8 +990,8 @@ export class SqliteStorage implements IStorage {
       autoResolveMergeConflicts: Boolean(row.auto_resolve_merge_conflicts),
       autoCreateReleases: Boolean(row.auto_create_releases ?? Number(DEFAULT_CONFIG.autoCreateReleases)),
       autoUpdateDocs: Boolean(row.auto_update_docs ?? 1),
-      autoPrs: DEFAULT_CONFIG.autoPrs,
-      autoIssues: DEFAULT_CONFIG.autoIssues,
+      autoPrs: Boolean(row.auto_prs ?? Number(DEFAULT_CONFIG.autoPrs)),
+      autoIssues: Boolean(row.auto_issues ?? Number(DEFAULT_CONFIG.autoIssues)),
       includeRepositoryLinksInGitHubComments: Boolean(
         row.include_repository_links_in_github_comments ?? Number(DEFAULT_CONFIG.includeRepositoryLinksInGitHubComments),
       ),
@@ -1041,6 +1047,8 @@ export class SqliteStorage implements IStorage {
           auto_resolve_merge_conflicts,
           auto_create_releases,
           auto_update_docs,
+          auto_prs,
+          auto_issues,
           include_repository_links_in_github_comments,
           github_comment_app_name,
           post_github_progress_replies,
@@ -1058,7 +1066,7 @@ export class SqliteStorage implements IStorage {
           trusted_reviewers_json,
           priority_issue_authors_json,
           ignored_bots_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           github_token = excluded.github_token,
           github_tokens_json = excluded.github_tokens_json,
@@ -1078,6 +1086,8 @@ export class SqliteStorage implements IStorage {
           auto_resolve_merge_conflicts = excluded.auto_resolve_merge_conflicts,
           auto_create_releases = excluded.auto_create_releases,
           auto_update_docs = excluded.auto_update_docs,
+          auto_prs = excluded.auto_prs,
+          auto_issues = excluded.auto_issues,
           include_repository_links_in_github_comments = excluded.include_repository_links_in_github_comments,
           github_comment_app_name = excluded.github_comment_app_name,
           post_github_progress_replies = excluded.post_github_progress_replies,
@@ -1115,6 +1125,8 @@ export class SqliteStorage implements IStorage {
         Number(config.autoResolveMergeConflicts),
         Number(config.autoCreateReleases),
         Number(config.autoUpdateDocs),
+        Number(config.autoPrs),
+        Number(config.autoIssues),
         Number(config.includeRepositoryLinksInGitHubComments),
         config.githubCommentAppName,
         Number(config.postGitHubProgressReplies),
@@ -1798,7 +1810,7 @@ export class SqliteStorage implements IStorage {
       SELECT github_token, github_tokens_json, web_username, web_password, coding_agent, fallback_to_next_coding_agent, model,
              codex_model, codex_reasoning_effort, claude_model, claude_effort, max_turns, batch_window_ms,
              poll_interval_ms, max_changes_per_run, auto_resolve_merge_conflicts, auto_create_releases,
-             auto_update_docs, include_repository_links_in_github_comments, github_comment_app_name,
+             auto_update_docs, auto_prs, auto_issues, include_repository_links_in_github_comments, github_comment_app_name,
              post_github_progress_replies,
              auto_heal_ci, max_healing_attempts_per_session,
              max_healing_attempts_per_fingerprint, max_concurrent_healing_runs, healing_cooldown_ms,
