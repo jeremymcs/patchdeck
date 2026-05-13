@@ -87,6 +87,7 @@ test("SqliteStorage reloads config and PR state from the same root", async () =>
     maxHealingAttemptsPerFingerprint: 4,
     maxConcurrentHealingRuns: 2,
     healingCooldownMs: 123456,
+    priorityIssueAuthors: ["priority-user"],
     watchedRepos: ["alex-morgan-o/lolodex"],
   });
   await first.updateRepoSettings("alex-morgan-o/lolodex", {
@@ -221,6 +222,7 @@ test("SqliteStorage reloads config and PR state from the same root", async () =>
   assert.equal(config.maxConcurrentHealingRuns, 2);
   assert.equal(config.healingCooldownMs, 123456);
   assert.deepEqual(config.githubTokens, ["ghs_first", "ghs_second"]);
+  assert.deepEqual(config.priorityIssueAuthors, ["priority-user"]);
   assert.deepEqual(config.watchedRepos, ["alex-morgan-o/lolodex"]);
   assert.deepEqual(repoSettings, {
     repo: "alex-morgan-o/lolodex",

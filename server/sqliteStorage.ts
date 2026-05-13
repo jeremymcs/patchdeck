@@ -90,6 +90,7 @@ type ConfigRow = {
   max_concurrent_issue_evaluations: number;
   max_concurrent_issue_work: number;
   trusted_reviewers_json: string;
+  priority_issue_authors_json: string;
   ignored_bots_json: string;
 };
 
@@ -538,6 +539,7 @@ export class SqliteStorage implements IStorage {
         max_concurrent_healing_runs INTEGER NOT NULL DEFAULT 1,
         healing_cooldown_ms INTEGER NOT NULL DEFAULT 300000,
         trusted_reviewers_json TEXT NOT NULL,
+        priority_issue_authors_json TEXT NOT NULL DEFAULT '[]',
         ignored_bots_json TEXT NOT NULL
       );
 
@@ -860,6 +862,7 @@ export class SqliteStorage implements IStorage {
     this.exec("UPDATE watched_repos SET issue_auto_evaluate = 1 WHERE issue_auto_work = 1 AND issue_auto_evaluate = 0");
     this.ensureColumn("config", "max_concurrent_issue_evaluations", "INTEGER NOT NULL DEFAULT 2");
     this.ensureColumn("config", "max_concurrent_issue_work", "INTEGER NOT NULL DEFAULT 1");
+    this.ensureColumn("config", "priority_issue_authors_json", "TEXT NOT NULL DEFAULT '[]'");
     this.ensureColumn("release_runs", "source", "TEXT NOT NULL DEFAULT 'automatic'");
     this.ensureColumn("prs", "watch_enabled", "INTEGER NOT NULL DEFAULT 1");
     this.ensureColumn("prs", "docs_assessment_json", "TEXT");
@@ -970,6 +973,7 @@ export class SqliteStorage implements IStorage {
       maxConcurrentIssueWork: row.max_concurrent_issue_work ?? DEFAULT_CONFIG.maxConcurrentIssueWork,
       watchedRepos,
       trustedReviewers: JSON.parse(row.trusted_reviewers_json),
+      priorityIssueAuthors: parseStringArrayJson(row.priority_issue_authors_json),
       ignoredBots: JSON.parse(row.ignored_bots_json),
     };
   }
@@ -1015,8 +1019,9 @@ export class SqliteStorage implements IStorage {
           max_concurrent_issue_evaluations,
           max_concurrent_issue_work,
           trusted_reviewers_json,
+          priority_issue_authors_json,
           ignored_bots_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           github_token = excluded.github_token,
           github_tokens_json = excluded.github_tokens_json,
@@ -1047,7 +1052,8 @@ export class SqliteStorage implements IStorage {
           max_concurrent_issue_evaluations = excluded.max_concurrent_issue_evaluations,
           max_concurrent_issue_work = excluded.max_concurrent_issue_work,
           trusted_reviewers_json = excluded.trusted_reviewers_json,
-        ignored_bots_json = excluded.ignored_bots_json
+          priority_issue_authors_json = excluded.priority_issue_authors_json,
+          ignored_bots_json = excluded.ignored_bots_json
       `,
         1,
         config.githubTokens[0] ?? "",
@@ -1079,6 +1085,7 @@ export class SqliteStorage implements IStorage {
         config.maxConcurrentIssueEvaluations,
         config.maxConcurrentIssueWork,
         JSON.stringify(config.trustedReviewers),
+        JSON.stringify(config.priorityIssueAuthors),
         JSON.stringify(config.ignoredBots),
       );
 
@@ -1739,7 +1746,7 @@ export class SqliteStorage implements IStorage {
              max_healing_attempts_per_fingerprint, max_concurrent_healing_runs, healing_cooldown_ms,
              auto_heal_deployments, deployment_check_delay_ms, deployment_check_timeout_ms,
              deployment_check_poll_interval_ms, max_concurrent_issue_evaluations, max_concurrent_issue_work,
-             trusted_reviewers_json, ignored_bots_json
+             trusted_reviewers_json, priority_issue_authors_json, ignored_bots_json
       FROM config
       WHERE id = 1
     `);

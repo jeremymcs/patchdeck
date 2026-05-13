@@ -250,6 +250,7 @@ patchdeck --no-log-file
 <li><strong>Babysitter tuning</strong> — Control polling, batching, merge-conflict handling, release automation, and automatic docs assessment.</li>
 <li><strong>Runtime drain mode</strong> — Pause new background automation and manual agent-triggering actions while allowing in-flight work to finish. During drain mode, the dashboard disables Run now/apply, feedback retry, Ask Agent, manual Release, and release retry actions; matching API calls return <code>409</code> instead of queueing new agent work.</li>
 <li><strong>Ignored bots</strong> — Add or remove bot logins whose comments and reviews should be ignored.</li>
+<li><strong>Priority issue authors</strong> — Add GitHub logins whose issues should be evaluated and worked before the regular issue queue.</li>
 <li><strong>PR comment branding</strong> — Customize the app name shown in agent-authored GitHub PR comments, or remove that signature entirely. Toggle whether the signature links back to patchdeck and includes the <code>Posted by patchdeck</code> footer.</li>
 <li><strong>GitHub progress replies</strong> — Toggle whether the babysitter posts public Accepted/running/completed status replies while working through review comments.</li>
 <li><strong>CI healing</strong> — Enable autonomous CI repair and tune retry/session limits.</li>
@@ -287,6 +288,9 @@ patchdeck --no-log-file
 </tbody></table>
 <p>New watched repos default to <strong>My PRs only</strong> with automatic release publishing disabled. If you want team-wide tracking for a repository, switch it to <strong>My PRs + teammates</strong> in the dashboard or patch <code>ownPrsOnly: false</code> through <code>/api/repos/settings</code>.</p>
 <p>PRs added directly by URL stay tracked regardless of a repo&#39;s <code>ownPrsOnly</code> setting.</p>
+<h2>Issue Queue Priority</h2>
+<p><code>priorityIssueAuthors</code> is a dashboard and API setting for GitHub issue queue ordering. Add GitHub account logins such as <code>octocat</code>; entries are matched case-insensitively and may include or omit a leading <code>@</code>.</p>
+<p>Issues opened by these authors are evaluated and worked ahead of the regular issue queue. Matching evaluation and work jobs are also queued with elevated background-job priority. The default is an empty list, so issue ordering and job priority are unchanged until logins are configured.</p>
 <h2>Manual Repository Releases</h2>
 <p>Each watched repository row in the dashboard includes a <strong>Release</strong> button. Pressing it queues a manual release run for the latest unreleased merged PR in that repository, using the same release evaluation, version bump, notes, and GitHub publishing flow as automatic release creation.</p>
 <p>Manual release runs are allowed even when <code>autoCreateReleases</code> is disabled, so you can keep automatic publishing off and still publish releases on demand. If the repository has no unreleased merged PRs, the API returns <code>409</code> and no release run is created.</p>

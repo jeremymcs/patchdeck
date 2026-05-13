@@ -46,6 +46,7 @@ describe("DEFAULT_CONFIG", () => {
       "maxConcurrentIssueWork",
       "watchedRepos",
       "trustedReviewers",
+      "priorityIssueAuthors",
       "ignoredBots",
     ] as const;
 
@@ -77,11 +78,13 @@ describe("DEFAULT_CONFIG", () => {
     }
   });
 
-  it("has empty arrays for watchedRepos and trustedReviewers", () => {
+  it("has empty arrays for watchedRepos, trustedReviewers, and priorityIssueAuthors", () => {
     assert.ok(Array.isArray(DEFAULT_CONFIG.watchedRepos), "watchedRepos should be an array");
     assert.ok(Array.isArray(DEFAULT_CONFIG.trustedReviewers), "trustedReviewers should be an array");
+    assert.ok(Array.isArray(DEFAULT_CONFIG.priorityIssueAuthors), "priorityIssueAuthors should be an array");
     assert.equal(DEFAULT_CONFIG.watchedRepos.length, 0, "watchedRepos should be empty by default");
     assert.equal(DEFAULT_CONFIG.trustedReviewers.length, 0, "trustedReviewers should be empty by default");
+    assert.equal(DEFAULT_CONFIG.priorityIssueAuthors.length, 0, "priorityIssueAuthors should be empty by default");
   });
 
   it("has empty array as default githubTokens", () => {

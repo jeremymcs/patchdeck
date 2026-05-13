@@ -31,5 +31,6 @@ export const DEFAULT_CONFIG: Config = {
   maxConcurrentIssueWork: 1,
   watchedRepos: [],
   trustedReviewers: [],
+  priorityIssueAuthors: [],
   ignoredBots: ["dependabot[bot]", "codecov[bot]", "github-actions[bot]"],
 };
