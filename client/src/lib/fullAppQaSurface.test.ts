@@ -268,7 +268,9 @@ test("dashboard keeps the QA-tested PR, repo, feedback, and side-panel workflows
 
   for (const [label, testId] of [
     ["active tab", "tab-active"],
+    ["on issues tab", "tab-on-issues"],
     ["archived tab", "tab-archived"],
+    ["PR on issues badge", "pr-on-issues-badge"],
     ["run-now action", "button-apply"],
     ["pause-resume watch action", "button-toggle-watch"],
     ["CI healing panel", "panel-ci-healing"],
@@ -293,6 +295,7 @@ test("dashboard keeps the QA-tested PR, repo, feedback, and side-panel workflows
   for (const [label, endpoint] of [
     ["active PR API", "/api/prs"],
     ["archived PR API", "/api/prs/archived"],
+    ["issues API", "/api/issues"],
     ["repo settings API", "/api/repos/settings"],
     ["activity API", "/api/activities"],
     ["config API", "/api/config"],
@@ -311,6 +314,8 @@ test("dashboard keeps the QA-tested PR, repo, feedback, and side-panel workflows
   assertHasExpression(sourceFile, "queue status helper", /\bbuildQueueStatusIndex\b/);
   assertHasExpression(sourceFile, "queue status badge", /\bQueueStatusBadge\b/);
   assertHasExpression(sourceFile, "queue status index", /\bqueueStatusById\b/);
+  assertHasExpression(sourceFile, "issue-linked PR index", /\bbuildIssueLinkedPRIndex\b/);
+  assertHasStringValue(sourceFile, "on issues tab label", /On Issues/);
   assertHasStringValue(sourceFile, "drain mode action label", "Paused by drain mode");
   assertHasStringValue(sourceFile, "blocked manual copy", "Manual runs are blocked while global automation is paused.");
   assertHasStringValue(sourceFile, "drained PR copy", "Background and manual runs are paused by drain mode.");
