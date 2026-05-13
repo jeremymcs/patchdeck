@@ -641,11 +641,9 @@ const PRRow = memo(function PRRow({
               href={pr.url}
               testId={`ready-to-merge-${pr.id}`}
               label="Ready to merge"
-              hint="— click to open PR"
               onClick={(event) => event.stopPropagation()}
-              className="mt-1.5 ml-[3.75rem] gap-1.5 px-2 py-0.5 text-[11px] tracking-wider"
+              className="mt-1.5 ml-[3.75rem] gap-1.5 whitespace-nowrap px-2 py-0.5 text-[10px] tracking-wider"
               dotClassName="h-1.5 w-1.5"
-              hintClassName="text-[10px] normal-case tracking-normal text-success-foreground/75"
             />
           )}
           {pr.status === "error" && failureMessage && (
