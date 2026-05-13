@@ -262,12 +262,14 @@ export async function registerRoutes(
         ownPrsOnly: z.boolean().optional(),
         issueAutoEvaluate: z.boolean().optional(),
         issueAutoWork: z.boolean().optional(),
+        prAutoMonitor: z.boolean().optional(),
       }).refine(
         (value) => (
           value.autoCreateReleases !== undefined
           || value.ownPrsOnly !== undefined
           || value.issueAutoEvaluate !== undefined
           || value.issueAutoWork !== undefined
+          || value.prAutoMonitor !== undefined
         ),
         "At least one repository setting must be provided",
       ).parse(req.body);

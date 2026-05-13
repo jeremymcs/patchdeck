@@ -157,6 +157,7 @@ type WatchedRepoRow = {
   own_prs_only: number;
   issue_auto_evaluate: number;
   issue_auto_work: number;
+  pr_auto_monitor: number;
 };
 
 type FeedbackItemRow = {
@@ -859,6 +860,7 @@ export class SqliteStorage implements IStorage {
     this.ensureColumn("watched_repos", "own_prs_only", "INTEGER NOT NULL DEFAULT 1");
     this.ensureColumn("watched_repos", "issue_auto_work", "INTEGER NOT NULL DEFAULT 0");
     this.ensureColumn("watched_repos", "issue_auto_evaluate", "INTEGER NOT NULL DEFAULT 0");
+    this.ensureColumn("watched_repos", "pr_auto_monitor", "INTEGER NOT NULL DEFAULT 1");
     this.exec("UPDATE watched_repos SET issue_auto_evaluate = 1 WHERE issue_auto_work = 1 AND issue_auto_evaluate = 0");
     this.ensureColumn("config", "max_concurrent_issue_evaluations", "INTEGER NOT NULL DEFAULT 2");
     this.ensureColumn("config", "max_concurrent_issue_work", "INTEGER NOT NULL DEFAULT 1");
@@ -1093,12 +1095,13 @@ export class SqliteStorage implements IStorage {
       for (const repo of config.watchedRepos) {
         const settings = watchedRepoSettings.get(repo);
         this.run(
-          "INSERT INTO watched_repos (repo, auto_create_releases, own_prs_only, issue_auto_evaluate, issue_auto_work) VALUES (?, ?, ?, ?, ?)",
+          "INSERT INTO watched_repos (repo, auto_create_releases, own_prs_only, issue_auto_evaluate, issue_auto_work, pr_auto_monitor) VALUES (?, ?, ?, ?, ?, ?)",
           repo,
           settings?.auto_create_releases ?? 0,
           settings?.own_prs_only ?? 1,
           settings?.issue_auto_evaluate ?? 0,
           settings?.issue_auto_work ?? 0,
+          settings?.pr_auto_monitor ?? 1,
         );
       }
     });
@@ -1111,12 +1114,13 @@ export class SqliteStorage implements IStorage {
       ownPrsOnly: Boolean(row.own_prs_only ?? 1),
       issueAutoEvaluate: Boolean(row.issue_auto_evaluate ?? 0),
       issueAutoWork: Boolean(row.issue_auto_work ?? 0),
+      prAutoMonitor: Boolean(row.pr_auto_monitor ?? 1),
     };
   }
 
   private getWatchedRepoRows(): WatchedRepoRow[] {
     return this.all<WatchedRepoRow>(
-      "SELECT repo, auto_create_releases, own_prs_only, issue_auto_evaluate, issue_auto_work FROM watched_repos ORDER BY repo ASC",
+      "SELECT repo, auto_create_releases, own_prs_only, issue_auto_evaluate, issue_auto_work, pr_auto_monitor FROM watched_repos ORDER BY repo ASC",
     );
   }
 
@@ -1767,7 +1771,7 @@ export class SqliteStorage implements IStorage {
 
   async getRepoSettings(repo: string): Promise<WatchedRepo | undefined> {
     const row = this.get<WatchedRepoRow>(
-      "SELECT repo, auto_create_releases, own_prs_only, issue_auto_evaluate, issue_auto_work FROM watched_repos WHERE repo = ?",
+      "SELECT repo, auto_create_releases, own_prs_only, issue_auto_evaluate, issue_auto_work, pr_auto_monitor FROM watched_repos WHERE repo = ?",
       repo,
     );
     return row ? this.parseWatchedRepoRow(row) : undefined;
@@ -1783,25 +1787,28 @@ export class SqliteStorage implements IStorage {
       ownPrsOnly: true,
       issueAutoEvaluate: false,
       issueAutoWork: false,
+      prAutoMonitor: true,
     };
     const next = applyWatchedRepoUpdate(existing, updates);
 
     this.withWriteTransaction(() => {
       this.run(
         `
-          INSERT INTO watched_repos (repo, auto_create_releases, own_prs_only, issue_auto_evaluate, issue_auto_work)
-          VALUES (?, ?, ?, ?, ?)
+          INSERT INTO watched_repos (repo, auto_create_releases, own_prs_only, issue_auto_evaluate, issue_auto_work, pr_auto_monitor)
+          VALUES (?, ?, ?, ?, ?, ?)
           ON CONFLICT(repo) DO UPDATE SET
             auto_create_releases = excluded.auto_create_releases,
             own_prs_only = excluded.own_prs_only,
             issue_auto_evaluate = excluded.issue_auto_evaluate,
-            issue_auto_work = excluded.issue_auto_work
+            issue_auto_work = excluded.issue_auto_work,
+            pr_auto_monitor = excluded.pr_auto_monitor
         `,
         next.repo,
         Number(next.autoCreateReleases),
         Number(next.ownPrsOnly),
         Number(next.issueAutoEvaluate),
         Number(next.issueAutoWork),
+        Number(next.prAutoMonitor),
       );
     });
 

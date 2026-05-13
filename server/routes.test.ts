@@ -1173,6 +1173,7 @@ test("GET/PATCH /api/repos/settings exposes repo-level settings", async () => {
       ownPrsOnly: boolean;
       issueAutoEvaluate: boolean;
       issueAutoWork: boolean;
+      prAutoMonitor: boolean;
     }>;
     assert.deepEqual(initial, [{
       repo: "acme/widgets",
@@ -1180,6 +1181,7 @@ test("GET/PATCH /api/repos/settings exposes repo-level settings", async () => {
       ownPrsOnly: true,
       issueAutoEvaluate: false,
       issueAutoWork: false,
+      prAutoMonitor: true,
     }]);
 
     const updateResponse = await fetch(`${harness.baseUrl}/api/repos/settings`, {
@@ -1201,6 +1203,7 @@ test("GET/PATCH /api/repos/settings exposes repo-level settings", async () => {
       ownPrsOnly: boolean;
       issueAutoEvaluate: boolean;
       issueAutoWork: boolean;
+      prAutoMonitor: boolean;
     };
     // Enabling auto-work implicitly enables auto-evaluate — they're dependent settings,
     // not independent flags. Verifies coercion in applyWatchedRepoUpdate.
@@ -1210,6 +1213,7 @@ test("GET/PATCH /api/repos/settings exposes repo-level settings", async () => {
       ownPrsOnly: false,
       issueAutoEvaluate: true,
       issueAutoWork: true,
+      prAutoMonitor: true,
     });
 
     const persisted = await harness.storage.getRepoSettings("acme/widgets");
@@ -1219,6 +1223,7 @@ test("GET/PATCH /api/repos/settings exposes repo-level settings", async () => {
       ownPrsOnly: false,
       issueAutoEvaluate: true,
       issueAutoWork: true,
+      prAutoMonitor: true,
     });
   } finally {
     await harness.close();
@@ -1251,6 +1256,7 @@ test("PATCH /api/repos/settings can update only ownPrsOnly", async () => {
       ownPrsOnly: boolean;
       issueAutoEvaluate: boolean;
       issueAutoWork: boolean;
+      prAutoMonitor: boolean;
     };
     assert.deepEqual(updated, {
       repo: "acme/widgets",
@@ -1258,6 +1264,7 @@ test("PATCH /api/repos/settings can update only ownPrsOnly", async () => {
       ownPrsOnly: false,
       issueAutoEvaluate: false,
       issueAutoWork: false,
+      prAutoMonitor: true,
     });
   } finally {
     await harness.close();

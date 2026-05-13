@@ -267,6 +267,7 @@ export class MemStorage implements IStorage {
       ownPrsOnly: true,
       issueAutoEvaluate: false,
       issueAutoWork: false,
+      prAutoMonitor: true,
     };
     const next = applyWatchedRepoUpdate(existing, updates);
     this.repoSettings.set(repo, next);
@@ -301,6 +302,7 @@ export class MemStorage implements IStorage {
           ownPrsOnly: true,
           issueAutoEvaluate: false,
           issueAutoWork: false,
+          prAutoMonitor: true,
         });
       }
     }

@@ -486,6 +486,7 @@ describe("MemStorage", () => {
         ownPrsOnly: true,
         issueAutoEvaluate: false,
         issueAutoWork: false,
+        prAutoMonitor: true,
       }]);
     });
 
@@ -503,6 +504,7 @@ describe("MemStorage", () => {
         ownPrsOnly: false,
         issueAutoEvaluate: true,
         issueAutoWork: true,
+        prAutoMonitor: true,
       });
 
       const config = await storage.getConfig();
@@ -515,6 +517,7 @@ describe("MemStorage", () => {
         ownPrsOnly: false,
         issueAutoEvaluate: true,
         issueAutoWork: true,
+        prAutoMonitor: true,
       });
     });
   });
