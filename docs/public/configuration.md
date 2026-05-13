@@ -65,6 +65,7 @@ The settings page in the dashboard provides a UI for:
 - **Babysitter tuning** — Control polling, batching, merge-conflict handling, release automation, and automatic docs assessment.
 - **Runtime drain mode** — Pause new background automation and manual agent-triggering actions while allowing in-flight work to finish. During drain mode, the dashboard disables Run now/apply, feedback retry, Ask Agent, manual Release, and release retry actions; matching API calls return `409` instead of queueing new agent work.
 - **Ignored bots** — Add or remove bot logins whose comments and reviews should be ignored.
+- **Priority issue authors** — Add GitHub logins whose issues should be evaluated and worked before the regular issue queue.
 - **PR comment branding** — Customize the app name shown in agent-authored GitHub PR comments, or remove that signature entirely. Toggle whether the signature links back to patchdeck and includes the `Posted by patchdeck` footer.
 - **GitHub progress replies** — Toggle whether the babysitter posts public Accepted/running/completed status replies while working through review comments.
 - **CI healing** — Enable autonomous CI repair and tune retry/session limits.
@@ -90,6 +91,12 @@ Watched repositories also have repo-level settings exposed in the dashboard's re
 New watched repos default to **My PRs only** with automatic release publishing disabled. If you want team-wide tracking for a repository, switch it to **My PRs + teammates** in the dashboard or patch `ownPrsOnly: false` through `/api/repos/settings`.
 
 PRs added directly by URL stay tracked regardless of a repo's `ownPrsOnly` setting.
+
+## Issue Queue Priority
+
+`priorityIssueAuthors` is a dashboard and API setting for GitHub issue queue ordering. Add GitHub account logins such as `octocat`; entries are matched case-insensitively and may include or omit a leading `@`.
+
+Issues opened by these authors are evaluated and worked ahead of the regular issue queue. Matching evaluation and work jobs are also queued with elevated background-job priority. The default is an empty list, so issue ordering and job priority are unchanged until logins are configured.
 
 ## Manual Repository Releases
 

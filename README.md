@@ -108,6 +108,7 @@ PatchDeck reads its config from `~/.patchdeck/state.sqlite`. Override the home d
 Key controls (all editable in Settings):
 
 - **Trusted reviewers** — comments from these GitHub logins skip evaluation and go straight to the agent fix queue
+- **Priority issue authors** — issues from these GitHub logins are evaluated and worked before the regular issue queue
 - **Ignored bots** — bot logins whose comments and reviews are ignored entirely
 - **Auto mode** — global toggles for PR babysitting and issue auto-work; the header chip in the web UI shows current state
 - **Drain mode** — emergency pause across all automation (kept separate from the per-area auto toggles)

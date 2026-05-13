@@ -688,6 +688,7 @@ Partially update the configuration.  Only the provided fields are changed.
   "deploymentCheckPollIntervalMs": 15000,
   "watchedRepos": ["owner/repo"],
   "trustedReviewers": ["alice", "bob"],
+  "priorityIssueAuthors": ["octocat"],
   "ignoredBots": ["dependabot", "codecov"]
 }
 ```
@@ -697,6 +698,12 @@ Partially update the configuration.  Only the provided fields are changed.
 Some configuration is REST-writable but not exposed by the MCP `update_config`
 tool schema today. Use this REST endpoint when changing release automation,
 CI-healing, or deployment-healing keys.
+
+`priorityIssueAuthors` accepts GitHub account logins such as `octocat`; values
+are matched case-insensitively and may include or omit a leading `@`. Issues from
+matching authors are evaluated and worked before the regular issue queue, and
+their evaluation/work jobs use elevated background-job priority. The default is
+an empty array, which leaves issue ordering and job priority unchanged.
 
 ---
 
@@ -1027,6 +1034,7 @@ Install the patchdeck code-review GitHub Actions workflow on a repository.
   deploymentCheckPollIntervalMs: number;
   watchedRepos: string[];
   trustedReviewers: string[];
+  priorityIssueAuthors: string[]; // GitHub logins whose issues receive queue and job priority; empty by default
   ignoredBots: string[];
 }
 ```
