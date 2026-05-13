@@ -79,6 +79,8 @@ test("SqliteStorage reloads config and PR state from the same root", async () =>
     fallbackToNextCodingAgent: true,
     autoCreateReleases: false,
     autoUpdateDocs: false,
+    autoPrs: false,
+    autoIssues: false,
     includeRepositoryLinksInGitHubComments: false,
     githubCommentAppName: "Review Bot",
     postGitHubProgressReplies: true,
@@ -213,6 +215,8 @@ test("SqliteStorage reloads config and PR state from the same root", async () =>
   assert.equal(config.fallbackToNextCodingAgent, true);
   assert.equal(config.autoCreateReleases, false);
   assert.equal(config.autoUpdateDocs, false);
+  assert.equal(config.autoPrs, false);
+  assert.equal(config.autoIssues, false);
   assert.equal(config.includeRepositoryLinksInGitHubComments, false);
   assert.equal(config.githubCommentAppName, "Review Bot");
   assert.equal(config.postGitHubProgressReplies, true);
@@ -437,6 +441,14 @@ test("SqliteStorage schema defaults automatic release creation off", async () =>
     assert.equal(
       configColumns.find((column) => column.name === "auto_create_releases")?.dflt_value,
       "0",
+    );
+    assert.equal(
+      configColumns.find((column) => column.name === "auto_prs")?.dflt_value,
+      "1",
+    );
+    assert.equal(
+      configColumns.find((column) => column.name === "auto_issues")?.dflt_value,
+      "1",
     );
     assert.equal(
       watchedRepoColumns.find((column) => column.name === "auto_create_releases")?.dflt_value,

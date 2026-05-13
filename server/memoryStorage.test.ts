@@ -459,6 +459,8 @@ describe("MemStorage", () => {
         githubCommentAppName: " Review Bot ",
         includeRepositoryLinksInGitHubComments: false,
         postGitHubProgressReplies: true,
+        autoPrs: false,
+        autoIssues: false,
         autoHealCI: true,
         maxHealingAttemptsPerSession: 5,
         maxHealingAttemptsPerFingerprint: 4,
@@ -470,6 +472,8 @@ describe("MemStorage", () => {
       assert.deepEqual(fetched.githubTokens, ["tok_123", "tok_456"]);
       assert.equal(fetched.githubCommentAppName, "Review Bot");
       assert.equal(fetched.postGitHubProgressReplies, true);
+      assert.equal(fetched.autoPrs, false);
+      assert.equal(fetched.autoIssues, false);
     });
   });
 
