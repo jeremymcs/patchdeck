@@ -18,6 +18,7 @@ import {
   type LogLevel,
   type LogRecord,
 } from "./logger";
+import { getRateLimitState } from "./rateLimitState";
 
 const VALID_LEVELS: LogLevel[] = ["trace", "debug", "info", "warn", "error", "fatal"];
 
@@ -144,6 +145,14 @@ export async function registerRoutes(
 
   app.get("/api/runtime", async (_req, res) => {
     res.json(await runtime.getRuntimeSnapshot());
+  });
+
+  app.get("/api/github-rate-limit", async (_req, res) => {
+    const state = getRateLimitState();
+    res.json({
+      limited: state.limited,
+      resetAt: state.resetAt ? state.resetAt.toISOString() : null,
+    });
   });
 
   app.get("/api/server-logs", (req, res) => {

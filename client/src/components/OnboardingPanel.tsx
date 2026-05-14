@@ -292,10 +292,10 @@ export function OnboardingPanel() {
                     )}
                     <div className="space-y-1.5 text-[12px] text-muted-foreground">
                       <Step number={1}>
-                        Run <InlineCode>gh auth login</InlineCode> on this machine, or set <InlineCode>GITHUB_TOKEN</InlineCode> before starting the app.
+                        Run <InlineCode>gh auth login</InlineCode> on this machine, set <InlineCode>GITHUB_TOKEN</InlineCode>, or add a saved token in <Link href="/settings" className="underline underline-offset-2">settings</Link>.
                       </Step>
                       <Step number={2}>
-                        Prefer the built-in token list if you want the app to remember it. Open <Link href="/settings" className="underline underline-offset-2">settings</Link> to paste a Personal Access Token.
+                        Prefer the built-in token list if you want the app to remember it. For fine-grained PATs, give the watched repos the GitHub permissions PatchDeck uses: Metadata read, Contents read/write if you push, Issues read/write, Pull requests read/write, and Checks read.
                       </Step>
                     </div>
                   </div>

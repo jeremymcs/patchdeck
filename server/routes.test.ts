@@ -5,6 +5,7 @@ import express from "express";
 import type { Octokit } from "@octokit/rest";
 import type { AppUpdateStatus, FeedbackItem, Issue, NewPR } from "@shared/schema";
 import type { AppRuntime } from "./appRuntime";
+import { clearRateLimited, markRateLimited } from "./rateLimitState";
 import type { ReleaseAgentPullSummary, ReleaseEvaluationDecision } from "./releaseAgent";
 import { ReleaseManager, type ReleaseGitHubService } from "./releaseManager";
 import { MemStorage } from "./memoryStorage";
@@ -214,6 +215,25 @@ test("PATCH /api/config accepts legacy single githubToken updates", async () => 
     const stored = await harness.storage.getConfig();
     assert.deepEqual(stored.githubTokens, ["ghs_legacy9999"]);
   } finally {
+    await harness.close();
+  }
+});
+
+test("GET /api/github-rate-limit reports the current reset time", async () => {
+  const resetAt = new Date(Date.now() + 600_000);
+  markRateLimited(resetAt);
+
+  const harness = await createHarness();
+
+  try {
+    const response = await fetch(`${harness.baseUrl}/api/github-rate-limit`);
+    assert.equal(response.status, 200);
+
+    const body = await response.json() as { limited: boolean; resetAt: string | null };
+    assert.equal(body.limited, true);
+    assert.equal(body.resetAt, resetAt.toISOString());
+  } finally {
+    clearRateLimited();
     await harness.close();
   }
 });
