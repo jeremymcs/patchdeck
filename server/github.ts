@@ -740,6 +740,46 @@ class RateLimitGateError extends Error {
   }
 }
 
+const RATE_LIMIT_AUTO_RETRY_MAX_WAIT_MS = 15_000;
+
+function parseRetryAfter(value: string | undefined): Date | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (/^\d+$/.test(trimmed)) {
+    const seconds = Number.parseInt(trimmed, 10);
+    if (Number.isFinite(seconds) && seconds >= 0) {
+      return new Date(Date.now() + seconds * 1000);
+    }
+  }
+  const ms = Date.parse(trimmed);
+  return Number.isFinite(ms) ? new Date(ms) : null;
+}
+
+function laterDate(a: Date | null, b: Date | null): Date | null {
+  if (a && b) return a.getTime() >= b.getTime() ? a : b;
+  return a ?? b;
+}
+
+function detectRateLimitFromHeaders(
+  status: number | undefined,
+  headers: Record<string, string>,
+  message: string,
+): { limited: boolean; gateUntil: Date | null } {
+  const remainingRaw = headers["x-ratelimit-remaining"];
+  const retryAfterHeader = headers["retry-after"];
+  const limited = (status === 403 || status === 429)
+    && (remainingRaw === "0" || Boolean(retryAfterHeader) || /rate limit/i.test(message));
+  if (!limited) {
+    return { limited: false, gateUntil: null };
+  }
+  const resetRaw = headers["x-ratelimit-reset"];
+  const resetSeconds = typeof resetRaw === "string" ? Number.parseInt(resetRaw, 10) : Number.NaN;
+  const resetDate = Number.isFinite(resetSeconds) ? new Date(resetSeconds * 1000) : null;
+  const retryDate = parseRetryAfter(retryAfterHeader);
+  return { limited: true, gateUntil: laterDate(resetDate, retryDate) };
+}
+
 function attachRateLimitHook(client: Octokit): void {
   client.hook.wrap("request", async (request, options) => {
     const state = getRateLimitState();
@@ -747,7 +787,7 @@ function attachRateLimitHook(client: Octokit): void {
       throw new RateLimitGateError(state.resetAt);
     }
 
-    try {
+    const dispatch = async (): Promise<ReturnType<typeof request>> => {
       const response = await request(options);
       const remainingRaw = response.headers?.["x-ratelimit-remaining"];
       const remaining = typeof remainingRaw === "string" ? Number.parseInt(remainingRaw, 10) : Number.NaN;
@@ -755,19 +795,30 @@ function attachRateLimitHook(client: Octokit): void {
         clearRateLimited();
       }
       return response;
-    } catch (error) {
-      const status = (error as { status?: number } | undefined)?.status;
-      const headers = (error as { response?: { headers?: Record<string, string> } } | undefined)?.response?.headers ?? {};
-      const remainingRaw = headers["x-ratelimit-remaining"];
-      const message = error instanceof Error ? error.message.toLowerCase() : "";
-      const looksRateLimited = (status === 403 || status === 429)
-        && (remainingRaw === "0" || /rate limit/i.test(message));
-      if (looksRateLimited) {
-        const resetRaw = headers["x-ratelimit-reset"];
-        const reset = typeof resetRaw === "string" ? Number.parseInt(resetRaw, 10) : Number.NaN;
-        markRateLimited(Number.isFinite(reset) ? reset : undefined);
+    };
+
+    let attempt = 0;
+    while (true) {
+      try {
+        return await dispatch();
+      } catch (error) {
+        const status = (error as { status?: number } | undefined)?.status;
+        const headers = (error as { response?: { headers?: Record<string, string> } } | undefined)?.response?.headers ?? {};
+        const message = error instanceof Error ? error.message.toLowerCase() : "";
+        const { limited, gateUntil } = detectRateLimitFromHeaders(status, headers, message);
+        if (!limited) {
+          throw error;
+        }
+
+        const gateAt = markRateLimited(gateUntil ?? undefined);
+        const waitMs = gateAt.getTime() - Date.now();
+        if (attempt === 0 && waitMs > 0 && waitMs <= RATE_LIMIT_AUTO_RETRY_MAX_WAIT_MS) {
+          attempt += 1;
+          await new Promise<void>((resolve) => setTimeout(resolve, waitMs));
+          continue;
+        }
+        throw error;
       }
-      throw error;
     }
   });
 }
