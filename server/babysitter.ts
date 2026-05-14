@@ -1779,7 +1779,11 @@ export class PRBabysitter {
       this.storage.getRuntimeState(),
       this.storage.getConfig(),
     ]);
-    const automationBlocked = runtimeState.drainMode || configEarly.autoPrs === false;
+    if (runtimeState.drainMode) {
+      return;
+    }
+
+    const automationBlocked = configEarly.autoPrs === false;
 
     const repairCandidates = [
       ...(await this.storage.getPRs()),

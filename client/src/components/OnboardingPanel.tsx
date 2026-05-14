@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { Link } from "wouter";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import type { Config } from "@shared/schema";
+import type { Config, RuntimeState } from "@shared/schema";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { toast } from "@/hooks/use-toast";
 
@@ -190,9 +190,16 @@ export function OnboardingPanel() {
   });
   const [expanded, setExpanded] = useState(true);
 
+  const { data: runtimeState } = useQuery<RuntimeState>({
+    queryKey: ["/api/runtime"],
+    refetchInterval: 5000,
+  });
+  const globalDrainMode = runtimeState?.drainMode === true;
+
   const { data: status, isLoading } = useQuery<OnboardingStatus>({
     queryKey: ["/api/onboarding/status"],
-    refetchInterval: 30000,
+    enabled: runtimeState !== undefined && !globalDrainMode,
+    refetchInterval: globalDrainMode ? false : 30000,
   });
   const { data: config } = useQuery<Config>({
     queryKey: ["/api/config"],
@@ -341,17 +348,17 @@ export function OnboardingPanel() {
                               && installWorkflowMutation.variables?.repo === repoStatus.repo
                               && installWorkflowMutation.variables?.tool === tool;
                             return (
-                              <button
-                                key={`${repoStatus.repo}-${tool}`}
-                                type="button"
-                                onClick={() => installWorkflowMutation.mutate({ repo: repoStatus.repo, tool })}
-                                disabled={installWorkflowMutation.isPending}
-                                className="border border-border px-2 py-1 text-[10px] uppercase tracking-wider transition-colors hover:bg-foreground hover:text-background disabled:opacity-40"
-                              >
-                                {isPending ? "Adding…" : `Add ${REVIEW_TOOL_LABELS[tool]} Action`}
-                              </button>
-                            );
-                          })}
+                            <button
+                              key={`${repoStatus.repo}-${tool}`}
+                              type="button"
+                              onClick={() => installWorkflowMutation.mutate({ repo: repoStatus.repo, tool })}
+                              disabled={installWorkflowMutation.isPending || globalDrainMode}
+                              className="border border-border px-2 py-1 text-[10px] uppercase tracking-wider transition-colors hover:bg-foreground hover:text-background disabled:opacity-40"
+                            >
+                              {globalDrainMode ? "Paused" : isPending ? "Adding…" : `Add ${REVIEW_TOOL_LABELS[tool]} Action`}
+                            </button>
+                          );
+                        })}
                         </div>
                       </div>
                     ))}

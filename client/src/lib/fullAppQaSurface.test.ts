@@ -326,6 +326,7 @@ test("dashboard keeps the QA-tested PR, repo, feedback, and side-panel workflows
   assertHasStringValue(sourceFile, "dashboard errors roll-up label", "Roll up");
   assertHasStringValue(sourceFile, "dashboard errors expand label", "Expand");
   assertHasExpression(sourceFile, "dashboard drain state", /\bglobalDrainMode\b/);
+  assertHasExpression(sourceFile, "dashboard issues drain guard", /enabled: runtimeState !== undefined && !globalDrainMode/);
   assertHasExpression(sourceFile, "dashboard active error count", /\bactiveErrorCount\b/);
   assertHasExpression(sourceFile, "dashboard errors roll-up state", /\bareErrorsRolledUp\b/);
 });
@@ -340,6 +341,8 @@ test("issues page keeps the QA-tested issue monitor and work surface wired", asy
   assertHasApiRequest(sourceFile, "issue work mutation", "POST", "/api/issues/work");
   assertHasApiRequest(sourceFile, "issue evaluation mutation", "POST", "/api/issues/evaluate");
   assertHasApiRequest(sourceFile, "issue label mutation", "PATCH", "/api/issues/labels");
+  assertHasExpression(sourceFile, "issues drain guard", /enabled: runtime !== undefined && !globalDrainMode/);
+  assertHasExpression(sourceFile, "issue detail drain guard", /enabled: Boolean\(selectedIssueFromList\) && !globalDrainMode/);
 
   for (const [label, testId] of [
     ["refresh button", "button-refresh-issues"],
@@ -457,6 +460,7 @@ test("settings keeps the QA-tested configuration, token, and runtime controls wi
     /testIdPrefix=\{`tracked-repo-issue-work-mode-\$\{repo\.repo\.replace\(\s*["']\/["']\s*,\s*["']-["']\s*\)\}`\}/,
   );
   assertHasExpression(sourceFile, "ordered GitHub tokens", /\bgithubTokens\b/);
+  assertHasExpression(sourceFile, "repo sync drain guard", /disabled=\{syncReposMutation\.isPending \|\| globalDrainMode\}/);
 });
 
 test("logs route keeps the QA-tested filtering, streaming, copy, and download surface wired", async () => {
@@ -477,6 +481,7 @@ test("releases route keeps the QA-tested list, expand, copy, retry, and GitHub l
 
   assertHasQueryKey(releases.sourceFile, "release route query", "/api/releases");
   assertHasQueryKey(releases.sourceFile, "github releases query", "/api/github-releases");
+  assertHasQueryKey(releases.sourceFile, "runtime query", "/api/runtime");
   assertHasApiRequest(releases.sourceFile, "release retry mutation", "POST", /`\/api\/releases\/\$\{id\}\/retry`/);
   assertHasJsxTag(releases.sourceFile, "release notes copy", "CopyButton");
   assertHasJsxTag(releases.sourceFile, "orphan github release card", "GitHubReleaseCard");
@@ -487,6 +492,17 @@ test("releases route keeps the QA-tested list, expand, copy, retry, and GitHub l
     ["empty release state", "No release activity yet."],
     ["watched repositories sidebar", "Watched repositories"],
   ]);
+  assertHasExpression(releases.sourceFile, "github releases drain guard", /disabled=\{isFetchingGitHub \|\| globalDrainMode \|\| runtimeState === undefined\}/);
+});
+
+test("onboarding panel keeps the QA-tested GitHub setup poll and install actions wired", async () => {
+  const { sourceFile } = await parseProjectFile("client/src/components/OnboardingPanel.tsx");
+
+  assertHasQueryKey(sourceFile, "onboarding status query", "/api/onboarding/status");
+  assertHasQueryKey(sourceFile, "runtime query", "/api/runtime");
+  assertHasApiRequest(sourceFile, "install review mutation", "POST", "/api/onboarding/install-review");
+  assertHasExpression(sourceFile, "onboarding drain guard", /enabled: runtimeState !== undefined && !globalDrainMode/);
+  assertHasExpression(sourceFile, "onboarding install disable", /disabled=\{installWorkflowMutation\.isPending \|\| globalDrainMode\}/);
 });
 
 test("activity menu keeps the QA-tested trigger, drain note, and poll footer wired", async () => {

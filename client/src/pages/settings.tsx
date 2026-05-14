@@ -610,11 +610,12 @@ export default function Settings() {
                     <button
                       type="button"
                       onClick={() => syncReposMutation.mutate()}
-                      disabled={syncReposMutation.isPending}
+                      disabled={syncReposMutation.isPending || globalDrainMode}
+                      title={globalDrainMode ? DRAIN_PAUSED_TITLE : "Fetch watched repos from GitHub"}
                       data-testid="button-sync-repos"
                       className="cursor-pointer rounded-md border border-primary bg-primary px-3 py-1 text-xs font-medium uppercase tracking-wider text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
                     >
-                      {syncReposMutation.isPending ? "Fetching..." : "Fetch"}
+                      {globalDrainMode ? DRAIN_PAUSED_LABEL : syncReposMutation.isPending ? "Fetching..." : "Fetch"}
                     </button>
                   }
                 >

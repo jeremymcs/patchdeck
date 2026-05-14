@@ -150,6 +150,9 @@ const SEMVER_TAG_PATTERN = /^v?(\d+)\.(\d+)\.(\d+)$/;
 
 const GITHUB_API_VERSION = "2022-11-28";
 const GH_AUTH_CACHE_TTL_MS = 15000;
+const GITHUB_MAX_CONCURRENT_REQUESTS = 20;
+const GITHUB_REST_POINT_INTERVAL_MS = 67;
+const GITHUB_CONTENT_REQUEST_INTERVAL_MS = 750;
 const REVIEW_THREADS_QUERY = `
   query CodeFactoryReviewThreads($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
     repository(owner: $owner, name: $repo) {
@@ -742,6 +745,76 @@ class RateLimitGateError extends Error {
 
 const RATE_LIMIT_AUTO_RETRY_MAX_WAIT_MS = 15_000;
 
+type GitHubRequestOptions = {
+  method?: string;
+};
+
+type QueuedGitHubRequest<T> = {
+  options: GitHubRequestOptions;
+  run: () => Promise<T>;
+  resolve: (value: T) => void;
+  reject: (error: unknown) => void;
+};
+
+class GitHubRequestThrottle {
+  private active = 0;
+  private pointReadyAt = 0;
+  private contentReadyAt = 0;
+  private readonly queue: Array<QueuedGitHubRequest<unknown>> = [];
+
+  schedule<T>(options: GitHubRequestOptions, run: () => Promise<T>): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      this.queue.push({
+        options,
+        run: run as () => Promise<unknown>,
+        resolve: resolve as (value: unknown) => void,
+        reject,
+      });
+      this.drain();
+    });
+  }
+
+  private drain(): void {
+    while (this.active < GITHUB_MAX_CONCURRENT_REQUESTS && this.queue.length > 0) {
+      const item = this.queue.shift();
+      if (!item) return;
+
+      this.active += 1;
+      const delayMs = this.reserveDelay(item.options);
+      setTimeout(() => {
+        item.run()
+          .then(item.resolve)
+          .catch(item.reject)
+          .finally(() => {
+            this.active -= 1;
+            this.drain();
+          });
+      }, delayMs);
+    }
+  }
+
+  private reserveDelay(options: GitHubRequestOptions): number {
+    const now = Date.now();
+    const method = options.method?.toUpperCase() ?? "GET";
+    const isContentRequest = method === "POST" || method === "PATCH" || method === "PUT" || method === "DELETE";
+    const pointCost = isContentRequest ? 5 : 1;
+    const startAt = Math.max(
+      now,
+      this.pointReadyAt,
+      isContentRequest ? this.contentReadyAt : 0,
+    );
+
+    this.pointReadyAt = startAt + (pointCost * GITHUB_REST_POINT_INTERVAL_MS);
+    if (isContentRequest) {
+      this.contentReadyAt = startAt + GITHUB_CONTENT_REQUEST_INTERVAL_MS;
+    }
+
+    return Math.max(0, startAt - now);
+  }
+}
+
+const githubRequestThrottle = new GitHubRequestThrottle();
+
 function parseRetryAfter(value: string | undefined): Date | null {
   if (!value) return null;
   const trimmed = value.trim();
@@ -800,7 +873,7 @@ function attachRateLimitHook(client: Octokit): void {
     let attempt = 0;
     while (true) {
       try {
-        return await dispatch();
+        return await githubRequestThrottle.schedule(options, dispatch);
       } catch (error) {
         const status = (error as { status?: number } | undefined)?.status;
         const headers = (error as { response?: { headers?: Record<string, string> } } | undefined)?.response?.headers ?? {};

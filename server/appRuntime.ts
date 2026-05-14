@@ -756,6 +756,11 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
   let logsRetentionJob: RetentionJobHandle | null = null;
   const watcherScheduler = dependencies.watcherScheduler ?? createWatcherScheduler(
     async () => {
+      const runtimeState = await storage.getRuntimeState();
+      if (runtimeState.drainMode) {
+        return;
+      }
+
       const rateLimit = getRateLimitState();
       if (rateLimit.limited && rateLimit.resetAt) {
         log.info(
@@ -1136,13 +1141,9 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
   }
 
   async function queueAutomaticIssueWorkInternal(): Promise<void> {
-    const [runtimeState, config, repoSettings, issues, evaluationJobs, workJobs] = await Promise.all([
+    const [runtimeState, config] = await Promise.all([
       storage.getRuntimeState(),
       storage.getConfig(),
-      storage.listRepoSettings(),
-      listIssuesInternal(),
-      storage.listBackgroundJobs({ kind: "evaluate_issue" }),
-      storage.listBackgroundJobs({ kind: "work_issue" }),
     ]);
 
     if (runtimeState.drainMode) {
@@ -1152,6 +1153,13 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
     if (config.autoIssues === false) {
       return;
     }
+
+    const [repoSettings, issues, evaluationJobs, workJobs] = await Promise.all([
+      storage.listRepoSettings(),
+      listIssuesInternal(),
+      storage.listBackgroundJobs({ kind: "evaluate_issue" }),
+      storage.listBackgroundJobs({ kind: "work_issue" }),
+    ]);
 
     const isJobActive = (status: string) => status === "queued" || status === "leased";
     const activeEvaluationTargets = new Set(

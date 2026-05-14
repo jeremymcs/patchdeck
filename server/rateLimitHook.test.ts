@@ -33,6 +33,37 @@ const config: Config = {
 
 test.beforeEach(() => clearRateLimited());
 
+test("octokit hook spaces concurrent REST requests under GitHub secondary limits", async () => {
+  const requestStartedAt: number[] = [];
+  const octokit = await buildOctokit(
+    { ...config, githubToken: "ghp_fake" },
+    {
+      ignoreCache: true,
+      requestFetch: async () => {
+        requestStartedAt.push(Date.now());
+        return new Response(JSON.stringify({ login: "octo" }), {
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+            "x-ratelimit-remaining": "4999",
+          },
+        });
+      },
+    },
+  );
+
+  await Promise.all([
+    octokit.request("GET /user"),
+    octokit.request("GET /user"),
+  ]);
+
+  assert.equal(requestStartedAt.length, 2);
+  assert.ok(
+    requestStartedAt[1] - requestStartedAt[0] >= 50,
+    `expected REST requests to be spaced, got ${requestStartedAt[1] - requestStartedAt[0]}ms`,
+  );
+});
+
 test("octokit hook records rate-limit reset from 403 response headers", async () => {
   const resetUnixSeconds = Math.floor(Date.now() / 1000) + 600;
   const octokit = await buildOctokit(
