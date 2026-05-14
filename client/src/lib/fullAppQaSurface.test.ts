@@ -311,19 +311,17 @@ test("dashboard keeps the QA-tested PR, repo, feedback, and side-panel workflows
   assertHasApiRequest(sourceFile, "ask agent mutation", "POST", /`\/api\/prs\/\$\{prId\}\/questions`/);
   assertHasTestId(sourceFile, "dashboard drain banner", "dashboard-drain-banner");
   assertHasTestId(sourceFile, "dashboard drain reason", "dashboard-drain-reason");
-  assertHasTestId(sourceFile, "activity drain note", "activity-drain-note");
   assertHasExpression(sourceFile, "queue status helper", /\bbuildQueueStatusIndex\b/);
   assertHasExpression(sourceFile, "queue status badge", /\bQueueStatusBadge\b/);
   assertHasExpression(sourceFile, "queue status index", /\bqueueStatusById\b/);
   assertHasExpression(sourceFile, "PR number search helper", /\bmatchesNumberSearch\b/);
   assertHasStringValue(sourceFile, "PR number search placeholder", "Search #");
   assertHasExpression(sourceFile, "issue-linked PR index", /\bbuildIssueLinkedPRIndex\b/);
-  assertHasStringValue(sourceFile, "on issues tab label", /On Issues/);
+  assertHasStringValue(sourceFile, "on issues tab label", /Issues \(/);
   assertHasStringValue(sourceFile, "drain mode action label", "Paused by drain mode");
   assertHasStringValue(sourceFile, "blocked manual copy", "Manual runs are blocked while global automation is paused.");
   assertHasStringValue(sourceFile, "drained PR copy", "Background and manual runs are paused by drain mode.");
   assertHasStringValue(sourceFile, "drained ask copy", "Ask Agent is paused by drain mode.");
-  assertHasStringValue(sourceFile, "queued drain copy", "Queued automation is paused until drain mode is disabled.");
   assertHasStringValue(sourceFile, "dashboard errors heading", "Needs attention");
   assertHasStringValue(sourceFile, "dashboard errors roll-up label", "Roll up");
   assertHasStringValue(sourceFile, "dashboard errors expand label", "Expand");
@@ -489,4 +487,14 @@ test("releases route keeps the QA-tested list, expand, copy, retry, and GitHub l
     ["empty release state", "No release activity yet."],
     ["watched repositories sidebar", "Watched repositories"],
   ]);
+});
+
+test("activity menu keeps the QA-tested trigger, drain note, and poll footer wired", async () => {
+  const { sourceFile } = await parseProjectFile("client/src/components/ActivityMenu.tsx");
+
+  assertHasTestId(sourceFile, "activity menu trigger", "activity-menu-trigger");
+  assertHasTestId(sourceFile, "clear failed activities", "clear-failed-activities");
+  assertHasTestId(sourceFile, "activity drain note", "activity-drain-note");
+  assertHasTestId(sourceFile, "activity poll footer", "activity-poll-footer");
+  assertHasStringValue(sourceFile, "queued drain copy", "Queued automation is paused until drain mode is disabled.");
 });

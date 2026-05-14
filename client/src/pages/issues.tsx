@@ -5,10 +5,11 @@ import { apiRequest, fetchJson, queryClient } from "@/lib/queryClient";
 import { AppHeader } from "@/components/AppHeader";
 import { UpdateBanner } from "@/components/UpdateBanner";
 import { toast } from "@/hooks/use-toast";
-import type { ActivitySnapshot, Issue, LogEntry, RuntimeState } from "@shared/schema";
+import type { ActivitySnapshot, Config, Issue, LogEntry, RuntimeState } from "@shared/schema";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { buildQueueStatusIndex, type QueueStatusView } from "@/lib/activityQueue";
 import { QueueStatusBadge } from "@/components/QueueStatusBadge";
+import { ActivityMenu, EMPTY_ACTIVITY_SNAPSHOT } from "@/components/ActivityMenu";
 
 function formatDateTime(value: string | null | undefined): string {
   if (!value) return "n/a";
@@ -142,14 +143,6 @@ function isStaleIssue(issue: Issue): boolean {
 
   return Date.now() - updatedAt > 7 * 24 * 60 * 60 * 1000;
 }
-
-const EMPTY_ACTIVITY_SNAPSHOT: ActivitySnapshot = {
-  failed: [],
-  inProgress: [],
-  queued: [],
-  warnings: [],
-  generatedAt: "",
-};
 
 function matchesIssueWorkFilter(issue: Issue, filter: IssueWorkFilter): boolean {
   if (filter === "ready") return Boolean(issue.workPrUrl);
@@ -376,7 +369,25 @@ export default function Issues() {
     queryKey: ["/api/activities"],
     refetchInterval: 3000,
   });
+  const { data: config } = useQuery<Config>({ queryKey: ["/api/config"] });
   const queueStatusById = useMemo(() => buildQueueStatusIndex(activities), [activities]);
+
+  const clearFailedActivitiesMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("DELETE", "/api/activities/failed");
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/activities"] });
+    },
+    onError: (error) => {
+      toast({
+        title: "Could not clear failed activities",
+        description: error instanceof Error ? error.message : String(error),
+        variant: "destructive",
+      });
+    },
+  });
 
   const { data: issues = [], isLoading, refetch, isFetching } = useQuery<Issue[]>({
     queryKey: ["/api/issues"],
@@ -614,21 +625,31 @@ export default function Issues() {
           </>
         )}
         actions={(
-          <button
-            type="button"
-            onClick={() => {
-              void Promise.all([
-                refetch(),
-                selectedIssueFromList ? refetchSelectedIssueDetail() : Promise.resolve(),
-              ]);
-            }}
-            disabled={isFetching}
-            data-testid="button-refresh-issues"
-            className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-0.5 text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
-          >
-            {isFetching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-            refresh
-          </button>
+          <>
+            <button
+              type="button"
+              onClick={() => {
+                void Promise.all([
+                  refetch(),
+                  selectedIssueFromList ? refetchSelectedIssueDetail() : Promise.resolve(),
+                ]);
+              }}
+              disabled={isFetching}
+              data-testid="button-refresh-issues"
+              className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-0.5 text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
+            >
+              {isFetching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+              refresh
+            </button>
+            <ActivityMenu
+              activities={activities}
+              onClearFailed={() => clearFailedActivitiesMutation.mutate()}
+              isClearingFailed={clearFailedActivitiesMutation.isPending}
+              globalDrainMode={Boolean(runtime?.drainMode)}
+              queueStatusById={queueStatusById}
+              pollIntervalMs={config?.pollIntervalMs}
+            />
+          </>
         )}
       />
 

@@ -9,13 +9,24 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 
 type AppHeaderSection = "prs" | "issues" | "releases" | "logs" | "settings";
 
-const NAV_ITEMS: Array<{ section: AppHeaderSection; label: string; href: string }> = [
+const PRIMARY_NAV_ITEMS: Array<{ section: AppHeaderSection; label: string; href: string }> = [
   { section: "prs", label: "PRs", href: "/" },
   { section: "issues", label: "Issues", href: "/issues" },
   { section: "releases", label: "Releases", href: "/releases" },
+];
+
+const SECONDARY_NAV_ITEMS: Array<{ section: AppHeaderSection; label: string; href: string }> = [
   { section: "logs", label: "Logs", href: "/logs" },
   { section: "settings", label: "Settings", href: "/settings" },
 ];
+
+function navLinkClass(selected: boolean) {
+  return `rounded-md border px-2 py-1 text-[11px] uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background ${
+    selected
+      ? "border-primary/40 bg-primary/10 text-primary"
+      : "border-transparent text-muted-foreground hover:border-border hover:text-foreground"
+  }`;
+}
 
 function PatchdeckMark() {
   return (
@@ -230,18 +241,14 @@ export function AppHeader({
           <span className="text-sm font-semibold tracking-tight">PatchDeck</span>
         </Link>
         <nav aria-label="Primary" className="flex flex-wrap items-center gap-1">
-          {NAV_ITEMS.map((item) => {
+          {PRIMARY_NAV_ITEMS.map((item) => {
             const selected = active === item.section;
             return (
               <Link
                 key={item.section}
                 href={item.href}
                 aria-current={selected ? "page" : undefined}
-                className={`rounded-md border px-2 py-1 text-[11px] uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background ${
-                  selected
-                    ? "border-primary/40 bg-primary/10 text-primary"
-                    : "border-transparent text-muted-foreground hover:border-border hover:text-foreground"
-                }`}
+                className={navLinkClass(selected)}
               >
                 {item.label}
               </Link>
@@ -260,6 +267,21 @@ export function AppHeader({
             {actions}
           </div>
         ) : null}
+        <nav aria-label="Secondary" className="flex flex-wrap items-center gap-1">
+          {SECONDARY_NAV_ITEMS.map((item) => {
+            const selected = active === item.section;
+            return (
+              <Link
+                key={item.section}
+                href={item.href}
+                aria-current={selected ? "page" : undefined}
+                className={navLinkClass(selected)}
+              >
+                {item.label}
+              </Link>
+            );
+          })}
+        </nav>
         <AutoModeButton />
         <ThemeToggle />
       </div>
