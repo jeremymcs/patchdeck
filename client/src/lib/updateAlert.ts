@@ -1,7 +1,7 @@
 import type { AppUpdateStatus } from "@shared/schema";
 
 export const APP_UPDATE_SESSION_STORAGE_KEY = "app-update-dismissed";
-export const APP_UPDATE_INSTALL_COMMAND = "npm install -g patchdeck@latest";
+export const APP_UPDATE_INSTALL_COMMAND = "npm install -g @jeremymcs/patchdeck@latest";
 
 export type AppUpdateInstructionStep = {
   text: string;

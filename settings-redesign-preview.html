@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>PatchDeck — Settings redesign preview</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    darkMode: 'class',
+    theme: {
+      extend: {
+        colors: {
+          background: 'hsl(var(--background) / <alpha-value>)',
+          foreground: 'hsl(var(--foreground) / <alpha-value>)',
+          border: 'hsl(var(--border) / <alpha-value>)',
+          card: 'hsl(var(--card) / <alpha-value>)',
+          'card-foreground': 'hsl(var(--card-foreground) / <alpha-value>)',
+          muted: 'hsl(var(--muted) / <alpha-value>)',
+          'muted-foreground': 'hsl(var(--muted-foreground) / <alpha-value>)',
+          primary: 'hsl(var(--primary) / <alpha-value>)',
+          'primary-foreground': 'hsl(var(--primary-foreground) / <alpha-value>)',
+          ring: 'hsl(var(--ring) / <alpha-value>)',
+          success: 'hsl(var(--success) / <alpha-value>)',
+          'success-foreground': 'hsl(var(--success-foreground) / <alpha-value>)',
+          'success-muted': 'hsl(var(--success-muted) / <alpha-value>)',
+          'success-border': 'hsl(var(--success-border) / <alpha-value>)',
+          warning: 'hsl(var(--warning) / <alpha-value>)',
+          'warning-foreground': 'hsl(var(--warning-foreground) / <alpha-value>)',
+          'warning-muted': 'hsl(var(--warning-muted) / <alpha-value>)',
+          'warning-border': 'hsl(var(--warning-border) / <alpha-value>)',
+        },
+        fontFamily: {
+          sans: ['Inter', 'ui-sans-serif', 'system-ui'],
+          mono: ['JetBrains Mono', 'ui-monospace'],
+        },
+        borderRadius: {
+          DEFAULT: '0.375rem',
+          md: '0.375rem',
+        }
+      }
+    }
+  }
+</script>
+<style>
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222 47% 7%;
+    --border: 220 14% 91%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 7%;
+    --muted: 220 14% 96%;
+    --muted-foreground: 215 16% 40%;
+    --primary: 231 70% 56%;
+    --primary-foreground: 0 0% 100%;
+    --ring: 231 70% 56%;
+    --success: 142 64% 36%;
+    --success-foreground: 142 72% 22%;
+    --success-muted: 142 44% 95%;
+    --success-border: 142 32% 70%;
+    --warning: 38 92% 38%;
+    --warning-foreground: 38 78% 26%;
+    --warning-muted: 38 100% 95%;
+    --warning-border: 38 78% 70%;
+  }
+  .dark {
+    --background: 240 6% 6%;
+    --foreground: 240 5% 93%;
+    --border: 240 5% 16%;
+    --card: 240 6% 8%;
+    --card-foreground: 240 5% 93%;
+    --muted: 240 5% 12%;
+    --muted-foreground: 240 5% 60%;
+    --primary: 231 75% 66%;
+    --primary-foreground: 0 0% 100%;
+    --ring: 231 75% 66%;
+    --success: 142 65% 55%;
+    --success-foreground: 142 76% 80%;
+    --success-muted: 142 30% 12%;
+    --success-border: 142 40% 32%;
+    --warning: 38 92% 58%;
+    --warning-foreground: 38 96% 82%;
+    --warning-muted: 38 42% 12%;
+    --warning-border: 38 50% 32%;
+  }
+  body {
+    font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+    letter-spacing: -0.011em;
+    font-feature-settings: 'cv11', 'ss01';
+  }
+  .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+  /* shadcn-style switch */
+  .switch {
+    position: relative;
+    display: inline-flex;
+    width: 28px;
+    height: 16px;
+    border-radius: 9999px;
+    background: hsl(var(--muted));
+    border: 1px solid hsl(var(--border));
+    transition: background-color 0.15s, border-color 0.15s;
+    flex-shrink: 0;
+  }
+  .switch.on {
+    background: hsl(var(--primary));
+    border-color: hsl(var(--primary));
+  }
+  .switch::after {
+    content: '';
+    position: absolute;
+    top: 1px;
+    left: 1px;
+    width: 12px;
+    height: 12px;
+    border-radius: 9999px;
+    background: white;
+    transition: transform 0.15s;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+  }
+  .switch.on::after {
+    transform: translateX(12px);
+  }
+  /* TOC active dot */
+  .toc-link.active {
+    color: hsl(var(--primary));
+  }
+  .toc-link.active::before {
+    background: hsl(var(--primary));
+  }
+  /* scrollbar */
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+</style>
+</head>
+<body class="bg-background text-foreground antialiased min-h-screen">
+
+<!-- ============ APP HEADER (mirrors AppHeader.tsx) ============ -->
+<header class="flex flex-col gap-2 border-b border-border bg-background/95 px-3 py-2.5 lg:flex-row lg:items-center lg:justify-between lg:px-4">
+  <div class="flex min-w-0 flex-wrap items-center gap-2.5">
+    <a href="#" class="inline-flex items-center gap-2 rounded-md px-1 text-foreground hover:text-primary transition-colors">
+      <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+        <path d="M4 4 Q 9 8 14 9" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+        <circle cx="4" cy="4" r="1.5" fill="currentColor"/>
+        <circle cx="9" cy="4" r="1" stroke="currentColor" stroke-width="1"/>
+        <circle cx="14" cy="4" r="1" stroke="currentColor" stroke-width="1"/>
+        <circle cx="4" cy="9" r="1" stroke="currentColor" stroke-width="1"/>
+        <circle cx="9" cy="9" r="1" stroke="currentColor" stroke-width="1"/>
+        <circle cx="14" cy="9" r="1.5" fill="currentColor"/>
+        <circle cx="4" cy="14" r="1" stroke="currentColor" stroke-width="1"/>
+        <circle cx="9" cy="14" r="1" stroke="currentColor" stroke-width="1"/>
+        <circle cx="14" cy="14" r="1" stroke="currentColor" stroke-width="1"/>
+      </svg>
+      <span class="text-sm font-semibold tracking-tight">PatchDeck</span>
+    </a>
+    <nav aria-label="Primary" class="flex flex-wrap items-center gap-1">
+      <a href="#" class="rounded-md border border-transparent px-2 py-1 text-[11px] uppercase tracking-wider text-muted-foreground hover:border-border hover:text-foreground transition-colors">PRs</a>
+      <a href="#" class="rounded-md border border-transparent px-2 py-1 text-[11px] uppercase tracking-wider text-muted-foreground hover:border-border hover:text-foreground transition-colors">Issues</a>
+      <a href="#" class="rounded-md border border-transparent px-2 py-1 text-[11px] uppercase tracking-wider text-muted-foreground hover:border-border hover:text-foreground transition-colors">Releases</a>
+      <a href="#" class="rounded-md border border-transparent px-2 py-1 text-[11px] uppercase tracking-wider text-muted-foreground hover:border-border hover:text-foreground transition-colors">Logs</a>
+      <a href="#" aria-current="page" class="rounded-md border border-primary/40 bg-primary/10 px-2 py-1 text-[11px] uppercase tracking-wider text-primary">Settings</a>
+    </nav>
+  </div>
+  <div class="flex flex-wrap items-center gap-2 lg:justify-end">
+    <button class="inline-flex items-center gap-1.5 rounded-md border border-success-border bg-success-muted px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-success-foreground">
+      <span class="inline-block h-1.5 w-1.5 rounded-full bg-success animate-pulse"></span>
+      Auto
+    </button>
+    <button id="theme-toggle" class="rounded-md border border-border px-2 py-1 text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors">
+      <span class="dark:hidden">Dark</span>
+      <span class="hidden dark:inline">Light</span>
+    </button>
+  </div>
+</header>
+
+<!-- ============ MAIN ============ -->
+<main class="px-4 py-6 lg:px-6">
+  <div class="mx-auto max-w-6xl">
+
+    <!-- Page title -->
+    <div class="mb-8 flex flex-wrap items-end justify-between gap-3 border-b border-border pb-4">
+      <div>
+        <h1 class="text-xl font-semibold tracking-tight text-foreground">Settings</h1>
+        <p class="mt-1 text-xs text-muted-foreground">Configure what PatchDeck watches, how the agent behaves, and how releases ship.</p>
+      </div>
+      <span class="mono inline-flex items-center gap-1.5 rounded-md border border-border bg-muted px-2 py-1 text-[10px] uppercase tracking-wider text-muted-foreground">
+        <span class="inline-block h-1.5 w-1.5 rounded-full bg-success"></span>
+        Auto-saved
+      </span>
+    </div>
+
+    <div class="flex gap-8">
+      <!-- ============ STICKY TOC ============ -->
+      <aside class="hidden lg:block w-48 shrink-0">
+        <nav class="sticky top-6 text-[12px]">
+          <div class="mb-3 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">On this page</div>
+          <ul class="space-y-0.5">
+            <li><a href="#sources" class="toc-link active block rounded px-2 py-1 text-foreground hover:bg-muted transition-colors">Sources</a></li>
+            <li class="pl-3"><a href="#sources-add" class="block rounded px-2 py-1 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">Add</a></li>
+            <li class="pl-3"><a href="#sources-repos" class="block rounded px-2 py-1 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">Repositories</a></li>
+
+            <li class="mt-2"><a href="#agent" class="toc-link block rounded px-2 py-1 text-foreground hover:bg-muted transition-colors">Agent</a></li>
+            <li class="pl-3"><a href="#agent-models" class="block rounded px-2 py-1 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">Models</a></li>
+            <li class="pl-3"><a href="#agent-autofix" class="block rounded px-2 py-1 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">Auto fixes</a></li>
+            <li class="pl-3"><a href="#agent-tuning" class="block rounded px-2 py-1 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">Tuning</a></li>
+            <li class="pl-3"><a href="#agent-ci" class="block rounded px-2 py-1 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">CI Healing</a></li>
+
+            <li class="mt-2"><a href="#delivery" class="toc-link block rounded px-2 py-1 text-foreground hover:bg-muted transition-colors">Delivery</a></li>
+            <li class="pl-3"><a href="#delivery-releases" class="block rounded px-2 py-1 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">Releases</a></li>
+            <li class="pl-3"><a href="#delivery-github" class="block rounded px-2 py-1 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">GitHub</a></li>
+
+            <li class="mt-2"><a href="#system" class="toc-link block rounded px-2 py-1 text-foreground hover:bg-muted transition-colors">System</a></li>
+            <li class="pl-3"><a href="#system-runtime" class="block rounded px-2 py-1 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">Runtime</a></li>
+            <li class="pl-3"><a href="#system-remote" class="block rounded px-2 py-1 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">Remote Access</a></li>
+          </ul>
+        </nav>
+      </aside>
+
+      <!-- ============ CONTENT ============ -->
+      <div class="min-w-0 flex-1 space-y-12">
+
+        <!-- ════ GROUP: SOURCES ════ -->
+        <section id="sources" class="scroll-mt-6">
+          <header class="mb-5 border-b border-border pb-3">
+            <h2 class="text-base font-semibold text-foreground">Sources</h2>
+            <p class="mt-1 text-xs text-muted-foreground">What PatchDeck watches.</p>
+          </header>
+
+          <!-- Subsection: Add -->
+          <div id="sources-add" class="mb-6 scroll-mt-6">
+            <div class="mb-2 flex items-baseline justify-between">
+              <h3 class="text-sm font-medium text-foreground">Add</h3>
+              <span class="text-[11px] text-muted-foreground">Add a PR or watch another repo.</span>
+            </div>
+            <div class="grid gap-3 md:grid-cols-2">
+              <form class="rounded-md border border-border p-4">
+                <label class="text-[11px] uppercase tracking-wider text-muted-foreground">Pull request</label>
+                <div class="mt-2 flex gap-2">
+                  <input type="text" placeholder="github.com/owner/repo/pull/123" class="mono min-w-0 flex-1 border border-border bg-transparent px-2 py-1 text-[12px] placeholder:text-muted-foreground/50 focus:border-primary focus:outline-none" />
+                  <button class="cursor-pointer rounded-md border border-primary bg-primary px-3 py-1 text-[11px] font-medium uppercase tracking-wider text-primary-foreground hover:bg-primary/90 transition-colors">Add</button>
+                </div>
+              </form>
+              <form class="rounded-md border border-border p-4">
+                <label class="text-[11px] uppercase tracking-wider text-muted-foreground">Repository</label>
+                <div class="mt-2 flex gap-2">
+                  <input type="text" placeholder="owner/repo" class="mono min-w-0 flex-1 border border-border bg-transparent px-2 py-1 text-[12px] placeholder:text-muted-foreground/50 focus:border-primary focus:outline-none" />
+                  <button class="cursor-pointer rounded-md border border-primary bg-primary px-3 py-1 text-[11px] font-medium uppercase tracking-wider text-primary-foreground hover:bg-primary/90 transition-colors">Watch</button>
+                </div>
+                <div class="mt-3">
+                  <div class="text-[10px] uppercase tracking-wider text-muted-foreground">Track automatically</div>
+                  <div role="radiogroup" class="mt-1 flex flex-wrap gap-1">
+                    <label class="cursor-pointer rounded-md border border-primary bg-primary/10 px-2 py-1 text-[11px] font-medium text-primary">My PRs only</label>
+                    <label class="cursor-pointer rounded-md border border-border px-2 py-1 text-[11px] font-medium text-muted-foreground hover:border-primary/40 hover:text-primary transition-colors">My PRs + teammates</label>
+                  </div>
+                </div>
+              </form>
+            </div>
+          </div>
+
+          <!-- Subsection: Repositories -->
+          <div id="sources-repos" class="scroll-mt-6">
+            <div class="mb-2 flex items-baseline justify-between">
+              <h3 class="text-sm font-medium text-foreground">Repositories</h3>
+              <div class="flex items-center gap-3">
+                <span class="text-[11px] text-muted-foreground">Repo-level automation, issue work, and release controls.</span>
+                <button class="cursor-pointer rounded-md border border-primary bg-primary px-3 py-1 text-[11px] font-medium uppercase tracking-wider text-primary-foreground hover:bg-primary/90 transition-colors">Fetch</button>
+              </div>
+            </div>
+
+            <!-- Repo row (collapsed) -->
+            <div class="rounded-md border border-border">
+              <div class="flex flex-wrap items-center justify-between gap-3 px-4 py-3 hover:bg-muted/40 cursor-pointer transition-colors">
+                <div class="flex items-center gap-2 min-w-0">
+                  <span class="mono text-[12px] font-medium text-foreground">jeremymcs/patchdeck</span>
+                  <span class="inline-flex items-center gap-1 rounded border border-success-border bg-success-muted px-1.5 py-0 text-[10px] uppercase tracking-wider text-success-foreground">
+                    <span class="inline-block h-1.5 w-1.5 rounded-full bg-success"></span>
+                    Watching
+                  </span>
+                </div>
+                <div class="flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground">
+                  <span>Agent: <span class="text-foreground">Global</span></span>
+                  <span class="text-border">·</span>
+                  <span>Scope: <span class="text-foreground">Mine</span></span>
+                  <button class="ml-2 rounded border border-border px-2 py-0.5 text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors">Edit</button>
+                </div>
+              </div>
+
+              <!-- Repo row (expanded) -->
+              <div class="border-t border-border bg-muted/30 px-4 py-3">
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                  <div class="flex items-center gap-2 min-w-0">
+                    <span class="mono text-[12px] font-medium text-foreground">jeremymcs/other-service</span>
+                    <span class="inline-flex items-center gap-1 rounded border border-success-border bg-success-muted px-1.5 py-0 text-[10px] uppercase tracking-wider text-success-foreground">
+                      <span class="inline-block h-1.5 w-1.5 rounded-full bg-success"></span>
+                      Watching
+                    </span>
+                  </div>
+                  <button class="rounded border border-border px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors">Collapse</button>
+                </div>
+
+                <div class="mt-4 grid gap-4 md:grid-cols-3">
+                  <div>
+                    <div class="text-[10px] uppercase tracking-wider text-muted-foreground">Issue work</div>
+                    <div role="radiogroup" class="mt-1 flex flex-wrap gap-1">
+                      <label class="cursor-pointer rounded-md border border-primary bg-primary/10 px-2 py-1 text-[11px] font-medium text-primary">Manual</label>
+                      <label class="cursor-pointer rounded-md border border-border px-2 py-1 text-[11px] font-medium text-muted-foreground">Auto</label>
+                    </div>
+                  </div>
+                  <div>
+                    <div class="text-[10px] uppercase tracking-wider text-muted-foreground">Issue evaluate</div>
+                    <div role="radiogroup" class="mt-1 flex flex-wrap gap-1">
+                      <label class="cursor-pointer rounded-md border border-border px-2 py-1 text-[11px] font-medium text-muted-foreground">Manual</label>
+                      <label class="cursor-pointer rounded-md border border-primary bg-primary/10 px-2 py-1 text-[11px] font-medium text-primary">Auto</label>
+                    </div>
+                  </div>
+                  <div>
+                    <div class="text-[10px] uppercase tracking-wider text-muted-foreground">PR monitor</div>
+                    <div role="radiogroup" class="mt-1 flex flex-wrap gap-1">
+                      <label class="cursor-pointer rounded-md border border-border px-2 py-1 text-[11px] font-medium text-muted-foreground">Manual</label>
+                      <label class="cursor-pointer rounded-md border border-primary bg-primary/10 px-2 py-1 text-[11px] font-medium text-primary">Auto</label>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="mt-4 grid gap-3 border-t border-border pt-4 md:grid-cols-5">
+                  <div class="grid gap-1.5">
+                    <label class="text-[10px] uppercase tracking-wider text-muted-foreground">Agent override</label>
+                    <select class="mono border border-border bg-transparent px-2 py-1 text-[11px] focus:border-primary focus:outline-none">
+                      <option>Global</option><option>codex</option><option>claude</option>
+                    </select>
+                  </div>
+                  <div class="grid gap-1.5">
+                    <label class="text-[10px] uppercase tracking-wider text-muted-foreground">Codex model</label>
+                    <select class="mono border border-border bg-transparent px-2 py-1 text-[11px] focus:border-primary focus:outline-none">
+                      <option>CLI default</option><option>gpt-5.4</option><option>gpt-5.3-codex</option>
+                    </select>
+                  </div>
+                  <div class="grid gap-1.5">
+                    <label class="text-[10px] uppercase tracking-wider text-muted-foreground">Reasoning</label>
+                    <select class="mono border border-border bg-transparent px-2 py-1 text-[11px] focus:border-primary focus:outline-none">
+                      <option>CLI default</option><option>Low</option><option>Medium</option><option>High</option>
+                    </select>
+                  </div>
+                  <div class="grid gap-1.5">
+                    <label class="text-[10px] uppercase tracking-wider text-muted-foreground">Claude model</label>
+                    <select class="mono border border-border bg-transparent px-2 py-1 text-[11px] focus:border-primary focus:outline-none">
+                      <option>CLI default</option><option>opus</option><option>sonnet</option>
+                    </select>
+                  </div>
+                  <div class="grid gap-1.5">
+                    <label class="text-[10px] uppercase tracking-wider text-muted-foreground">Effort</label>
+                    <select class="mono border border-border bg-transparent px-2 py-1 text-[11px] focus:border-primary focus:outline-none">
+                      <option>CLI default</option><option>Medium</option><option>Max</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <!-- another collapsed row -->
+              <div class="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3 hover:bg-muted/40 cursor-pointer transition-colors">
+                <div class="flex items-center gap-2 min-w-0">
+                  <span class="mono text-[12px] font-medium text-foreground">jeremymcs/legacy-api</span>
+                  <span class="inline-flex items-center gap-1 rounded border border-border bg-muted px-1.5 py-0 text-[10px] uppercase tracking-wider text-muted-foreground">
+                    <span class="inline-block h-1.5 w-1.5 rounded-full bg-muted-foreground/50"></span>
+                    Paused
+                  </span>
+                </div>
+                <div class="flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground">
+                  <span>Agent: <span class="text-foreground">codex</span></span>
+                  <span class="text-border">·</span>
+                  <span>Scope: <span class="text-foreground">Team</span></span>
+                  <button class="ml-2 rounded border border-border px-2 py-0.5 text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors">Edit</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ════ GROUP: AGENT ════ -->
+        <section id="agent" class="scroll-mt-6">
+          <header class="mb-5 border-b border-border pb-3">
+            <h2 class="text-base font-semibold text-foreground">Agent</h2>
+            <p class="mt-1 text-xs text-muted-foreground">How the agent runs across watched work.</p>
+          </header>
+
+          <!-- Models -->
+          <div id="agent-models" class="mb-6 scroll-mt-6">
+            <h3 class="mb-2 text-sm font-medium text-foreground">Models</h3>
+            <div class="rounded-md border border-border p-4">
+              <div class="grid gap-3 md:grid-cols-2">
+                <div class="grid gap-1.5">
+                  <label class="text-[11px] uppercase tracking-wider text-muted-foreground">Codex model</label>
+                  <select class="mono border border-border bg-transparent px-2 py-1.5 text-[12px] focus:border-primary focus:outline-none">
+                    <option>CLI default</option><option selected>gpt-5.4</option><option>gpt-5.4-mini</option><option>gpt-5.3-codex</option>
+                  </select>
+                </div>
+                <div class="grid gap-1.5">
+                  <label class="text-[11px] uppercase tracking-wider text-muted-foreground">Codex reasoning</label>
+                  <select class="mono border border-border bg-transparent px-2 py-1.5 text-[12px] focus:border-primary focus:outline-none">
+                    <option>CLI default</option><option>Low</option><option selected>Medium</option><option>High</option><option>XHigh</option>
+                  </select>
+                </div>
+                <div class="grid gap-1.5">
+                  <label class="text-[11px] uppercase tracking-wider text-muted-foreground">Claude model</label>
+                  <select class="mono border border-border bg-transparent px-2 py-1.5 text-[12px] focus:border-primary focus:outline-none">
+                    <option>CLI default</option><option>opus</option><option selected>sonnet</option>
+                  </select>
+                </div>
+                <div class="grid gap-1.5">
+                  <label class="text-[11px] uppercase tracking-wider text-muted-foreground">Claude effort</label>
+                  <select class="mono border border-border bg-transparent px-2 py-1.5 text-[12px] focus:border-primary focus:outline-none">
+                    <option>CLI default</option><option>Low</option><option selected>Medium</option><option>High</option><option>Max</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Auto fixes -->
+          <div id="agent-autofix" class="mb-6 scroll-mt-6">
+            <h3 class="mb-2 text-sm font-medium text-foreground">Auto fixes</h3>
+            <div class="rounded-md border border-border divide-y divide-border">
+              <label class="flex cursor-pointer items-center justify-between gap-4 px-4 py-3">
+                <div class="min-w-0">
+                  <div class="text-[13px] font-medium text-foreground">Auto-fix failing CI on watched PRs</div>
+                  <div class="mt-0.5 text-[11px] text-muted-foreground">When checks fail, the agent re-runs and pushes a fix.</div>
+                </div>
+                <span class="switch on"></span>
+              </label>
+              <label class="flex cursor-pointer items-center justify-between gap-4 px-4 py-3">
+                <div class="min-w-0">
+                  <div class="text-[13px] font-medium text-foreground">Auto-evaluate new issues</div>
+                  <div class="mt-0.5 text-[11px] text-muted-foreground">Triage new issues into ready / blocked / needs-info.</div>
+                </div>
+                <span class="switch on"></span>
+              </label>
+              <label class="flex cursor-pointer items-center justify-between gap-4 px-4 py-3">
+                <div class="min-w-0">
+                  <div class="text-[13px] font-medium text-foreground">Auto-work ready issues</div>
+                  <div class="mt-0.5 text-[11px] text-muted-foreground">Open a PR for issues marked ready.</div>
+                </div>
+                <span class="switch"></span>
+              </label>
+            </div>
+          </div>
+
+          <!-- Tuning -->
+          <div id="agent-tuning" class="mb-6 scroll-mt-6">
+            <h3 class="mb-2 text-sm font-medium text-foreground">Tuning</h3>
+            <div class="rounded-md border border-border p-4">
+              <div class="grid gap-3 md:grid-cols-3">
+                <div class="grid gap-1.5">
+                  <label class="text-[11px] uppercase tracking-wider text-muted-foreground">Max concurrent jobs</label>
+                  <input type="number" value="2" class="mono border border-border bg-transparent px-2 py-1.5 text-[12px] focus:border-primary focus:outline-none" />
+                </div>
+                <div class="grid gap-1.5">
+                  <label class="text-[11px] uppercase tracking-wider text-muted-foreground">Poll interval (s)</label>
+                  <input type="number" value="60" class="mono border border-border bg-transparent px-2 py-1.5 text-[12px] focus:border-primary focus:outline-none" />
+                </div>
+                <div class="grid gap-1.5">
+                  <label class="text-[11px] uppercase tracking-wider text-muted-foreground">Idle timeout (m)</label>
+                  <input type="number" value="15" class="mono border border-border bg-transparent px-2 py-1.5 text-[12px] focus:border-primary focus:outline-none" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- CI Healing -->
+          <div id="agent-ci" class="scroll-mt-6">
+            <h3 class="mb-2 text-sm font-medium text-foreground">CI Healing</h3>
+            <div class="rounded-md border border-border p-4">
+              <label class="flex cursor-pointer items-center justify-between gap-4">
+                <div class="min-w-0">
+                  <div class="text-[13px] font-medium text-foreground">Watch checks</div>
+                  <div class="mt-0.5 text-[11px] text-muted-foreground">React to GitHub check_run / check_suite events.</div>
+                </div>
+                <span class="switch on"></span>
+              </label>
+              <div class="mt-4 grid gap-3 border-t border-border pt-4 md:grid-cols-2">
+                <div class="grid gap-1.5">
+                  <label class="text-[11px] uppercase tracking-wider text-muted-foreground">Max retries per PR</label>
+                  <input type="number" value="3" class="mono border border-border bg-transparent px-2 py-1.5 text-[12px] focus:border-primary focus:outline-none" />
+                </div>
+                <div class="grid gap-1.5">
+                  <label class="text-[11px] uppercase tracking-wider text-muted-foreground">Backoff (s)</label>
+                  <input type="number" value="120" class="mono border border-border bg-transparent px-2 py-1.5 text-[12px] focus:border-primary focus:outline-none" />
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ════ GROUP: DELIVERY ════ -->
+        <section id="delivery" class="scroll-mt-6">
+          <header class="mb-5 border-b border-border pb-3">
+            <h2 class="text-base font-semibold text-foreground">Delivery</h2>
+            <p class="mt-1 text-xs text-muted-foreground">Releases and GitHub integration.</p>
+          </header>
+
+          <div id="delivery-releases" class="mb-6 scroll-mt-6">
+            <h3 class="mb-2 text-sm font-medium text-foreground">Releases</h3>
+            <div class="rounded-md border border-border divide-y divide-border">
+              <label class="flex cursor-pointer items-center justify-between gap-4 px-4 py-3">
+                <div class="min-w-0">
+                  <div class="text-[13px] font-medium text-foreground">Auto-cut releases on merge to main</div>
+                  <div class="mt-0.5 text-[11px] text-muted-foreground">Bump version, push tag, generate changelog.</div>
+                </div>
+                <span class="switch"></span>
+              </label>
+              <div class="px-4 py-3">
+                <div class="text-[11px] uppercase tracking-wider text-muted-foreground">Last release</div>
+                <div class="mt-1 flex items-center gap-2">
+                  <span class="mono text-[12px] font-medium text-foreground">v1.0.4</span>
+                  <span class="text-[11px] text-muted-foreground">· 2 days ago · 12 commits</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div id="delivery-github" class="scroll-mt-6">
+            <h3 class="mb-2 text-sm font-medium text-foreground">GitHub</h3>
+            <div class="rounded-md border border-border p-4">
+              <div class="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div class="text-[13px] font-medium text-foreground">Connection</div>
+                  <div class="mt-0.5 text-[11px] text-muted-foreground">Authenticated as <span class="mono text-foreground">@jeremymcs</span> · token expires in 89 days.</div>
+                </div>
+                <span class="inline-flex items-center gap-1.5 rounded border border-success-border bg-success-muted px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-success-foreground">
+                  <span class="inline-block h-1.5 w-1.5 rounded-full bg-success"></span>
+                  Connected
+                </span>
+              </div>
+              <div class="mt-3 flex gap-2">
+                <button class="rounded-md border border-border px-3 py-1 text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors">Reauthenticate</button>
+                <button class="rounded-md border border-border px-3 py-1 text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors">Disconnect</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ════ GROUP: SYSTEM ════ -->
+        <section id="system" class="scroll-mt-6">
+          <header class="mb-5 border-b border-border pb-3">
+            <h2 class="text-base font-semibold text-foreground">System</h2>
+            <p class="mt-1 text-xs text-muted-foreground">Runtime and process-level controls.</p>
+          </header>
+
+          <div id="system-runtime" class="mb-6 scroll-mt-6">
+            <h3 class="mb-2 text-sm font-medium text-foreground">Runtime</h3>
+            <div class="rounded-md border border-border p-4">
+              <label class="flex cursor-pointer items-center justify-between gap-4">
+                <div class="min-w-0">
+                  <div class="flex items-center gap-2">
+                    <span class="text-[13px] font-medium text-foreground">Drain mode</span>
+                    <span class="inline-flex items-center gap-1.5 rounded border border-warning-border bg-warning-muted px-1.5 py-0 text-[10px] font-medium uppercase tracking-wider text-warning-foreground">
+                      <span class="inline-block h-1.5 w-1.5 rounded-full bg-warning"></span>
+                      Pauses automation
+                    </span>
+                  </div>
+                  <div class="mt-0.5 text-[11px] text-muted-foreground">Finish in-flight jobs, accept no new ones.</div>
+                </div>
+                <span class="switch"></span>
+              </label>
+            </div>
+          </div>
+
+          <div id="system-remote" class="scroll-mt-6">
+            <h3 class="mb-2 text-sm font-medium text-foreground">Remote Access</h3>
+            <div class="rounded-md border border-border p-4">
+              <div class="text-[13px] font-medium text-foreground">API token</div>
+              <div class="mt-0.5 text-[11px] text-muted-foreground">For the PatchDeck CLI and remote triggers.</div>
+              <div class="mt-3 flex flex-wrap gap-2">
+                <code class="mono flex-1 rounded border border-border bg-muted px-2 py-1.5 text-[11px] text-muted-foreground">pdk_xxxxxxxxxxxx••••••••••</code>
+                <button class="rounded-md border border-border px-3 py-1 text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors">Copy</button>
+                <button class="rounded-md border border-border px-3 py-1 text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors">Rotate</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+      </div>
+    </div>
+  </div>
+</main>
+
+<script>
+  // Theme toggle
+  document.getElementById('theme-toggle').addEventListener('click', () => {
+    document.documentElement.classList.toggle('dark');
+  });
+  // Default to dark to match dev tool vibe
+  document.documentElement.classList.add('dark');
+
+  // Scroll-spy for TOC
+  const links = document.querySelectorAll('.toc-link');
+  const sections = Array.from(links).map(l => document.querySelector(l.getAttribute('href')));
+  const obs = new IntersectionObserver((entries) => {
+    entries.forEach(e => {
+      if (e.isIntersecting) {
+        links.forEach(l => l.classList.remove('active'));
+        const link = document.querySelector(`.toc-link[href="#${e.target.id}"]`);
+        if (link) link.classList.add('active');
+      }
+    });
+  }, { rootMargin: '-20% 0px -70% 0px' });
+  sections.forEach(s => s && obs.observe(s));
+</script>
+</body>
+</html>
