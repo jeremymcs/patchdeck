@@ -640,11 +640,11 @@ export default function Issues() {
                 ]);
               }}
               disabled={isFetching || globalDrainMode}
-              data-testid="button-refresh-issues"
+              data-testid="button-sync-issues"
               className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-0.5 text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
             >
               {globalDrainMode ? <span className="h-3.5 w-3.5" /> : isFetching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-              {globalDrainMode ? "paused" : "refresh"}
+              {globalDrainMode ? "paused" : "sync"}
             </button>
             <ActivityMenu
               activities={activities}

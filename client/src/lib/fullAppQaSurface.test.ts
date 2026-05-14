@@ -285,6 +285,7 @@ test("dashboard keeps the QA-tested PR, repo, feedback, and side-panel workflows
     ["dashboard clear issue failure", "dashboard-clear-issue-failure"],
     ["dashboard errors roll-up toggle", "dashboard-errors-rollup-toggle"],
     ["dashboard errors roll-up summary", "dashboard-errors-rollup-summary"],
+    ["dashboard sync action", "button-sync-dashboard"],
   ] satisfies SourceExpectation[]) {
     assertHasTestId(sourceFile, label, testId);
   }
@@ -308,6 +309,7 @@ test("dashboard keeps the QA-tested PR, repo, feedback, and side-panel workflows
 
   assertHasApiRequest(sourceFile, "failed activity clear mutation", "DELETE", "/api/activities/failed");
   assertHasApiRequest(sourceFile, "issue failure clear mutation", "DELETE", "/api/issues/work/failures");
+  assertHasApiRequest(sourceFile, "dashboard sync mutation", "POST", "/api/repos/sync");
   assertHasApiRequest(sourceFile, "ask agent mutation", "POST", /`\/api\/prs\/\$\{prId\}\/questions`/);
   assertHasTestId(sourceFile, "dashboard drain banner", "dashboard-drain-banner");
   assertHasTestId(sourceFile, "dashboard drain reason", "dashboard-drain-reason");
@@ -318,6 +320,7 @@ test("dashboard keeps the QA-tested PR, repo, feedback, and side-panel workflows
   assertHasStringValue(sourceFile, "PR number search placeholder", "Search #");
   assertHasExpression(sourceFile, "issue-linked PR index", /\bbuildIssueLinkedPRIndex\b/);
   assertHasStringValue(sourceFile, "on issues tab label", /Issues \(/);
+  assertHasStringValue(sourceFile, "dashboard sync label", "sync");
   assertHasStringValue(sourceFile, "drain mode action label", "Paused by drain mode");
   assertHasStringValue(sourceFile, "blocked manual copy", "Manual runs are blocked while global automation is paused.");
   assertHasStringValue(sourceFile, "drained PR copy", "Background and manual runs are paused by drain mode.");
@@ -345,7 +348,7 @@ test("issues page keeps the QA-tested issue monitor and work surface wired", asy
   assertHasExpression(sourceFile, "issue detail drain guard", /enabled: Boolean\(selectedIssueFromList\) && !globalDrainMode/);
 
   for (const [label, testId] of [
-    ["refresh button", "button-refresh-issues"],
+    ["sync button", "button-sync-issues"],
     ["issue number search", "issue-number-search"],
     ["work issue button", "button-work-issue"],
     ["evaluate issue button", "button-evaluate-issue"],
@@ -395,6 +398,7 @@ test("issues page keeps the QA-tested issue monitor and work surface wired", asy
   assertHasExpression(sourceFile, "issue queue helper", /\bbuildQueueStatusIndex\b/);
   assertHasExpression(sourceFile, "issue queue badge", /\bQueueStatusBadge\b/);
   assertHasExpression(sourceFile, "issue filtered list", /\bfilteredIssues\b/);
+  assertHasStringValue(sourceFile, "issue sync label", "sync");
   assertHasStringValue(sourceFile, "issue number search placeholder", "Search #");
   assertHasStringValue(sourceFile, "issue body label", "Issue body");
 });
@@ -461,6 +465,7 @@ test("settings keeps the QA-tested configuration, token, and runtime controls wi
   );
   assertHasExpression(sourceFile, "ordered GitHub tokens", /\bgithubTokens\b/);
   assertHasExpression(sourceFile, "repo sync drain guard", /disabled=\{syncReposMutation\.isPending \|\| globalDrainMode\}/);
+  assertHasStringValue(sourceFile, "repo sync button label", "Sync");
 });
 
 test("logs route keeps the QA-tested filtering, streaming, copy, and download surface wired", async () => {

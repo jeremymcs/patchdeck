@@ -1107,9 +1107,10 @@ export default function Dashboard() {
   const [areErrorsRolledUp, setAreErrorsRolledUp] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  const handleRefreshDashboard = async () => {
+  const handleSyncDashboard = async () => {
     setIsRefreshing(true);
     try {
+      await apiRequest("POST", "/api/repos/sync");
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["/api/prs"] }),
         queryClient.invalidateQueries({ queryKey: ["/api/prs/archived"] }),
@@ -1331,13 +1332,13 @@ export default function Dashboard() {
             )}
             <button
               type="button"
-              onClick={() => { void handleRefreshDashboard(); }}
+              onClick={() => { void handleSyncDashboard(); }}
               disabled={isRefreshing}
-              data-testid="button-refresh-dashboard"
+              data-testid="button-sync-dashboard"
               className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-0.5 text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
             >
               {isRefreshing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-              refresh
+              sync
             </button>
             <ActivityMenu
               activities={activities}
