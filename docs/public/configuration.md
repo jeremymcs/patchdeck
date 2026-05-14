@@ -61,6 +61,7 @@ The dashboard also exposes a server log viewer at `/logs`. It shows recent struc
 The settings page in the dashboard provides a UI for:
 
 - **GitHub token management** — Add, remove, and reorder saved tokens before falling back to `GITHUB_TOKEN` or `gh auth`.
+- **GitHub token permissions** — For fine-grained PATs, grant the watched repos `Metadata: read`, `Contents: read/write` if PatchDeck will push commits, `Issues: read/write`, `Pull requests: read/write`, and `Checks: read`. Tokens from the same GitHub account still share one rate-limit bucket.
 - **Agent selection** — Choose whether autonomous runs use Claude Code or OpenAI Codex. If the default run fails and a code-owner fallback is launched, the fallback uses the same resolved agent; enabling **Fallback to next coding agent** lets patchdeck resolve that fallback to the other local CLI when needed.
 - **Babysitter tuning** — Control polling, batching, merge-conflict handling, release automation, and automatic docs assessment.
 - **Runtime drain mode** — Pause new background automation and manual agent-triggering actions while allowing in-flight work to finish. During drain mode, the dashboard disables Run now/apply, feedback retry, Ask Agent, manual Release, and release retry actions; matching API calls return `409` instead of queueing new agent work.

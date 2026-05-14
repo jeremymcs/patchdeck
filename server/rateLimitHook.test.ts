@@ -88,6 +88,52 @@ test("octokit hook records rate-limit reset from 403 response headers", async ()
   assert.equal(state.resetAt!.getTime(), resetUnixSeconds * 1000);
 });
 
+test("octokit hook refreshes the reset time from /rate_limit when the response omits it", async () => {
+  const resetUnixSeconds = Math.floor(Date.now() / 1000) + 900;
+  const requestedPaths: string[] = [];
+  const octokit = await buildOctokit(
+    { ...config, githubToken: "ghp_fake" },
+    {
+      ignoreCache: true,
+      requestFetch: async (input) => {
+        const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+        requestedPaths.push(new URL(url).pathname);
+
+        if (url.includes("/rate_limit")) {
+          return new Response(JSON.stringify({
+            resources: {
+              core: {
+                limit: 5000,
+                remaining: 0,
+                reset: resetUnixSeconds,
+                used: 5000,
+              },
+            },
+          }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+
+        return new Response(JSON.stringify({ message: "API rate limit exceeded" }), {
+          status: 403,
+          headers: {
+            "content-type": "application/json",
+            "x-ratelimit-remaining": "0",
+            "x-ratelimit-resource": "core",
+          },
+        });
+      },
+    },
+  );
+
+  await assert.rejects(() => octokit.request("GET /user"));
+  const state = getRateLimitState();
+  assert.equal(state.limited, true);
+  assert.equal(state.resetAt!.getTime(), resetUnixSeconds * 1000);
+  assert.deepEqual(requestedPaths, ["/user", "/rate_limit"]);
+});
+
 test("octokit hook short-circuits requests while the gate is active", async () => {
   const resetUnixSeconds = Math.floor(Date.now() / 1000) + 600;
   let realCalls = 0;
@@ -110,11 +156,11 @@ test("octokit hook short-circuits requests while the gate is active", async () =
   );
 
   await assert.rejects(() => octokit.request("GET /user"));
-  assert.equal(realCalls, 1);
+  assert.equal(realCalls, 2);
 
   // Second call must be short-circuited by the gate.
   await assert.rejects(() => octokit.request("GET /repos/foo/bar"));
-  assert.equal(realCalls, 1);
+  assert.equal(realCalls, 2);
 });
 
 test("octokit hook auto-retries once when Retry-After is within the short-wait threshold", async () => {
@@ -150,7 +196,7 @@ test("octokit hook auto-retries once when Retry-After is within the short-wait t
   const elapsed = Date.now() - start;
 
   assert.equal(result.data.login, "octo");
-  assert.equal(callIndex, 2);
+  assert.equal(callIndex, 3);
   assert.ok(elapsed >= 900, `expected >= ~1s wait, got ${elapsed}ms`);
   assert.equal(getRateLimitState().limited, false);
 });
@@ -175,7 +221,7 @@ test("octokit hook does not auto-retry when the Retry-After wait exceeds the thr
   );
 
   await assert.rejects(() => octokit.request("GET /user"));
-  assert.equal(callIndex, 1);
+  assert.equal(callIndex, 2);
   const state = getRateLimitState();
   assert.equal(state.limited, true);
   assert.ok(state.resetAt!.getTime() - Date.now() > 60_000);

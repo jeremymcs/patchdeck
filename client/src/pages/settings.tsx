@@ -64,6 +64,11 @@ const CLAUDE_EFFORT_OPTIONS = [
 const DRAIN_PAUSED_LABEL = "Paused";
 const DRAIN_PAUSED_TITLE = "Paused by drain mode";
 
+type GitHubRateLimitState = {
+  limited: boolean;
+  resetAt: string | null;
+};
+
 type WatchScope = (typeof WATCH_SCOPE_OPTIONS)[number]["value"];
 type IssueWorkMode = (typeof ISSUE_WORK_MODE_OPTIONS)[number]["value"];
 type RepoAgentOption = (typeof REPO_AGENT_OPTIONS)[number]["value"];
@@ -340,6 +345,10 @@ export default function Settings() {
   const { data: runtimeState, isError: runtimeStateIsError } = useQuery<RuntimeState>({
     queryKey: ["/api/runtime"],
     refetchInterval: 5000,
+  });
+  const { data: githubRateLimit } = useQuery<GitHubRateLimitState>({
+    queryKey: ["/api/github-rate-limit"],
+    refetchInterval: 30000,
   });
   const drainStatusView = getDrainStatusView(runtimeState, runtimeStateIsError);
   const globalDrainMode = runtimeState?.drainMode === true;
@@ -1189,7 +1198,9 @@ export default function Settings() {
                   <div>
                     <div className="text-sm">Tokens</div>
                     <div className="text-[11px] text-muted-foreground">
-                      Tried in order before GITHUB_TOKEN and gh auth.
+                      Tried in order before GITHUB_TOKEN and gh auth. For fine-grained PATs, give the watched repos
+                      Metadata: read, Contents: read/write if you push, Issues: read/write, Pull requests: read/write,
+                      and Checks: read. Tokens from the same GitHub account share the same rate-limit bucket.
                     </div>
                   </div>
                   {!showTokenInput && (
@@ -1247,6 +1258,11 @@ export default function Settings() {
                 ) : (
                   <div className="text-[11px] text-muted-foreground">none configured</div>
                 )}
+                {githubRateLimit?.limited && githubRateLimit.resetAt ? (
+                  <div className="border-l-2 border-warning bg-muted/30 px-3 py-2 text-[11px]">
+                    GitHub rate limit active until {new Date(githubRateLimit.resetAt).toLocaleString()}.
+                  </div>
+                ) : null}
                 {showTokenInput ? (
                   <div className="flex items-center gap-2">
                     <input

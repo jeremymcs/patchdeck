@@ -749,6 +749,18 @@ type GitHubRequestOptions = {
   method?: string;
 };
 
+type GitHubRateLimitResourceSnapshot = {
+  limit?: number | null;
+  remaining?: number | null;
+  reset?: number | null;
+  used?: number | null;
+};
+
+type GitHubRateLimitResponse = {
+  resources?: Record<string, GitHubRateLimitResourceSnapshot | undefined>;
+  rate?: GitHubRateLimitResourceSnapshot | null;
+};
+
 type QueuedGitHubRequest<T> = {
   options: GitHubRequestOptions;
   run: () => Promise<T>;
@@ -838,22 +850,56 @@ function detectRateLimitFromHeaders(
   status: number | undefined,
   headers: Record<string, string>,
   message: string,
-): { limited: boolean; gateUntil: Date | null } {
+): { limited: boolean; gateUntil: Date | null; resource: string | null } {
   const remainingRaw = headers["x-ratelimit-remaining"];
   const retryAfterHeader = headers["retry-after"];
   const limited = (status === 403 || status === 429)
     && (remainingRaw === "0" || Boolean(retryAfterHeader) || /rate limit/i.test(message));
   if (!limited) {
-    return { limited: false, gateUntil: null };
+    return { limited: false, gateUntil: null, resource: null };
   }
   const resetRaw = headers["x-ratelimit-reset"];
   const resetSeconds = typeof resetRaw === "string" ? Number.parseInt(resetRaw, 10) : Number.NaN;
   const resetDate = Number.isFinite(resetSeconds) ? new Date(resetSeconds * 1000) : null;
   const retryDate = parseRetryAfter(retryAfterHeader);
-  return { limited: true, gateUntil: laterDate(resetDate, retryDate) };
+  return {
+    limited: true,
+    gateUntil: laterDate(resetDate, retryDate),
+    resource: headers["x-ratelimit-resource"]?.trim().toLowerCase() || null,
+  };
 }
 
-function attachRateLimitHook(client: Octokit): void {
+function readRateLimitReset(
+  payload: GitHubRateLimitResponse,
+  resourceHint: string | null,
+): Date | null {
+  const resources = payload.resources ?? {};
+  const resourceKey = resourceHint ?? "core";
+  const resource = resources[resourceKey] ?? payload.rate ?? null;
+  const reset = resource?.reset;
+  if (typeof reset !== "number" || !Number.isFinite(reset) || reset <= 0) {
+    return null;
+  }
+
+  return new Date(reset * 1000);
+}
+
+async function fetchRateLimitResetAt(
+  client: Octokit,
+  resourceHint: string | null,
+): Promise<Date | null> {
+  try {
+    const response = await client.request("GET /rate_limit");
+    return readRateLimitReset(response.data as GitHubRateLimitResponse, resourceHint);
+  } catch {
+    return null;
+  }
+}
+
+function attachRateLimitHook(
+  client: Octokit,
+  resolveRateLimitResetAt?: (resourceHint: string | null) => Promise<Date | null>,
+): void {
   client.hook.wrap("request", async (request, options) => {
     const state = getRateLimitState();
     if (state.limited && state.resetAt) {
@@ -878,12 +924,13 @@ function attachRateLimitHook(client: Octokit): void {
         const status = (error as { status?: number } | undefined)?.status;
         const headers = (error as { response?: { headers?: Record<string, string> } } | undefined)?.response?.headers ?? {};
         const message = error instanceof Error ? error.message.toLowerCase() : "";
-        const { limited, gateUntil } = detectRateLimitFromHeaders(status, headers, message);
+        const { limited, gateUntil, resource } = detectRateLimitFromHeaders(status, headers, message);
         if (!limited) {
           throw error;
         }
 
-        const gateAt = markRateLimited(gateUntil ?? undefined);
+        const exactResetAt = resolveRateLimitResetAt ? await resolveRateLimitResetAt(resource) : null;
+        const gateAt = markRateLimited(exactResetAt ?? gateUntil ?? undefined);
         const waitMs = gateAt.getTime() - Date.now();
         if (attempt === 0 && waitMs > 0 && waitMs <= RATE_LIMIT_AUTO_RETRY_MAX_WAIT_MS) {
           attempt += 1;
@@ -902,7 +949,7 @@ export async function buildOctokit(
 ): Promise<Octokit> {
   const envToken = process.env.GITHUB_TOKEN?.trim();
   const configuredToken = resolveConfiguredGitHubToken(config);
-  const buildClient = (authToken?: string) => {
+  const buildClient = (authToken?: string, attachHooks = true) => {
     const client = new Octokit({
       auth: authToken,
       log: octokitLogger,
@@ -913,7 +960,9 @@ export async function buildOctokit(
         },
       },
     });
-    attachRateLimitHook(client);
+    if (attachHooks) {
+      attachRateLimitHook(client, async (resourceHint) => fetchRateLimitResetAt(buildClient(authToken, false), resourceHint));
+    }
     return client;
   };
 
