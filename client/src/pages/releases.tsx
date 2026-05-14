@@ -329,7 +329,6 @@ export default function Releases() {
     queryKey: ["/api/runtime"],
     refetchInterval: 5000,
   });
-  const globalDrainMode = runtimeState?.drainMode === true;
 
   const {
     data: githubReleasesByRepo = [],
@@ -337,7 +336,8 @@ export default function Releases() {
     error: githubError,
   } = useQuery<RepoGitHubReleases[]>({
     queryKey: ["/api/github-releases"],
-    enabled: runtimeState !== undefined && !globalDrainMode,
+    enabled: runtimeState !== undefined,
+    refetchInterval: 60_000,
   });
 
   const { releaseLookup, orphans } = useMemo(() => {
@@ -423,9 +423,6 @@ export default function Releases() {
   const selectedOrphans = selectedRepo ? orphansByRepo.get(selectedRepo) ?? [] : [];
 
   const handleSyncGitHub = () => {
-    if (globalDrainMode) {
-      return;
-    }
     queryClient.invalidateQueries({ queryKey: ["/api/github-releases"] });
     queryClient.invalidateQueries({ queryKey: ["/api/releases"] });
   };
@@ -468,9 +465,9 @@ export default function Releases() {
             <button
               type="button"
               onClick={handleSyncGitHub}
-              disabled={isFetchingGitHub || globalDrainMode || runtimeState === undefined}
-              title={globalDrainMode ? "Paused by drain mode" : isFetchingGitHub ? "Syncing…" : "Sync from GitHub"}
-              aria-label={globalDrainMode ? "Paused by drain mode" : isFetchingGitHub ? "Syncing from GitHub" : "Sync from GitHub"}
+              disabled={isFetchingGitHub || runtimeState === undefined}
+              title={isFetchingGitHub ? "Syncing…" : "Sync from GitHub"}
+              aria-label={isFetchingGitHub ? "Syncing from GitHub" : "Sync from GitHub"}
               data-testid="button-sync-github-releases"
               className="inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-md border border-primary bg-primary text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50"
             >
