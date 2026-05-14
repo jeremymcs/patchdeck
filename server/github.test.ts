@@ -16,6 +16,7 @@ import {
   fetchPullSummary,
   formatRepoSlug,
   getLatestSemverTagForRepo,
+  listOpenLinkedPullRequestsForIssue,
   listOpenIssuesForRepo,
   listOpenPullsForRepo,
   listMergedPullsSince,
@@ -210,6 +211,37 @@ test("buildOctokit retries once with gh auth when the saved github token gets 40
             JSON.stringify(isFirst ? { message: "Bad credentials" } : { login: "octo" }),
             {
               status: isFirst ? 401 : 200,
+              headers: { "content-type": "application/json" },
+            },
+          );
+        },
+      },
+    );
+
+    const response = await octokit.rest.users.getAuthenticated();
+
+    assert.equal(response.data.login, "octo");
+    assert.deepEqual(authHeaders, ["token ghp_saved_token", "token gho_cli_token"]);
+  });
+});
+
+test("buildOctokit retries once with gh auth when the saved github token gets 403", async () => {
+  await withoutGithubTokenEnv(async () => {
+    const authHeaders: string[] = [];
+    const octokit = await buildOctokit(
+      { ...config, githubToken: "ghp_saved_token" },
+      {
+        ignoreCache: true,
+        runCommandFn: async () => {
+          return { stdout: "gho_cli_token\n", stderr: "", code: 0 };
+        },
+        requestFetch: async (input, init) => {
+          authHeaders.push(readAuthorizationHeader(input, init) ?? "");
+          const isFirst = authHeaders.length === 1;
+          return new Response(
+            JSON.stringify(isFirst ? { message: "Resource not accessible by integration" } : { login: "octo" }),
+            {
+              status: isFirst ? 403 : 200,
               headers: { "content-type": "application/json" },
             },
           );
@@ -762,6 +794,61 @@ test("listOpenIssuesForRepo filters pull requests and normalizes issue metadata"
   assert.deepEqual(issues[0]?.assignees, ["octocat"]);
   assert.equal(issues[0]?.repoFullName, "owner/repo");
   assert.match(issues[0]?.bodyHtml ?? "", /<p>The toggle is stuck<\/p>/);
+});
+
+test("listOpenLinkedPullRequestsForIssue returns unique open cross-referenced PRs", async () => {
+  const octokit = {
+    paginate: async () => [
+      {
+        event: "cross-referenced",
+        source: {
+          issue: {
+            number: 31,
+            state: "open",
+            html_url: "https://github.com/owner/repo/pull/31",
+            pull_request: { url: "https://api.github.com/repos/owner/repo/pulls/31" },
+            repository: { full_name: "owner/repo" },
+          },
+        },
+      },
+      {
+        event: "cross-referenced",
+        source: {
+          issue: {
+            number: 31,
+            state: "open",
+            html_url: "https://github.com/owner/repo/pull/31",
+            pull_request: { url: "https://api.github.com/repos/owner/repo/pulls/31" },
+            repository: { full_name: "owner/repo" },
+          },
+        },
+      },
+      {
+        event: "cross-referenced",
+        source: {
+          issue: {
+            number: 32,
+            state: "closed",
+            html_url: "https://github.com/owner/repo/pull/32",
+            pull_request: { url: "https://api.github.com/repos/owner/repo/pulls/32" },
+            repository: { full_name: "owner/repo" },
+          },
+        },
+      },
+      {
+        event: "referenced",
+      },
+    ],
+  };
+
+  const linked = await listOpenLinkedPullRequestsForIssue(octokit as never, { owner: "owner", repo: "repo" }, 17);
+
+  assert.deepEqual(linked, [{
+    number: 31,
+    url: "https://github.com/owner/repo/pull/31",
+    state: "open",
+    repoFullName: "owner/repo",
+  }]);
 });
 
 test("fetchIssueSummary normalizes direct issue metadata", async () => {

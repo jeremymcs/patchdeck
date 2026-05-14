@@ -11,6 +11,39 @@ import { buildQueueStatusIndex, type QueueStatusView } from "@/lib/activityQueue
 import { QueueStatusBadge } from "@/components/QueueStatusBadge";
 import { ActivityMenu, EMPTY_ACTIVITY_SNAPSHOT } from "@/components/ActivityMenu";
 
+const ISSUES_CACHE_KEY = "patchdeck:issues-cache:v1";
+const ISSUES_CACHE_MAX_AGE_MS = 5 * 60 * 1000;
+
+function readCachedIssues(): { data: Issue[]; updatedAt: number } | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(ISSUES_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { data?: unknown; updatedAt?: unknown };
+    if (!Array.isArray(parsed.data) || typeof parsed.updatedAt !== "number" || !Number.isFinite(parsed.updatedAt)) {
+      return null;
+    }
+    if (Date.now() - parsed.updatedAt > ISSUES_CACHE_MAX_AGE_MS) {
+      return null;
+    }
+    return { data: parsed.data as Issue[], updatedAt: parsed.updatedAt };
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedIssues(data: Issue[]): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(ISSUES_CACHE_KEY, JSON.stringify({
+      data,
+      updatedAt: Date.now(),
+    }));
+  } catch {
+    // Best-effort cache only.
+  }
+}
+
 function formatDateTime(value: string | null | undefined): string {
   if (!value) return "n/a";
   const date = new Date(value);
@@ -74,6 +107,10 @@ function getWorkPrReadiness(issue: Issue): { label: string; detail: string; tone
     detail: `PR #${issue.workPrNumber} on GitHub`,
     tone: "neutral",
   };
+}
+
+function hasExternalIssuePr(issue: Issue): boolean {
+  return Boolean(issue.externalWorkPrUrl && issue.externalWorkPrNumber !== undefined && issue.externalWorkPrNumber !== null);
 }
 
 function formatIssueWorkStage(issue: Issue): string {
@@ -249,6 +286,20 @@ function IssueRow({
           <span className="text-success-foreground/70">ready to merge</span>
         </a>
       )
+      : hasExternalIssuePr(issue)
+        ? (
+          <a
+            href={issue.externalWorkPrUrl ?? "#"}
+            target="_blank"
+            rel="noreferrer noopener"
+            data-testid="issue-external-pr-list"
+            className="mt-2 inline-flex items-center gap-1 rounded-md border border-warning-border px-2 py-0.5 text-[10px] uppercase tracking-wider text-warning-foreground transition-colors hover:border-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+          >
+            <ExternalLink className="h-3 w-3" />
+            PR <span className="font-mono">#{issue.externalWorkPrNumber}</span>
+            <span className="text-warning-foreground/70">external linked</span>
+          </a>
+        )
       : issue.workStatus === "queued" || issue.workStatus === "in_progress"
         ? (
           <div
@@ -363,15 +414,14 @@ function IssueLogRow({ entry }: { entry: LogEntry }) {
 export default function Issues() {
   const { data: runtime } = useQuery<RuntimeState>({
     queryKey: ["/api/runtime"],
-    refetchInterval: 5000,
   });
   const globalDrainMode = runtime?.drainMode === true;
   const { data: activities = EMPTY_ACTIVITY_SNAPSHOT } = useQuery<ActivitySnapshot>({
     queryKey: ["/api/activities"],
-    refetchInterval: 3000,
   });
   const { data: config } = useQuery<Config>({ queryKey: ["/api/config"] });
   const queueStatusById = useMemo(() => buildQueueStatusIndex(activities), [activities]);
+  const cachedIssues = useMemo(() => readCachedIssues(), []);
 
   const clearFailedActivitiesMutation = useMutation({
     mutationFn: async () => {
@@ -390,9 +440,13 @@ export default function Issues() {
     },
   });
 
-  const { data: issues = [], isLoading, refetch, isFetching } = useQuery<Issue[]>({
+  const issuesQuery = useQuery<Issue[]>({
     queryKey: ["/api/issues"],
     enabled: runtime !== undefined && !globalDrainMode,
+    initialData: cachedIssues?.data,
+    initialDataUpdatedAt: cachedIssues?.updatedAt,
+    staleTime: ISSUES_CACHE_MAX_AGE_MS,
+    refetchOnMount: cachedIssues ? false : true,
     refetchInterval: (query) => {
       if (globalDrainMode) {
         return false;
@@ -403,6 +457,12 @@ export default function Issues() {
         : false;
     },
   });
+  const { data: issues = [], isLoading, refetch, isFetching } = issuesQuery;
+  useEffect(() => {
+    if (issuesQuery.status === "success") {
+      writeCachedIssues(issuesQuery.data);
+    }
+  }, [issuesQuery.status, issuesQuery.data]);
 
   const [selectedIssueId, setSelectedIssueId] = useState<string | null>(null);
   const [selectedRepo, setSelectedRepo] = useState<string>("all");
@@ -469,6 +529,7 @@ export default function Issues() {
   const selectedIssue = selectedIssueDetail ?? selectedIssueFromList;
   const selectedIssueKey = selectedIssue ? issueKey(selectedIssue) : null;
   const selectedIssueQueueStatus = selectedIssue ? queueStatusById.get(selectedIssue.id) ?? null : null;
+  const selectedIssueHasExternalPr = selectedIssue ? hasExternalIssuePr(selectedIssue) : false;
   const repoGroups = useMemo(() => {
     const counts = new Map<string, Issue[]>();
     for (const issue of filteredIssues) {
@@ -921,8 +982,14 @@ export default function Issues() {
                     <button
                       type="button"
                       onClick={() => workMutation.mutate(selectedIssue)}
-                      disabled={workMutation.isPending || isActiveWorkStatus(selectedIssue.workStatus) || Boolean(runtime?.drainMode)}
-                      title={runtime?.drainMode ? "Manual issue work is paused by drain mode" : "Work this issue"}
+                      disabled={workMutation.isPending || isActiveWorkStatus(selectedIssue.workStatus) || Boolean(runtime?.drainMode) || selectedIssueHasExternalPr}
+                      title={
+                        runtime?.drainMode
+                          ? "Manual issue work is paused by drain mode"
+                          : selectedIssueHasExternalPr
+                            ? "Manual issue work is blocked because this issue already has a linked external PR"
+                            : "Work this issue"
+                      }
                       data-testid="button-work-issue"
                       className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-primary bg-primary px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
                     >
@@ -1015,6 +1082,25 @@ export default function Issues() {
                     </a>
                   );
                 })()}
+                {hasExternalIssuePr(selectedIssue) && (
+                  <a
+                    href={selectedIssue.externalWorkPrUrl ?? "#"}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                    data-testid="issue-external-pr"
+                    className="mt-3 flex items-center justify-between gap-3 rounded-md border border-warning-border bg-warning-muted px-3 py-2 text-[11px] text-warning-foreground transition-colors hover:border-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+                  >
+                    <span className="min-w-0">
+                      <span className="block text-[10px] uppercase tracking-wider opacity-70">
+                        Linked external PR
+                      </span>
+                      <span className="block truncate text-[12px] leading-5">
+                        {selectedIssue.externalWorkPrRepo ?? selectedIssue.repo} #{selectedIssue.externalWorkPrNumber}
+                      </span>
+                    </span>
+                    <ExternalLink className="h-3.5 w-3.5 shrink-0 opacity-80" />
+                  </a>
+                )}
                 {selectedIssue.workStatus === "failed" && selectedIssue.lastError && (
                   <div
                     data-testid="issue-work-failed"

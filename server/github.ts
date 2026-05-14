@@ -63,6 +63,13 @@ export type GitHubIssueSummary = {
   updatedAt: string;
 };
 
+export type GitHubLinkedPullRequest = {
+  number: number;
+  url: string;
+  repoFullName: string;
+  state: "open" | "closed";
+};
+
 export type GitHubStatusFailure = {
   context: string;
   description: string;
@@ -285,8 +292,20 @@ function parseGhAuthStatusToken(stdout: string): string | undefined {
   return activeToken;
 }
 
-function isUnauthorized(error: unknown): boolean {
-  return (error as { status?: number } | undefined)?.status === 401;
+function shouldFallbackToGhAuth(error: unknown): boolean {
+  const status = getGitHubErrorStatus(error);
+  if (status === 401) {
+    return true;
+  }
+
+  if (status === 403) {
+    const headers = (error as GitHubErrorLike | undefined)?.response?.headers;
+    const rateLimitRemaining = headers?.["x-ratelimit-remaining"];
+    const lowerMessage = error instanceof Error ? error.message.toLowerCase() : "";
+    return rateLimitRemaining !== "0" && !lowerMessage.includes("rate limit");
+  }
+
+  return false;
 }
 
 async function resolveGhAuthToken(
@@ -975,7 +994,7 @@ export async function buildOctokit(
       try {
         return await request(options);
       } catch (error) {
-        if (!isUnauthorized(error)) throw error;
+        if (!shouldFallbackToGhAuth(error)) throw error;
 
         const ghAuthToken = await resolveGhAuthToken(deps);
         if (!ghAuthToken || ghAuthToken === configuredToken) throw error;
@@ -2019,6 +2038,57 @@ export async function listOpenIssuesForRepo(
       createdAt: issue.created_at || new Date().toISOString(),
       updatedAt: issue.updated_at || issue.created_at || new Date().toISOString(),
     }));
+}
+
+export async function listOpenLinkedPullRequestsForIssue(
+  octokit: Octokit,
+  repo: ParsedRepoSlug,
+  issueNumber: number,
+): Promise<GitHubLinkedPullRequest[]> {
+  const timeline = await withGitHubErrorHandling("issue timeline events", repo, () => octokit.paginate(
+    "GET /repos/{owner}/{repo}/issues/{issue_number}/timeline",
+    {
+      owner: repo.owner,
+      repo: repo.repo,
+      issue_number: issueNumber,
+      per_page: 100,
+    },
+  ));
+
+  const linked = new Map<string, GitHubLinkedPullRequest>();
+  for (const event of timeline as Array<Record<string, unknown>>) {
+    if (event.event !== "cross-referenced") continue;
+    const source = event.source;
+    if (!source || typeof source !== "object") continue;
+    const sourceIssue = (source as { issue?: unknown }).issue;
+    if (!sourceIssue || typeof sourceIssue !== "object") continue;
+    const pullRequest = (sourceIssue as { pull_request?: unknown }).pull_request;
+    if (!pullRequest || typeof pullRequest !== "object") continue;
+
+    const number = (sourceIssue as { number?: unknown }).number;
+    const htmlUrl = (sourceIssue as { html_url?: unknown }).html_url;
+    const state = (sourceIssue as { state?: unknown }).state;
+    const repoInfo = (sourceIssue as { repository?: unknown }).repository;
+    const repoFullName = repoInfo && typeof repoInfo === "object"
+      ? (repoInfo as { full_name?: unknown }).full_name
+      : null;
+    if (typeof number !== "number" || !Number.isFinite(number)) continue;
+    if (typeof htmlUrl !== "string" || !htmlUrl.trim()) continue;
+    if (state !== "open" && state !== "closed") continue;
+
+    const normalizedRepo = typeof repoFullName === "string" && repoFullName.trim()
+      ? repoFullName
+      : `${repo.owner}/${repo.repo}`;
+    const dedupeKey = `${normalizedRepo}#${number}`;
+    linked.set(dedupeKey, {
+      number,
+      url: htmlUrl,
+      state,
+      repoFullName: normalizedRepo,
+    });
+  }
+
+  return Array.from(linked.values()).filter((entry) => entry.state === "open");
 }
 
 export async function addReactionToComment(
