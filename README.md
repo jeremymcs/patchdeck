@@ -102,6 +102,8 @@ Release creation is off by default. You can keep automatic releases disabled and
 
 The Releases page also includes social-post generation for release runs when you want a short shareable summary.
 
+![PatchDeck Releases pipeline](docs/assets/PatchDeck-Releases.png)
+
 ## CI and Deployment Healing
 
 Automatic CI healing is off by default. When enabled, PatchDeck classifies failing checks, creates healing sessions, and only attempts bounded repairs for failures it considers repairable in the PR branch. Retry limits and concurrency are configurable.
@@ -154,6 +156,8 @@ PatchDeck stores local state in:
 ```
 
 Set `PATCHDECK_HOME` to use a different directory.
+
+![PatchDeck Settings page](docs/assets/PatchDeck-Settings.png)
 
 Most configuration is editable in Settings:
 
@@ -222,6 +226,8 @@ PatchDeck writes structured server logs to stdout and, by default, to:
 Use `--log-file`, `PATCHDECK_LOG_FILE`, `--no-log-file`, or `PATCHDECK_NO_LOG_FILE=1` to change file logging. Use `--log-level` or `LOG_LEVEL` to change verbosity.
 
 The dashboard also includes a Logs page with filtering, search, and live tailing for recent server log records.
+
+![PatchDeck Logs page](docs/assets/PatchDeck-Logs.png)
 
 GitHub tokens are redacted from logs before they are written.
 
