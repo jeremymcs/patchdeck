@@ -214,6 +214,27 @@ test("runtime updateConfig persists updates and exposes them through getConfig",
   assert.equal(config.postGitHubProgressReplies, true);
 });
 
+test("watcher tick does not enqueue sync jobs while global manual mode is on", async () => {
+  const storage = new MemStorage();
+  const runtime = createAppRuntime({
+    storage,
+    startBackgroundServices: false,
+    startWatcher: false,
+  });
+
+  await runtime.updateConfig({
+    autoPrs: false,
+    autoIssues: false,
+  });
+
+  await runtime.syncRepos();
+
+  const jobs = await storage.listBackgroundJobs({
+    kind: "sync_watched_repos",
+  });
+  assert.equal(jobs.length, 0);
+});
+
 test("runtime release adapter skips merged PRs without a merge commit SHA", () => {
   const summaries = mapMergedPullsToReleaseSummaries([
     {
