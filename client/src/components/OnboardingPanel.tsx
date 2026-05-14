@@ -6,6 +6,9 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { toast } from "@/hooks/use-toast";
 
 const ONBOARDING_DISMISS_KEY = "onboarding-panel-dismissed-v2";
+const ONBOARDING_LAST_GITHUB_USER_KEY = "onboarding-last-github-user-v1";
+const ONBOARDING_LAST_HAS_TRACKED_REPO_KEY = "onboarding-last-has-tracked-repo-v1";
+const ONBOARDING_LAST_HAS_REVIEWER_KEY = "onboarding-last-has-reviewer-v1";
 const REVIEW_TOOL_LABELS = {
   claude: "Claude",
   codex: "Codex",
@@ -36,6 +39,10 @@ type OnboardingStatus = {
   githubUser?: string;
   repos: RepoOnboardingStatus[];
 };
+type GitHubRateLimitState = {
+  limited: boolean;
+  resetAt: string | null;
+};
 
 type CodeReviewPresence = {
   claude: boolean;
@@ -61,6 +68,11 @@ type OnboardingStep = {
   complete: boolean;
 };
 
+function isTransientGitHubWarning(githubError?: string): boolean {
+  if (!githubError) return false;
+  return /rate limit gate active/i.test(githubError);
+}
+
 function hasDetectedCodeReviewWorkflow(codeReviews: CodeReviewPresence) {
   return codeReviews.claude || codeReviews.codex || codeReviews.gemini;
 }
@@ -72,37 +84,45 @@ function getDetectedReviewTools(codeReviews: CodeReviewPresence): ReviewTool[] {
 }
 
 export function getOnboardingPanelState(status: OnboardingStatus) {
+  const transientGithubWarning = isTransientGitHubWarning(status.githubError);
+  const githubStepComplete = status.githubConnected || transientGithubWarning;
   const accessibleRepos = status.repos.filter((repo) => repo.accessible);
-  const inaccessibleRepos = status.repos.filter((repo) => !repo.accessible);
+  const inaccessibleRepos = transientGithubWarning ? [] : status.repos.filter((repo) => !repo.accessible);
   const reposWithReview = accessibleRepos.filter((repo) => hasDetectedCodeReviewWorkflow(repo.codeReviews));
   const reposMissingReview = accessibleRepos.filter((repo) => !hasDetectedCodeReviewWorkflow(repo.codeReviews));
+  const repoStepComplete = transientGithubWarning ? true : accessibleRepos.length > 0;
+  const workflowStepComplete = transientGithubWarning ? true : reposWithReview.length > 0;
 
   const steps: OnboardingStep[] = [
     {
       id: "github",
       title: "Connect GitHub",
-      description: status.githubConnected
+      description: githubStepComplete
         ? `Connected${status.githubUser ? ` as @${status.githubUser}` : ""}.`
         : "Connect GitHub so the app can read repositories, sync feedback, and add reviewer Actions to your repos.",
-      complete: status.githubConnected,
+      complete: githubStepComplete,
     },
     {
       id: "repo",
       title: "Track your first repository or PR",
-      description: accessibleRepos.length > 0
-        ? `Watching ${accessibleRepos.length} accessible repo${accessibleRepos.length === 1 ? "" : "s"}. Choose per repo whether to track only your PRs or your whole team.`
+      description: repoStepComplete
+        ? transientGithubWarning
+          ? "Repository tracking preserved while GitHub checks are temporarily rate limited."
+          : `Watching ${accessibleRepos.length} accessible repo${accessibleRepos.length === 1 ? "" : "s"}. Choose per repo whether to track only your PRs or your whole team.`
         : "Use the Add PR or Watch form below. Adding a PR also adds its repository to the watch list, and watched repos let you choose whether to track only your PRs or the whole team.",
-      complete: accessibleRepos.length > 0,
+      complete: repoStepComplete,
     },
     {
       id: "workflow",
       title: "Add a CI reviewer to one of your repos",
-      description: reposWithReview.length > 0
-        ? `Reviewer Action detected in ${reposWithReview.length} repo${reposWithReview.length === 1 ? "" : "s"}.`
+      description: workflowStepComplete
+        ? transientGithubWarning
+          ? "Reviewer setup preserved while GitHub checks are temporarily rate limited."
+          : `Reviewer Action detected in ${reposWithReview.length} repo${reposWithReview.length === 1 ? "" : "s"}.`
         : accessibleRepos.length > 0
           ? "Drop a Claude, Codex, or Gemini GitHub Action into a tracked repo so AI review comments appear on every new PR — PatchDeck then babysits the feedback."
           : "Track a repo first, then add a reviewer GitHub Action to it.",
-      complete: reposWithReview.length > 0,
+      complete: workflowStepComplete,
     },
   ];
 
@@ -181,6 +201,27 @@ function StepCard({
 }
 
 export function OnboardingPanel() {
+  const [lastGitHubUser] = useState<string | null>(() => {
+    if (typeof window === "undefined") {
+      return null;
+    }
+
+    return window.localStorage.getItem(ONBOARDING_LAST_GITHUB_USER_KEY);
+  });
+  const [lastHasTrackedRepo] = useState<boolean>(() => {
+    if (typeof window === "undefined") {
+      return false;
+    }
+
+    return window.localStorage.getItem(ONBOARDING_LAST_HAS_TRACKED_REPO_KEY) === "1";
+  });
+  const [lastHasReviewer] = useState<boolean>(() => {
+    if (typeof window === "undefined") {
+      return false;
+    }
+
+    return window.localStorage.getItem(ONBOARDING_LAST_HAS_REVIEWER_KEY) === "1";
+  });
   const [dismissedKey, setDismissedKey] = useState<string | null>(() => {
     if (typeof window === "undefined") {
       return null;
@@ -204,6 +245,10 @@ export function OnboardingPanel() {
   const { data: config } = useQuery<Config>({
     queryKey: ["/api/config"],
   });
+  const { data: githubRateLimit } = useQuery<GitHubRateLimitState>({
+    queryKey: ["/api/github-rate-limit"],
+    refetchInterval: globalDrainMode ? false : 30000,
+  });
 
   const installWorkflowMutation = useMutation({
     mutationFn: async ({ repo, tool }: { repo: string; tool: InstallReviewTool }) => {
@@ -226,6 +271,40 @@ export function OnboardingPanel() {
 
   if (isLoading || !status) return null;
 
+  const effectiveGithubError = status.githubError
+    ?? (githubRateLimit?.limited ? "rate limit gate active" : undefined);
+  const transientGithubWarning = isTransientGitHubWarning(effectiveGithubError);
+  const hasCurrentReviewer = status.repos.some((repo) => hasDetectedCodeReviewWorkflow(repo.codeReviews));
+  const shouldUseCachedRepoStatus = transientGithubWarning && status.repos.length === 0 && lastHasTrackedRepo;
+  const cachedRepoStatus: RepoOnboardingStatus[] = shouldUseCachedRepoStatus
+    ? [{
+      repo: "cached/tracked-repo",
+      accessible: true,
+      codeReviews: {
+        claude: lastHasReviewer,
+        codex: lastHasReviewer,
+        gemini: false,
+      },
+    }]
+    : [];
+
+  const displayStatus = {
+    ...status,
+    githubError: effectiveGithubError,
+    githubUser: status.githubUser ?? lastGitHubUser ?? undefined,
+    repos: shouldUseCachedRepoStatus ? cachedRepoStatus : status.repos,
+  };
+  if (typeof window !== "undefined" && status.githubUser) {
+    window.localStorage.setItem(ONBOARDING_LAST_GITHUB_USER_KEY, status.githubUser);
+  }
+  if (typeof window !== "undefined" && status.repos.length > 0) {
+    window.localStorage.setItem(ONBOARDING_LAST_HAS_TRACKED_REPO_KEY, "1");
+    window.localStorage.setItem(
+      ONBOARDING_LAST_HAS_REVIEWER_KEY,
+      hasCurrentReviewer ? "1" : "0",
+    );
+  }
+
   const {
     accessibleRepos,
     completedCount,
@@ -236,7 +315,7 @@ export function OnboardingPanel() {
     reposWithReview,
     steps,
     summary,
-  } = getOnboardingPanelState(status);
+  } = getOnboardingPanelState(displayStatus);
   const preferredTool = config?.codingAgent ?? "claude";
   const installOrder: InstallReviewTool[] = preferredTool === "codex"
     ? ["codex", "claude"]
@@ -287,8 +366,8 @@ export function OnboardingPanel() {
               <StepCard key={step.id} step={step} index={index + 1}>
                 {step.id === "github" && !step.complete && (
                   <div className="space-y-2 pt-1">
-                    {status.githubError && (
-                      <p className="text-[12px] text-destructive">{status.githubError}</p>
+                    {displayStatus.githubError && !isTransientGitHubWarning(displayStatus.githubError) && (
+                      <p className="text-[12px] text-destructive">{displayStatus.githubError}</p>
                     )}
                     <div className="space-y-1.5 text-[12px] text-muted-foreground">
                       <Step number={1}>
@@ -406,7 +485,7 @@ export function OnboardingPanel() {
             ))}
           </div>
 
-          {inaccessibleRepos.length > 0 && (
+          {inaccessibleRepos.length > 0 && !isTransientGitHubWarning(displayStatus.githubError) && (
             <div className="space-y-3 border border-destructive/30 bg-destructive/5 px-3 py-3">
               <div className="text-[11px] font-medium uppercase tracking-wider text-destructive">
                 Repository access issues

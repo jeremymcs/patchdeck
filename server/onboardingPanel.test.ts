@@ -93,3 +93,38 @@ test("getOnboardingPanelState hides the panel when GitHub, repo access, and a re
   assert.deepEqual(state.reposWithReview.map((repo) => repo.repo), ["octo/accessible"]);
   assert.equal(state.dismissalKey, "complete");
 });
+
+test("getOnboardingPanelState treats GitHub rate-limit gate as transient, not a setup blocker", () => {
+  const state = getOnboardingPanelState({
+    githubConnected: false,
+    githubError: "GitHub rate limit gate active until 2026-05-14T23:19:11.000Z",
+    repos: [],
+  });
+
+  assert.equal(state.steps[0]?.id, "github");
+  assert.equal(state.steps[0]?.complete, true);
+  assert.equal(state.completedCount, 3);
+  assert.equal(state.summary, "0 access issues");
+  assert.equal(state.hasIssues, false);
+  assert.deepEqual(state.pendingSteps, []);
+});
+
+test("getOnboardingPanelState keeps repo/workflow steps complete when rate-limit gate blocks repo checks", () => {
+  const state = getOnboardingPanelState({
+    githubConnected: false,
+    githubError: "GitHub rate limit gate active until 2026-05-14T23:19:11.000Z",
+    repos: [
+      {
+        repo: "octo/app",
+        accessible: false,
+        error: "GitHub rate limit gate active until 2026-05-14T23:19:11.000Z",
+        codeReviews: { claude: false, codex: false, gemini: false },
+      },
+    ],
+  });
+
+  assert.equal(state.completedCount, 3);
+  assert.equal(state.summary, "0 access issues");
+  assert.equal(state.hasIssues, false);
+  assert.deepEqual(state.pendingSteps, []);
+});

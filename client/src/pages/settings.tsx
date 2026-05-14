@@ -1258,11 +1258,6 @@ export default function Settings() {
                 ) : (
                   <div className="text-[11px] text-muted-foreground">none configured</div>
                 )}
-                {githubRateLimit?.limited && githubRateLimit.resetAt ? (
-                  <div className="border-l-2 border-warning bg-muted/30 px-3 py-2 text-[11px]">
-                    GitHub rate limit active until {new Date(githubRateLimit.resetAt).toLocaleString()}.
-                  </div>
-                ) : null}
                 {showTokenInput ? (
                   <div className="flex items-center gap-2">
                     <input
@@ -1406,6 +1401,14 @@ export default function Settings() {
               <SettingsGroup id="system" title="System" description="Runtime and process-level controls.">
                 <SettingsSubsection id="system-runtime" title="Runtime">
             <div className="flex flex-col gap-4 rounded-md border border-border p-4">
+              {githubRateLimit?.limited && githubRateLimit.resetAt ? (
+                <div
+                  className="border-l-2 border-warning bg-warning-muted/40 px-3 py-2 text-[11px] text-warning-foreground"
+                  data-testid="runtime-github-rate-limit"
+                >
+                  GitHub rate limit active until {new Date(githubRateLimit.resetAt).toLocaleTimeString("en-US")}
+                </div>
+              ) : null}
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="text-sm">Automation</div>

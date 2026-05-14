@@ -448,6 +448,29 @@ test("checkOnboardingStatus reads workflow files with authenticated API content 
   }
 });
 
+test("checkOnboardingStatus keeps GitHub step connected during temporary rate-limit gate", async () => {
+  const status = await checkOnboardingStatus(
+    config,
+    [],
+    {
+      buildOctokitFn: async () => ({
+        rest: {
+          users: {
+            getAuthenticated: async () => {
+              throw new Error("GitHub rate limit gate active until 2026-05-14T23:19:11.000Z");
+            },
+          },
+        },
+      }) as never,
+      resolveGitHubAuthTokenFn: async () => "token",
+    },
+  );
+
+  assert.equal(status.githubConnected, true);
+  assert.equal(status.githubError, undefined);
+  assert.deepEqual(status.repos, []);
+});
+
 test("fetchCheckSnapshotsForRef normalizes commit statuses and check runs", async () => {
   const octokit = {
     repos: {

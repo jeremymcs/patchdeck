@@ -1048,11 +1048,12 @@ export async function checkOnboardingStatus(
   let githubConnected = false;
   let githubError: string | undefined;
   let githubUser: string | undefined;
+  let resolvedAuth: string | undefined;
 
   try {
     octokit = await buildOctokitFn(config);
-    const auth = await resolveGitHubAuthTokenFn(config);
-    if (!auth) {
+    resolvedAuth = await resolveGitHubAuthTokenFn(config);
+    if (!resolvedAuth) {
       githubError = "No GitHub token found. Run `gh auth login` or set GITHUB_TOKEN, or enter a Personal Access Token in settings.";
     } else {
       const { data } = await octokit.rest.users.getAuthenticated();
@@ -1061,8 +1062,13 @@ export async function checkOnboardingStatus(
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    githubError = msg;
-    return { githubConnected: false, githubError, repos: [] };
+    if (resolvedAuth && /rate limit gate active/i.test(msg)) {
+      githubConnected = true;
+      githubError = undefined;
+    } else {
+      githubError = msg;
+      return { githubConnected: false, githubError, repos: [] };
+    }
   }
 
   const repos: RepoOnboardingStatus[] = await Promise.all(
