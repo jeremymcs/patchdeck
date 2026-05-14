@@ -497,7 +497,8 @@ test("releases route keeps the QA-tested list, expand, copy, retry, and GitHub l
     ["empty release state", "No release activity yet."],
     ["watched repositories sidebar", "Watched repositories"],
   ]);
-  assertHasExpression(releases.sourceFile, "github releases drain guard", /disabled=\{isFetchingGitHub \|\| globalDrainMode \|\| runtimeState === undefined\}/);
+  assertHasExpression(releases.sourceFile, "github releases polling", /refetchInterval:\s*60_000/);
+  assertHasExpression(releases.sourceFile, "github releases sync guard", /disabled=\{isFetchingGitHub \|\| runtimeState === undefined\}/);
 });
 
 test("onboarding panel keeps the QA-tested GitHub setup poll and install actions wired", async () => {
