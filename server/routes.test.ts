@@ -452,7 +452,7 @@ test("POST /api/repos/sync enqueues a durable sync_watched_repos job", async () 
   }
 });
 
-test("POST /api/repos/sync enqueues sync_watched_repos while drain mode is enabled", async () => {
+test("POST /api/repos/sync is a no-op while drain mode is enabled", async () => {
   const harness = await createHarness();
   await harness.storage.updateRuntimeState({
     drainMode: true,
@@ -473,9 +473,7 @@ test("POST /api/repos/sync enqueues sync_watched_repos while drain mode is enabl
       kind: "sync_watched_repos",
       status: "queued",
     });
-    assert.equal(jobs.length, 1);
-    assert.equal(jobs[0].targetId, "runtime:1");
-    assert.equal(jobs[0].dedupeKey, "sync_watched_repos");
+    assert.equal(jobs.length, 0);
   } finally {
     await harness.close();
   }

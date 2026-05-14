@@ -365,6 +365,7 @@ export default function Issues() {
     queryKey: ["/api/runtime"],
     refetchInterval: 5000,
   });
+  const globalDrainMode = runtime?.drainMode === true;
   const { data: activities = EMPTY_ACTIVITY_SNAPSHOT } = useQuery<ActivitySnapshot>({
     queryKey: ["/api/activities"],
     refetchInterval: 3000,
@@ -391,7 +392,11 @@ export default function Issues() {
 
   const { data: issues = [], isLoading, refetch, isFetching } = useQuery<Issue[]>({
     queryKey: ["/api/issues"],
+    enabled: runtime !== undefined && !globalDrainMode,
     refetchInterval: (query) => {
+      if (globalDrainMode) {
+        return false;
+      }
       const data = query.state.data;
       return Array.isArray(data) && data.some((issue) => isActiveWorkStatus(issue.workStatus))
         ? 5000
@@ -458,8 +463,8 @@ export default function Issues() {
 
       return fetchJson<Issue>(issueDetailUrl(selectedIssueFromList));
     },
-    enabled: Boolean(selectedIssueFromList),
-    refetchInterval: selectedIssueFromList && isActiveWorkStatus(selectedIssueFromList.workStatus) ? 5000 : false,
+    enabled: Boolean(selectedIssueFromList) && !globalDrainMode,
+    refetchInterval: selectedIssueFromList && isActiveWorkStatus(selectedIssueFromList.workStatus) && !globalDrainMode ? 5000 : false,
   });
   const selectedIssue = selectedIssueDetail ?? selectedIssueFromList;
   const selectedIssueKey = selectedIssue ? issueKey(selectedIssue) : null;
@@ -634,12 +639,12 @@ export default function Issues() {
                   selectedIssueFromList ? refetchSelectedIssueDetail() : Promise.resolve(),
                 ]);
               }}
-              disabled={isFetching}
+              disabled={isFetching || globalDrainMode}
               data-testid="button-refresh-issues"
               className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-0.5 text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
             >
-              {isFetching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-              refresh
+              {globalDrainMode ? <span className="h-3.5 w-3.5" /> : isFetching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+              {globalDrainMode ? "paused" : "refresh"}
             </button>
             <ActivityMenu
               activities={activities}

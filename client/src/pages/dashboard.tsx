@@ -1134,8 +1134,15 @@ export default function Dashboard() {
     refetchInterval: 10000,
   });
 
+  const { data: runtimeState } = useQuery<RuntimeState>({
+    queryKey: ["/api/runtime"],
+    refetchInterval: 3000,
+  });
+  const globalDrainMode = runtimeState?.drainMode === true;
+
   const { data: issues = [], isLoading: isLoadingIssues } = useQuery<Issue[]>({
     queryKey: ["/api/issues"],
+    enabled: runtimeState !== undefined && !globalDrainMode,
     refetchInterval: 30000,
   });
 
@@ -1155,11 +1162,6 @@ export default function Dashboard() {
     refetchInterval: 3000,
   });
   const queueStatusById = useMemo(() => buildQueueStatusIndex(activities), [activities]);
-
-  const { data: runtimeState } = useQuery<RuntimeState>({
-    queryKey: ["/api/runtime"],
-    refetchInterval: 3000,
-  });
 
   const { data: repos = [] } = useQuery<WatchedRepo[]>({
     queryKey: ["/api/repos/settings"],
@@ -1201,7 +1203,6 @@ export default function Dashboard() {
   const selectedPRErrorMessage = selectedPR?.status === "error"
     ? selectedFailedActivity?.lastError ?? getPRFeedbackFailureReason(selectedPR) ?? "Automation stopped on this PR. Check the activity log for the full failure context."
     : null;
-  const globalDrainMode = runtimeState?.drainMode === true;
   const activeErrorCount = activities.failed.length + activities.warnings.length;
 
   const applyMutation = useMutation({
