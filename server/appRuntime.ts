@@ -58,6 +58,7 @@ import {
   GitHubIntegrationError,
   installCodeReviewWorkflow,
   listOpenIssuesForRepo,
+  listOpenLinkedPullRequestsForIssue,
   listReleasesForRepo,
   listUnreleasedMergedPulls,
   type MergedPRSummary,
@@ -261,7 +262,7 @@ export type PlanAutomaticIssueQueueInput = {
   repoSettings: Pick<WatchedRepo, "repo" | "issueAutoEvaluate" | "issueAutoWork">[];
   issues: Pick<
     Issue,
-    "id" | "repo" | "number" | "author" | "workStatus" | "workPrUrl" | "autoWorkEligible" | "evaluationStatus" | "updatedAt"
+    "id" | "repo" | "number" | "author" | "workStatus" | "workPrUrl" | "externalWorkPrUrl" | "autoWorkEligible" | "evaluationStatus" | "updatedAt"
   >[];
   activeEvaluationTargets: Set<string>;
   activeWorkCount: number;
@@ -302,7 +303,7 @@ export function planAutomaticIssueQueueActions(
       continue;
     }
     const candidate = repoIssues
-      .filter((issue) => issue.workStatus === "idle" && !issue.workPrUrl && issue.autoWorkEligible)
+      .filter((issue) => issue.workStatus === "idle" && !issue.workPrUrl && !issue.externalWorkPrUrl && issue.autoWorkEligible)
       .sort((a, b) => compareIssueQueuePriority(a, b, priorityIssueAuthors))[0];
     if (!candidate) continue;
     result.work.push({ repo: candidate.repo, number: candidate.number, id: candidate.id });
@@ -319,6 +320,7 @@ export function planAutomaticIssueQueueActions(
           issue.repo === repo
           && issue.workStatus === "idle"
           && !issue.workPrUrl
+          && !issue.externalWorkPrUrl
           && !issue.evaluationStatus
           && !input.activeEvaluationTargets.has(issue.id)
           && !claimed.has(issue.id),
@@ -887,6 +889,15 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
 
     const octokit = await buildOctokit(config);
     const issue = await fetchIssueSummary(octokit, { ...parsedRepo, number });
+    const linkedOpenPrs = await listOpenLinkedPullRequestsForIssue(octokit, parsedRepo, issue.number);
+    if (linkedOpenPrs.length > 0) {
+      const linked = linkedOpenPrs[0];
+      const linkedRef = linked ? `${linked.repoFullName}#${linked.number}` : "another branch";
+      throw new AppRuntimeError(
+        409,
+        `Issue ${issue.repoFullName}#${issue.number} already has an open linked PR (${linkedRef}): ${linked?.url ?? "unknown"}`,
+      );
+    }
     const baseBranch = await getDefaultBranchForRepo(octokit, parsedRepo);
     const targetId = formatIssueTargetId(issue.repoFullName, issue.number);
     const priority = isPriorityIssueAuthor(issue.author, config.priorityIssueAuthors)
@@ -936,12 +947,19 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       workPrNumber: null,
       workPrUrl: null,
       workPrMergeable: null,
+      externalWorkPrNumber: null,
+      externalWorkPrUrl: null,
+      externalWorkPrRepo: null,
     };
   }
 
   async function applyIssueWorkState(
     issue: Awaited<ReturnType<typeof fetchIssueSummary>>,
-    options: { includePrMergeability?: boolean; issueJobs?: BackgroundJob[] } = {},
+    options: {
+      includePrMergeability?: boolean;
+      issueJobs?: BackgroundJob[];
+      octokit?: Awaited<ReturnType<typeof buildOctokit>>;
+    } = {},
   ): Promise<Issue> {
     const targetId = formatIssueTargetId(issue.repoFullName, issue.number);
     const issueJobs = options.issueJobs ?? await storage.listBackgroundJobs({ kind: "work_issue", targetId });
@@ -957,6 +975,15 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
     const autoWork = getIssueAutoWorkEligibility({
       labels: issue.labels,
     }, evaluation);
+    let externalPr: { number: number; url: string; repoFullName: string } | null = null;
+    const parsedIssueRepo = parseRepoSlug(issue.repoFullName);
+    const linkedOpenPrs = options.octokit && parsedIssueRepo
+      ? await listOpenLinkedPullRequestsForIssue(options.octokit, parsedIssueRepo, issue.number)
+      : [];
+    if (linkedOpenPrs.length > 0) {
+      const localRepo = issue.repoFullName.toLowerCase();
+      externalPr = linkedOpenPrs.find((entry) => entry.repoFullName.toLowerCase() !== localRepo) ?? linkedOpenPrs[0] ?? null;
+    }
 
     if (options.includePrMergeability && readyPr) {
       const parsedPr = parsePRUrl(readyPr.workPrUrl);
@@ -989,6 +1016,9 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       workPrNumber: readyPr?.workPrNumber ?? null,
       workPrUrl: readyPr?.workPrUrl ?? null,
       workPrMergeable,
+      externalWorkPrNumber: externalPr?.number ?? null,
+      externalWorkPrUrl: externalPr?.url ?? null,
+      externalWorkPrRepo: externalPr?.repoFullName ?? null,
       autoWorkEligible: autoWork.autoWorkEligible,
       autoWorkBlockedReason: autoWork.autoWorkBlockedReason,
       evaluationStatus: evaluation?.status ?? null,
@@ -1028,7 +1058,7 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
 
     const issuesWithWorkLinks = await Promise.all(perRepoIssues.flat().map((issue) => {
       const targetId = formatIssueTargetId(issue.repoFullName, issue.number);
-      return applyIssueWorkState(issue, { issueJobs: workJobsByTarget.get(targetId) ?? [] });
+      return applyIssueWorkState(issue, { issueJobs: workJobsByTarget.get(targetId) ?? [], octokit });
     }));
 
     return issuesWithWorkLinks
@@ -1049,7 +1079,7 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
 
     const octokit = await buildOctokit(config);
     const issue = await fetchIssueSummary(octokit, { ...parsedRepo, number });
-    return applyIssueWorkState(issue, { includePrMergeability: true });
+    return applyIssueWorkState(issue, { includePrMergeability: true, octokit });
   }
 
   async function updateIssueLabelsInternal(
@@ -1093,7 +1123,7 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
     });
 
     notifyChange();
-    return applyIssueWorkState(issue, { includePrMergeability: true });
+    return applyIssueWorkState(issue, { includePrMergeability: true, octokit });
   }
 
   async function clearIssueWorkFailuresInternal(

@@ -8,6 +8,10 @@ import { Switch } from "@/components/ui/switch";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
 type AppHeaderSection = "prs" | "issues" | "releases" | "logs" | "settings";
+type GitHubRateLimitState = {
+  limited: boolean;
+  resetAt: string | null;
+};
 
 const PRIMARY_NAV_ITEMS: Array<{ section: AppHeaderSection; label: string; href: string }> = [
   { section: "prs", label: "PRs", href: "/" },
@@ -220,6 +224,27 @@ function AutoModeButton() {
   );
 }
 
+function GitHubRateLimitNotice() {
+  const { data: githubRateLimit } = useQuery<GitHubRateLimitState>({
+    queryKey: ["/api/github-rate-limit"],
+    refetchInterval: 30000,
+  });
+
+  if (!githubRateLimit?.limited || !githubRateLimit.resetAt) {
+    return null;
+  }
+
+  return (
+    <Link
+      href="/settings"
+      title="Open settings for GitHub token configuration"
+      className="hidden max-w-full items-center border border-warning-border bg-warning-muted px-2.5 py-1 text-[10px] uppercase tracking-wider text-warning-foreground transition-colors hover:border-warning hover:bg-warning-muted/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background lg:inline-flex"
+    >
+      GitHub rate limit active until {new Date(githubRateLimit.resetAt).toLocaleTimeString("en-US")}
+    </Link>
+  );
+}
+
 export function AppHeader({
   active,
   status,
@@ -230,8 +255,8 @@ export function AppHeader({
   actions?: ReactNode;
 }) {
   return (
-    <header className="flex shrink-0 flex-col gap-2 border-b border-border bg-background/95 px-3 py-2.5 lg:flex-row lg:items-center lg:justify-between lg:px-4">
-      <div className="flex min-w-0 flex-wrap items-center gap-2.5">
+    <header className="flex shrink-0 flex-col gap-2 border-b border-border bg-background/95 px-3 py-2.5 lg:grid lg:grid-cols-[1fr_auto_1fr] lg:items-center lg:px-4">
+      <div className="flex min-w-0 flex-wrap items-center gap-2.5 lg:justify-self-start">
         <Link
           href="/"
           className="inline-flex items-center gap-2 rounded-md px-1 text-foreground transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
@@ -256,7 +281,10 @@ export function AppHeader({
           })}
         </nav>
       </div>
-      <div className="flex min-w-0 flex-wrap items-center gap-2 lg:justify-end">
+      <div className="flex min-w-0 items-center justify-center">
+        <GitHubRateLimitNotice />
+      </div>
+      <div className="flex min-w-0 flex-wrap items-center gap-2 lg:justify-self-end lg:justify-end">
         {status ? (
           <div className="flex min-w-0 flex-wrap items-center gap-2 border-l border-border/70 pl-2 text-[11px] text-muted-foreground lg:border-l-0 lg:pl-0">
             {status}
