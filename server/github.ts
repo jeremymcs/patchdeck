@@ -1064,7 +1064,6 @@ export async function checkOnboardingStatus(
     const msg = err instanceof Error ? err.message : String(err);
     if (resolvedAuth && /rate limit gate active/i.test(msg)) {
       githubConnected = true;
-      githubError = undefined;
     } else {
       githubError = msg;
       return { githubConnected: false, githubError, repos: [] };
