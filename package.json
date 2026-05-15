@@ -1,6 +1,6 @@
 {
   "name": "@jeremymcs/patchdeck",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "description": "Autonomous GitHub PR and issue workbench that watches repos, triages review feedback, and dispatches agents to fix code locally",
   "keywords": [
     "github",
