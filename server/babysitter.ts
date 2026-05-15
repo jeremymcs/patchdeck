@@ -30,6 +30,7 @@ import {
   GitHubIntegrationError,
   listFailingStatuses,
   listOpenPullsForRepo,
+  listOpenPullsForRepoConditional,
   parseRepoSlug,
   postFollowUpForFeedbackItem,
   postPRComment,
@@ -102,6 +103,7 @@ type GitHubService = {
   getAuthenticatedLogin?: (octokit: Awaited<ReturnType<typeof buildOctokit>>) => Promise<string | null>;
   listFailingStatuses: typeof listFailingStatuses;
   listOpenPullsForRepo: typeof listOpenPullsForRepo;
+  listOpenPullsForRepoConditional: typeof listOpenPullsForRepoConditional;
   postFollowUpForFeedbackItem: typeof postFollowUpForFeedbackItem;
   postPRComment: typeof postPRComment;
   postStatusReplyForFeedbackItem: typeof postStatusReplyForFeedbackItem;
@@ -182,6 +184,7 @@ const defaultGitHubService: GitHubService = {
   },
   listFailingStatuses,
   listOpenPullsForRepo,
+  listOpenPullsForRepoConditional,
   postFollowUpForFeedbackItem,
   postPRComment,
   postStatusReplyForFeedbackItem,
@@ -1330,6 +1333,10 @@ export class PRBabysitter {
   private readonly agentHealthCache = new Map<CodingAgent, { checkedAtMs: number; result: AgentHealthResult }>();
   private readonly feedbackSyncCooldownUntilMs = new Map<string, number>();
   private repoSyncCursor = 0;
+  // Per-repo open-PR list snapshot + its etag, kept together so a conditional
+  // 304 always has a list to reuse. In-memory only — a restart simply
+  // re-fetches once.
+  private readonly prListCache = new Map<string, { etag: string | null; pulls: GitHubPullSummary[] }>();
 
   constructor(
     storage: IStorage,
@@ -1947,7 +1954,26 @@ export class PRBabysitter {
 
       let openPulls;
       try {
-        openPulls = await this.github.listOpenPullsForRepo(octokit, repo);
+        // Conditional GET: a 304 means no PR's `updated_at` changed since the
+        // last sweep, so the cached list is reused and the fetch costs no
+        // primary rate-limit budget. The etag and list are cached together in
+        // memory so they cannot drift out of sync across a restart.
+        const cachedPrList = this.prListCache.get(repoSlug);
+        const conditional = await this.github.listOpenPullsForRepoConditional(
+          octokit,
+          repo,
+          cachedPrList?.etag ?? null,
+        );
+        if (conditional.notModified && cachedPrList) {
+          openPulls = cachedPrList.pulls;
+        } else if (conditional.notModified) {
+          // Etag hit without a cached list (should not happen, since both are
+          // stored together) — fall back to a full fetch.
+          openPulls = await this.github.listOpenPullsForRepo(octokit, repo);
+        } else {
+          openPulls = conditional.pulls;
+          this.prListCache.set(repoSlug, { etag: conditional.etag, pulls: conditional.pulls });
+        }
         await this.storage.upsertRepoSyncState(repoSlug, "prs", {
           lastSyncedAt: this.now().toISOString(),
           nextEligibleAt: null,

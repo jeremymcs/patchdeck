@@ -2105,22 +2105,11 @@ export async function fetchFeedbackItemsForPR(
   return combined;
 }
 
-export async function listOpenPullsForRepo(
-  octokit: Octokit,
-  repo: ParsedRepoSlug,
-): Promise<GitHubPullSummary[]> {
-  const pulls = await withGitHubErrorHandling("open pull requests", repo, () => octokit.paginate(octokit.pulls.list, {
-    owner: repo.owner,
-    repo: repo.repo,
-    state: "open",
-    sort: "updated",
-    direction: "desc",
-    per_page: 100,
-  }));
+type GitHubPullListItem = Awaited<ReturnType<Octokit["pulls"]["list"]>>["data"][number];
 
-  return pulls.map((pull) => {
-    const body = typeof pull.body === "string" ? pull.body : null;
-    return {
+function mapPullToSummary(pull: GitHubPullListItem, repo: ParsedRepoSlug): GitHubPullSummary {
+  const body = typeof pull.body === "string" ? pull.body : null;
+  return {
     number: pull.number,
     title: pull.title || `PR #${pull.number}`,
     body,
@@ -2137,6 +2126,78 @@ export async function listOpenPullsForRepo(
     baseRef: pull.base?.ref || pull.base?.repo?.default_branch || "",
     baseSha: pull.base?.sha || "",
     mergeable: null,
+  };
+}
+
+export async function listOpenPullsForRepo(
+  octokit: Octokit,
+  repo: ParsedRepoSlug,
+): Promise<GitHubPullSummary[]> {
+  const pulls = await withGitHubErrorHandling("open pull requests", repo, () => octokit.paginate(octokit.pulls.list, {
+    owner: repo.owner,
+    repo: repo.repo,
+    state: "open",
+    sort: "updated",
+    direction: "desc",
+    per_page: 100,
+  }));
+
+  return pulls.map((pull) => mapPullToSummary(pull, repo));
+}
+
+export type ConditionalPullList =
+  | { notModified: true }
+  | { notModified: false; etag: string | null; pulls: GitHubPullSummary[] };
+
+/**
+ * Conditional GET of a repo's open pull requests. Page 1 carries an
+ * `If-None-Match`; a 304 means no PR's `updated_at` changed since `cachedEtag`
+ * and costs no primary rate-limit budget. Note a 304 does *not* imply CI
+ * check-runs are unchanged — those do not bump `updated_at` — so callers must
+ * still poll CI separately.
+ */
+export async function listOpenPullsForRepoConditional(
+  octokit: Octokit,
+  repo: ParsedRepoSlug,
+  cachedEtag: string | null,
+): Promise<ConditionalPullList> {
+  return withGitHubErrorHandling("open pull requests", repo, async () => {
+    const perPage = 100;
+    const collected: GitHubPullListItem[] = [];
+    let firstPageEtag: string | null = null;
+
+    for (let page = 1; ; page += 1) {
+      let response;
+      try {
+        response = await octokit.pulls.list({
+          owner: repo.owner,
+          repo: repo.repo,
+          state: "open",
+          sort: "updated",
+          direction: "desc",
+          per_page: perPage,
+          page,
+          ...(page === 1 && cachedEtag ? { headers: { "if-none-match": cachedEtag } } : {}),
+        });
+      } catch (error) {
+        if (page === 1 && (error as { status?: number } | undefined)?.status === 304) {
+          return { notModified: true };
+        }
+        throw error;
+      }
+
+      if (page === 1) {
+        const etag = response.headers?.etag;
+        firstPageEtag = typeof etag === "string" ? etag : null;
+      }
+      collected.push(...response.data);
+      if (response.data.length < perPage) break;
+    }
+
+    return {
+      notModified: false,
+      etag: firstPageEtag,
+      pulls: collected.map((pull) => mapPullToSummary(pull, repo)),
     };
   });
 }

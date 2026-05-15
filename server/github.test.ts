@@ -20,6 +20,7 @@ import {
   listOpenLinkedPullRequestsForIssue,
   listOpenIssuesForRepo,
   listOpenPullsForRepo,
+  listOpenPullsForRepoConditional,
   probeRepoIssuesChanged,
   listMergedPullsSince,
   listReleasesForRepo,
@@ -900,6 +901,68 @@ test("classifyGitHubConcurrency buckets search, writes, and default reads", () =
   assert.equal(classifyGitHubConcurrency({ method: "PUT", url: "/repos/o/r/contents/file" }), "write");
   assert.equal(classifyGitHubConcurrency({ method: "GET", url: "/repos/o/r/pulls" }), "default");
   assert.equal(classifyGitHubConcurrency({}), "default");
+});
+
+test("listOpenPullsForRepoConditional returns pulls and the page-1 etag on a 200", async () => {
+  let sentIfNoneMatch: string | undefined;
+  const octokit = {
+    pulls: {
+      list: async (params: { page: number; headers?: Record<string, string> }) => {
+        if (params.page === 1) {
+          sentIfNoneMatch = params.headers?.["if-none-match"];
+        }
+        return {
+          data: [
+            {
+              number: 5,
+              title: "PR 5",
+              body: "body",
+              head: { ref: "feature", sha: "head5" },
+              base: { ref: "main", sha: "base5" },
+              user: { login: "alice" },
+              html_url: "https://github.com/owner/repo/pull/5",
+            },
+          ],
+          headers: { etag: 'W/"pulls-v1"' },
+        };
+      },
+    },
+  };
+
+  const result = await listOpenPullsForRepoConditional(
+    octokit as never,
+    { owner: "owner", repo: "repo" },
+    'W/"cached"',
+  );
+
+  assert.equal(result.notModified, false);
+  if (!result.notModified) {
+    assert.equal(result.etag, 'W/"pulls-v1"');
+    assert.equal(result.pulls.length, 1);
+    assert.equal(result.pulls[0]?.number, 5);
+    assert.equal(result.pulls[0]?.headSha, "head5");
+  }
+  assert.equal(sentIfNoneMatch, 'W/"cached"');
+});
+
+test("listOpenPullsForRepoConditional reports notModified on a 304", async () => {
+  const octokit = {
+    pulls: {
+      list: async () => {
+        const error = new Error("Not modified") as Error & { status: number };
+        error.status = 304;
+        throw error;
+      },
+    },
+  };
+
+  const result = await listOpenPullsForRepoConditional(
+    octokit as never,
+    { owner: "owner", repo: "repo" },
+    'W/"cached"',
+  );
+
+  assert.equal(result.notModified, true);
 });
 
 test("probeRepoIssuesChanged returns the response etag on a 200", async () => {

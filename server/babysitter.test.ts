@@ -127,7 +127,7 @@ function makeGitRunCommand(params?: {
 }
 
 function makeWatcherGitHubService(overrides?: Record<string, unknown>) {
-  return {
+  const service: Record<string, unknown> = {
     buildOctokit: async () => ({}) as never,
     fetchFeedbackItemsForPR: async () => [],
     fetchPullSummary: async () => {
@@ -159,6 +159,16 @@ function makeWatcherGitHubService(overrides?: Record<string, unknown>) {
     postPRComment: async () => undefined,
     ...overrides,
   };
+  // Default the conditional PR list to delegate to listOpenPullsForRepo so a
+  // test that overrides only listOpenPullsForRepo still drives the sweep.
+  if (!service.listOpenPullsForRepoConditional) {
+    service.listOpenPullsForRepoConditional = async (octokit: unknown, repo: unknown) => ({
+      notModified: false as const,
+      etag: null,
+      pulls: await (service.listOpenPullsForRepo as (o: unknown, r: unknown) => Promise<unknown>)(octokit, repo),
+    });
+  }
+  return service;
 }
 
 function makeCheckSnapshot(overrides: Partial<CheckSnapshot> = {}): CheckSnapshot {
@@ -354,6 +364,77 @@ test("syncFeedbackForPR logs completion even when no new feedback items arrive",
 
   assert.equal(updated.status, "watching");
   assert.equal(logs.at(-1)?.message, "GitHub sync complete: 1 feedback item (0 new)");
+});
+
+test("syncAndBabysitTrackedRepos reuses the cached PR list on a conditional 304", async () => {
+  const storage = new MemStorage();
+  await storage.addPR({
+    number: 1,
+    title: "Tracked PR",
+    repo: "octo/example",
+    branch: "feature/x",
+    author: "octocat",
+    url: "https://github.com/octo/example/pull/1",
+    status: "watching",
+    feedbackItems: [],
+    accepted: 0,
+    rejected: 0,
+    flagged: 0,
+    testsPassed: null,
+    lintPassed: null,
+    lastChecked: null,
+    watchEnabled: false,
+  });
+
+  let conditionalCalls = 0;
+  let fullFetchCalls = 0;
+  const samplePull = {
+    number: 1,
+    title: "Tracked PR",
+    body: null,
+    bodyHtml: null,
+    branch: "feature/x",
+    author: "octocat",
+    url: "https://github.com/octo/example/pull/1",
+    repoFullName: "octo/example",
+    repoCloneUrl: "https://github.com/octo/example.git",
+    headSha: "head1",
+    headRef: "feature/x",
+    headRepoFullName: "octo/example",
+    headRepoCloneUrl: "https://github.com/octo/example.git",
+    baseRef: "main",
+    baseSha: "base1",
+    mergeable: null,
+  };
+
+  const babysitter = new PRBabysitter(
+    storage,
+    makeWatcherGitHubService({
+      listOpenPullsForRepo: async () => {
+        fullFetchCalls += 1;
+        return [];
+      },
+      listOpenPullsForRepoConditional: async () => {
+        conditionalCalls += 1;
+        return conditionalCalls === 1
+          ? { notModified: false as const, etag: 'W/"pulls-v1"', pulls: [samplePull] }
+          : { notModified: true as const };
+      },
+    }),
+    {
+      resolveAgent: async () => "codex",
+      ciPollIntervalMs: 0,
+      evaluateFixNecessityWithAgent: async () => ({ needsFix: false, reason: "unused" }),
+      applyFixesWithAgent: async () => ({ code: 0, stdout: "", stderr: "" }),
+      runCommand: async () => ({ code: 0, stdout: "", stderr: "" }),
+    },
+  );
+
+  await babysitter.syncAndBabysitTrackedRepos(); // 200 — populates the cache
+  await babysitter.syncAndBabysitTrackedRepos(); // 304 — must reuse the cache
+
+  assert.equal(conditionalCalls, 2);
+  assert.equal(fullFetchCalls, 0, "a 304 with a warm cache must not trigger a full PR-list fetch");
 });
 
 test("syncAndBabysitTrackedRepos persists a backoff when listing open PRs fails", async () => {
