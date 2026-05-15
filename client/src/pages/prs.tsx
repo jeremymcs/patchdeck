@@ -753,15 +753,15 @@ function LogPanel({ prId }: { prId: string | null }) {
 
   return (
     <div className="flex h-full flex-col">
-      <div ref={scrollerRef} className="flex-1 overflow-y-auto p-4 font-mono text-[11px] leading-relaxed">
+      <div ref={scrollerRef} className="flex-1 overflow-y-auto" data-testid="pr-detail-logs">
         {!prId ? (
-          <span className="text-muted-foreground">Select a PR to view activity.</span>
+          <div className="p-4 text-[12px] text-muted-foreground">Select a PR to see logs.</div>
         ) : logs.length === 0 ? (
-          <span className="text-muted-foreground">No log entries.</span>
+          <div className="p-4 text-[12px] text-muted-foreground">No workflow logs yet.</div>
         ) : (
           <>
             {hiddenLogCount > 0 && (
-              <div className="border-b border-border/60 pb-2 text-[10px] uppercase tracking-wider text-muted-foreground">
+              <div className="border-b border-border/60 px-3 py-2 text-[10px] uppercase tracking-wider text-muted-foreground">
                 Showing latest {MAX_VISIBLE_LOGS} of {logs.length} entries.
               </div>
             )}
@@ -771,9 +771,8 @@ function LogPanel({ prId }: { prId: string | null }) {
                 : null;
 
               return (
-                <div key={log.id} className="border-b border-border/60 py-2 last:border-b-0" data-testid={`log-${log.id}`}>
+                <div key={log.id} className="border-b border-border/60 px-3 py-2 last:border-b-0" data-testid={`log-${log.id}`}>
                   <div className="flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground">
-                    <span>{formatClock(log.timestamp)}</span>
                     <span className={
                       log.level === "error" ? "text-destructive" :
                       log.level === "warn" ? "text-warning-foreground" :
@@ -784,8 +783,9 @@ function LogPanel({ prId }: { prId: string | null }) {
                     </span>
                     {log.phase && <span className="border border-border px-1 py-0">{log.phase}</span>}
                     {log.runId && <span className="normal-case text-foreground/45">run {log.runId.slice(0, 8)}</span>}
+                    <span>{formatClock(log.timestamp)}</span>
                   </div>
-                  <div className={`mt-1 break-words ${log.level === "error" ? "text-destructive" : "text-foreground/75"}`}>
+                  <div className={`mt-1 break-words text-[12px] ${log.level === "error" ? "text-destructive" : "text-foreground/75"}`}>
                     {log.message}
                   </div>
                   {metadataText && (
@@ -940,8 +940,13 @@ function PRDescriptionPanel({ pr }: { pr: PR }) {
 function RightPanel({ prId }: { prId: string | null }) {
   return (
     <div className="flex min-h-[24rem] w-full shrink-0 flex-col border-t border-border lg:min-h-0 lg:w-80 lg:border-l lg:border-t-0">
-      <div className="border-b border-border px-3 py-2 text-[11px] uppercase tracking-wider text-muted-foreground">
-        <span data-testid="tab-activity">Activity</span>
+      <div className="flex shrink-0 border-b border-border">
+        <div
+          className="flex-1 bg-muted px-3 py-2 text-[11px] uppercase tracking-wider text-foreground shadow-[inset_0_-2px_0_0_hsl(var(--primary))]"
+          data-testid="tab-activity"
+        >
+          Activity
+        </div>
       </div>
       <div className="flex-1 overflow-hidden">
         <LogPanel prId={prId} />
@@ -1381,8 +1386,8 @@ export default function Dashboard() {
       />
       <DashboardDrainBanner runtimeState={runtimeState} />
 
-      <div className="flex flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
-        <div className="flex max-h-[42vh] w-full shrink-0 flex-col overflow-y-auto border-b border-border lg:max-h-none lg:min-h-0 lg:w-80 lg:border-b-0 lg:border-r">
+      <div className="flex flex-1 flex-col overflow-hidden lg:flex-row">
+        <div className="flex max-h-[42vh] w-full shrink-0 flex-col overflow-hidden border-b border-border lg:max-h-none lg:w-[42rem] lg:border-b-0 lg:border-r">
           <div className="sticky top-0 z-10 flex shrink-0 border-b border-border bg-background">
             <button
               type="button"
@@ -1432,7 +1437,7 @@ export default function Dashboard() {
               className="h-7 w-full rounded-md border border-border bg-background px-2 font-mono text-[12px] text-foreground placeholder:font-sans placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             />
           </div>
-          <div className="flex-1">
+          <div className="flex-1 overflow-y-auto">
             {isLoadingCurrentView ? (
               <div data-testid="pr-list-loading" aria-label="Loading pull requests">
                 {Array.from({ length: 6 }).map((_, idx) => (
@@ -1601,7 +1606,7 @@ export default function Dashboard() {
               <HealingPanel pr={selectedPR} config={config} healingSessions={healingSessions} />
               <PRDescriptionPanel pr={selectedPR} />
 
-              <div className="flex-1 overflow-y-auto">
+          <div className="flex-1 overflow-y-auto">
                 {selectedPR.feedbackItems.length === 0 ? (
                   <div className="p-4 text-[12px] text-muted-foreground">
                     {selectedPRWatchEnabled
