@@ -112,6 +112,11 @@ export interface IStorage {
   getSyncedIssue(repo: string, number: number): Promise<StoredIssueRecord | undefined>;
   markSyncedIssueWorked(repo: string, number: number): Promise<void>;
 
+  // GitHub conditional-request etags (If-None-Match), keyed by a stable request URL.
+  getGithubEtag(url: string): Promise<string | undefined>;
+  setGithubEtag(url: string, etag: string): Promise<void>;
+  clearGithubEtag(url: string): Promise<void>;
+
   // CI healing
   getHealingSession(id: string): Promise<HealingSession | undefined>;
   getHealingSessionByPrAndHead(prId: string, initialHeadSha: string): Promise<HealingSession | undefined>;

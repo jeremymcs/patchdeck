@@ -9,6 +9,7 @@ import { DatabaseSync } from "node:sqlite";
 import { DEFAULT_CONFIG } from "./defaultConfig";
 import { getCodeFactoryPaths } from "./paths";
 import { SQLITE_LOCK_TIMEOUT_MS, SqliteStorage } from "./sqliteStorage";
+import { MemStorage } from "./memoryStorage";
 
 function createRawDatabase(root: string): DatabaseSync {
   const db = new DatabaseSync(getCodeFactoryPaths(root).stateDbPath, {
@@ -1162,4 +1163,41 @@ try {
   } finally {
     storage.close();
   }
+});
+
+test("SqliteStorage stores, overwrites, and clears GitHub etags across reopen", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "codefactory-storage-"));
+  const first = new SqliteStorage(root);
+  try {
+    assert.equal(await first.getGithubEtag("issues:open:owner/repo"), undefined);
+
+    await first.setGithubEtag("issues:open:owner/repo", 'W/"abc"');
+    assert.equal(await first.getGithubEtag("issues:open:owner/repo"), 'W/"abc"');
+
+    // Overwrite keeps a single row per url.
+    await first.setGithubEtag("issues:open:owner/repo", 'W/"def"');
+    assert.equal(await first.getGithubEtag("issues:open:owner/repo"), 'W/"def"');
+  } finally {
+    first.close();
+  }
+
+  const second = new SqliteStorage(root);
+  try {
+    assert.equal(await second.getGithubEtag("issues:open:owner/repo"), 'W/"def"');
+    await second.clearGithubEtag("issues:open:owner/repo");
+    assert.equal(await second.getGithubEtag("issues:open:owner/repo"), undefined);
+  } finally {
+    second.close();
+  }
+});
+
+test("MemStorage GitHub etag round-trip matches the SqliteStorage contract", async () => {
+  const storage = new MemStorage();
+  assert.equal(await storage.getGithubEtag("issues:open:owner/repo"), undefined);
+  await storage.setGithubEtag("issues:open:owner/repo", 'W/"abc"');
+  assert.equal(await storage.getGithubEtag("issues:open:owner/repo"), 'W/"abc"');
+  await storage.setGithubEtag("issues:open:owner/repo", 'W/"def"');
+  assert.equal(await storage.getGithubEtag("issues:open:owner/repo"), 'W/"def"');
+  await storage.clearGithubEtag("issues:open:owner/repo");
+  assert.equal(await storage.getGithubEtag("issues:open:owner/repo"), undefined);
 });

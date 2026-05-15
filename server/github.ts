@@ -2154,6 +2154,48 @@ export async function listOpenIssuesForRepo(
   return { items, hasMore };
 }
 
+export type RepoIssuesProbeResult =
+  | { notModified: true }
+  | { notModified: false; etag: string | null };
+
+/**
+ * Conditional GET of a repo's open-issue list (page 1, sorted by `updated`).
+ * A 304 means no issue has changed since `cachedEtag` was stored, so the
+ * caller can skip the whole sweep. 304 responses do not decrement the
+ * primary REST rate limit.
+ */
+export async function probeRepoIssuesChanged(
+  octokit: Octokit,
+  repo: ParsedRepoSlug,
+  cachedEtag: string | null,
+): Promise<RepoIssuesProbeResult> {
+  if (typeof octokit.issues?.listForRepo !== "function") {
+    // Mocked/partial Octokit (tests) — can't probe, treat as changed.
+    return { notModified: false, etag: null };
+  }
+  return withGitHubErrorHandling("open issues", repo, async () => {
+    try {
+      const response = await octokit.issues.listForRepo({
+        owner: repo.owner,
+        repo: repo.repo,
+        state: "open",
+        sort: "updated",
+        direction: "desc",
+        per_page: 100,
+        page: 1,
+        ...(cachedEtag ? { headers: { "if-none-match": cachedEtag } } : {}),
+      });
+      const etag = response.headers?.etag;
+      return { notModified: false, etag: typeof etag === "string" ? etag : null };
+    } catch (error) {
+      if ((error as { status?: number } | undefined)?.status === 304) {
+        return { notModified: true };
+      }
+      throw error;
+    }
+  });
+}
+
 export async function listOpenLinkedPullRequestsForIssue(
   octokit: Octokit,
   repo: ParsedRepoSlug,

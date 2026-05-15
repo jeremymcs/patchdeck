@@ -67,6 +67,7 @@ import {
   type MergedPRSummary,
   parsePRUrl,
   parseRepoSlug,
+  probeRepoIssuesChanged,
   addLabelsToIssue,
   removeLabelsFromIssue,
   resolveNextSemverTag,
@@ -90,6 +91,7 @@ export type AppRuntimeDependencies = {
   deploymentHealingManager?: DeploymentHealingManager;
   babysitter?: PRBabysitter;
   watcherScheduler?: WatcherScheduler;
+  buildOctokitFn?: typeof buildOctokit;
   startBackgroundServices?: boolean;
   startWatcher?: boolean;
 };
@@ -690,6 +692,7 @@ export function mapMergedPullsToReleaseSummaries(pulls: MergedPRSummary[]): Rele
 
 export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): AppRuntime {
   const storage = dependencies.storage ?? getDefaultStorage();
+  const buildOctokitImpl = dependencies.buildOctokitFn ?? buildOctokit;
   const events = new EventEmitter();
   const socialPostJobs = new Map<string, ReleaseSocialPost>();
   const backgroundJobQueue = dependencies.backgroundJobQueue ?? new BackgroundJobQueue(storage);
@@ -1202,7 +1205,7 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
   async function syncStoredIssuesStep(options?: { fullSweep?: boolean }): Promise<void> {
     const config = await storage.getConfig();
     if (config.watchedRepos.length === 0) return;
-    const octokit = await buildOctokit(config);
+    const octokit = await buildOctokitImpl(config);
     const nowMs = Date.now();
     const repoCount = config.watchedRepos.length;
     const candidates = options?.fullSweep
@@ -1218,6 +1221,24 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
         const limit = MAX_ISSUES_PAGE_SIZE;
         const loops = options?.fullSweep ? MAX_AUTO_ISSUE_SWEEP_PAGES : 1;
         let nextOffset = options?.fullSweep ? 0 : (issueRepoSyncOffsets.get(repoSlug) ?? 0);
+
+        // At the start of a repo's sweep, a conditional GET tells us whether
+        // anything changed. A 304 costs no primary rate-limit budget, so on an
+        // unchanged repo we skip the whole sweep instead of paginating it.
+        const etagKey = `issues:open:${repoSlug}`;
+        let pendingEtag: string | null = null;
+        if (nextOffset === 0) {
+          const cachedEtag = (await storage.getGithubEtag(etagKey)) ?? null;
+          const probe = await probeRepoIssuesChanged(octokit, parsed, cachedEtag);
+          if (probe.notModified) {
+            issueRepoBackoffUntilMs.delete(repoSlug);
+            const index = config.watchedRepos.indexOf(repoSlug);
+            issueRepoCursor = index === -1 ? issueRepoCursor : (index + 1) % repoCount;
+            continue;
+          }
+          pendingEtag = probe.etag;
+        }
+
         let didWork = false;
         for (let i = 0; i < loops; i += 1) {
           const page = await listOpenIssuesForRepo(octokit, parsed, { limit, offset: nextOffset });
@@ -1233,6 +1254,11 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
         }
         if (didWork) {
           issueRepoBackoffUntilMs.delete(repoSlug);
+          // Persist the etag only after a successful sync so a failure mid-sweep
+          // re-probes and re-syncs next tick instead of 304-skipping stale data.
+          if (pendingEtag) {
+            await storage.setGithubEtag(etagKey, pendingEtag);
+          }
           const index = config.watchedRepos.indexOf(repoSlug);
           issueRepoCursor = index === -1 ? issueRepoCursor : (index + 1) % repoCount;
           if (!options?.fullSweep) return;

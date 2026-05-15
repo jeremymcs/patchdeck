@@ -80,6 +80,7 @@ export class MemStorage implements IStorage {
   private issueEvaluations: Map<string, IssueEvaluation> = new Map();
   private issueSubtaskSets: Map<string, IssueSubtaskSet> = new Map();
   private syncedIssues: Map<string, StoredIssueRecord> = new Map();
+  private githubEtags: Map<string, string> = new Map();
 
   private cloneConfig(config: Config): Config {
     return structuredClone(config);
@@ -398,6 +399,18 @@ export class MemStorage implements IStorage {
     const existing = this.syncedIssues.get(key);
     if (!existing) return;
     this.syncedIssues.set(key, { ...existing, isWorked: true });
+  }
+
+  async getGithubEtag(url: string): Promise<string | undefined> {
+    return this.githubEtags.get(url);
+  }
+
+  async setGithubEtag(url: string, etag: string): Promise<void> {
+    this.githubEtags.set(url, etag);
+  }
+
+  async clearGithubEtag(url: string): Promise<void> {
+    this.githubEtags.delete(url);
   }
 
   private syncRepoSettings(): void {

@@ -19,6 +19,7 @@ import {
   listOpenLinkedPullRequestsForIssue,
   listOpenIssuesForRepo,
   listOpenPullsForRepo,
+  probeRepoIssuesChanged,
   listMergedPullsSince,
   listReleasesForRepo,
   listTagsForRepo,
@@ -883,6 +884,63 @@ test("listOpenIssuesForRepo continues pagination when a page contains pull reque
   assert.equal(page.items.length, 51);
   assert.equal(page.items[0]?.number, 51);
   assert.equal(page.items[50]?.number, 101);
+});
+
+test("probeRepoIssuesChanged returns the response etag on a 200", async () => {
+  const octokit = {
+    issues: {
+      listForRepo: async () => ({
+        data: [],
+        headers: { etag: 'W/"fresh"' },
+      }),
+    },
+  };
+
+  const result = await probeRepoIssuesChanged(octokit as never, { owner: "owner", repo: "repo" }, null);
+
+  assert.equal(result.notModified, false);
+  if (!result.notModified) {
+    assert.equal(result.etag, 'W/"fresh"');
+  }
+});
+
+test("probeRepoIssuesChanged reports notModified on a 304 and forwards If-None-Match", async () => {
+  let sentIfNoneMatch: string | undefined;
+  const octokit = {
+    issues: {
+      listForRepo: async (params: { headers?: Record<string, string> }) => {
+        sentIfNoneMatch = params.headers?.["if-none-match"];
+        const error = new Error("Not modified") as Error & { status: number };
+        error.status = 304;
+        throw error;
+      },
+    },
+  };
+
+  const result = await probeRepoIssuesChanged(
+    octokit as never,
+    { owner: "owner", repo: "repo" },
+    'W/"cached"',
+  );
+
+  assert.equal(result.notModified, true);
+  assert.equal(sentIfNoneMatch, 'W/"cached"');
+});
+
+test("probeRepoIssuesChanged rethrows non-304 errors instead of skipping the sweep", async () => {
+  const octokit = {
+    issues: {
+      listForRepo: async () => {
+        const error = new Error("not found") as Error & { status: number };
+        error.status = 404;
+        throw error;
+      },
+    },
+  };
+
+  await assert.rejects(() =>
+    probeRepoIssuesChanged(octokit as never, { owner: "owner", repo: "repo" }, null),
+  );
 });
 
 test("listOpenLinkedPullRequestsForIssue returns unique open cross-referenced PRs", async () => {

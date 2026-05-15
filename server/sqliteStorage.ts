@@ -882,6 +882,12 @@ export class SqliteStorage implements IStorage {
         UNIQUE(repo, merge_sha)
       );
 
+      CREATE TABLE IF NOT EXISTS github_etags (
+        url TEXT PRIMARY KEY,
+        etag TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
       CREATE INDEX IF NOT EXISTS idx_feedback_items_pr_id ON feedback_items(pr_id);
       CREATE INDEX IF NOT EXISTS idx_logs_pr_id_timestamp ON logs(pr_id, timestamp);
       CREATE INDEX IF NOT EXISTS idx_agent_runs_status_updated_at ON agent_runs(status, updated_at);
@@ -2271,6 +2277,29 @@ export class SqliteStorage implements IStorage {
   async markSyncedIssueWorked(repo: string, number: number): Promise<void> {
     this.withWriteTransaction(() => {
       this.run("UPDATE synced_issues SET is_worked = 1 WHERE repo = ? AND issue_number = ?", repo, number);
+    });
+  }
+
+  async getGithubEtag(url: string): Promise<string | undefined> {
+    const row = this.get<{ etag: string }>("SELECT etag FROM github_etags WHERE url = ?", url);
+    return row?.etag;
+  }
+
+  async setGithubEtag(url: string, etag: string): Promise<void> {
+    this.withWriteTransaction(() => {
+      this.run(
+        `INSERT INTO github_etags (url, etag, updated_at) VALUES (?, ?, ?)
+         ON CONFLICT(url) DO UPDATE SET etag = excluded.etag, updated_at = excluded.updated_at`,
+        url,
+        etag,
+        new Date().toISOString(),
+      );
+    });
+  }
+
+  async clearGithubEtag(url: string): Promise<void> {
+    this.withWriteTransaction(() => {
+      this.run("DELETE FROM github_etags WHERE url = ?", url);
     });
   }
 

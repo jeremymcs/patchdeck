@@ -563,3 +563,80 @@ test("planAutomaticIssueQueueActions counts active work jobs against the work ca
   });
   assert.equal(plan.work.length, 0, "work cap already saturated");
 });
+
+test("syncRepos skips the issue sweep for a repo whose issue list responds 304", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig({ watchedRepos: ["owner/repo"] });
+  await storage.setGithubEtag("issues:open:owner/repo", 'W/"stale"');
+
+  let listForRepoCalls = 0;
+  const fakeOctokit = {
+    issues: {
+      listForRepo: async () => {
+        listForRepoCalls += 1;
+        const error = new Error("Not modified") as Error & { status: number };
+        error.status = 304;
+        throw error;
+      },
+    },
+  };
+
+  const runtime = createAppRuntime({
+    storage,
+    startBackgroundServices: false,
+    startWatcher: false,
+    babysitter: { syncAndBabysitTrackedRepos: async () => {} } as never,
+    buildOctokitFn: async () => fakeOctokit as never,
+  });
+
+  await runtime.syncRepos();
+
+  assert.equal(listForRepoCalls, 1, "only the conditional probe should reach GitHub");
+  const synced = await storage.listSyncedIssues({ repos: ["owner/repo"], limit: 50, offset: 0 });
+  assert.equal(synced.items.length, 0, "a 304 must not sync any issues");
+});
+
+test("syncRepos syncs issues and persists the new etag when the issue list changed", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig({ watchedRepos: ["owner/repo"] });
+
+  const issuePayload = {
+    number: 7,
+    title: "Issue 7",
+    body: "needs attention",
+    html_url: "https://github.com/owner/repo/issues/7",
+    user: { login: "alice" },
+    labels: [],
+    assignees: [],
+    comments: 0,
+    created_at: "2026-05-03T17:00:00.000Z",
+    updated_at: "2026-05-03T18:00:00.000Z",
+  };
+  const fakeOctokit = {
+    issues: {
+      listForRepo: async () => ({
+        data: [issuePayload],
+        headers: { etag: 'W/"issues-v1"' },
+      }),
+    },
+  };
+
+  const runtime = createAppRuntime({
+    storage,
+    startBackgroundServices: false,
+    startWatcher: false,
+    babysitter: { syncAndBabysitTrackedRepos: async () => {} } as never,
+    buildOctokitFn: async () => fakeOctokit as never,
+  });
+
+  await runtime.syncRepos();
+
+  const synced = await storage.listSyncedIssues({ repos: ["owner/repo"], limit: 50, offset: 0 });
+  assert.equal(synced.items.length, 1);
+  assert.equal(synced.items[0]?.number, 7);
+  assert.equal(
+    await storage.getGithubEtag("issues:open:owner/repo"),
+    'W/"issues-v1"',
+    "a successful sweep should persist the fresh etag for next tick",
+  );
+});
