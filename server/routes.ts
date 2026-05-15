@@ -1,5 +1,6 @@
 import type { Express, Response } from "express";
 import type { Server } from "http";
+import { Octokit } from "@octokit/rest";
 import { z } from "zod";
 import { claudeEffortSchema, codexReasoningEffortSchema, codingAgentSchema, configSchema, startReleaseSocialPostSchema } from "@shared/schema";
 import type { Config } from "@shared/schema";
@@ -37,6 +38,7 @@ function parsePositiveInt(value: unknown): number | undefined {
 
 const TOKEN_MASK_PREFIX = "***";
 const WEB_PASSWORD_MASK = "********";
+const GITHUB_API_VERSION = "2022-11-28";
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -128,7 +130,110 @@ function maskConfig(config: Config): Config {
 export type RouteDependencies = AppRuntimeDependencies & {
   runtime?: AppRuntime;
   appUpdateChecker?: AppUpdateChecker;
+  testGitHubTokensFn?: (config: Config, watchedRepos: string[]) => Promise<GitHubTokenTestResponse>;
 };
+
+type GitHubTokenTestStatus = "ok" | "throttled" | "error";
+
+type GitHubTokenTestResult = {
+  index: number;
+  token: string;
+  status: GitHubTokenTestStatus;
+  login: string | null;
+  remaining: number | null;
+  resetAt: string | null;
+  message: string;
+  repoProbe: string | null;
+};
+
+type GitHubTokenTestResponse = {
+  testedAt: string;
+  results: GitHubTokenTestResult[];
+};
+
+function parseRateLimitInfo(headers: Record<string, string | string[] | undefined>): { remaining: number | null; resetAt: string | null } {
+  const remainingRaw = headers["x-ratelimit-remaining"];
+  const resetRaw = headers["x-ratelimit-reset"];
+  const remainingText = Array.isArray(remainingRaw) ? remainingRaw[0] : remainingRaw;
+  const resetText = Array.isArray(resetRaw) ? resetRaw[0] : resetRaw;
+  const remaining = typeof remainingText === "string" ? Number.parseInt(remainingText, 10) : Number.NaN;
+  const resetEpoch = typeof resetText === "string" ? Number.parseInt(resetText, 10) : Number.NaN;
+  return {
+    remaining: Number.isFinite(remaining) ? remaining : null,
+    resetAt: Number.isFinite(resetEpoch) ? new Date(resetEpoch * 1000).toISOString() : null,
+  };
+}
+
+async function testGitHubTokens(config: Config, watchedRepos: string[]): Promise<GitHubTokenTestResponse> {
+  const tokens = (config.githubTokens ?? []).map((token) => token.trim()).filter(Boolean);
+  const firstWatchedRepo = watchedRepos[0] ?? null;
+  const results: GitHubTokenTestResult[] = [];
+
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    const client = new Octokit({
+      auth: token,
+      request: {
+        headers: {
+          "X-GitHub-Api-Version": GITHUB_API_VERSION,
+        },
+      },
+    });
+
+    try {
+      const user = await client.request("GET /user");
+      const { remaining, resetAt } = parseRateLimitInfo(user.headers as Record<string, string>);
+      let message = "Authenticated successfully";
+
+      if (firstWatchedRepo) {
+        const [owner, repo] = firstWatchedRepo.split("/");
+        if (owner && repo) {
+          try {
+            await client.request("GET /repos/{owner}/{repo}", { owner, repo });
+            message = `Authenticated and can access ${firstWatchedRepo}`;
+          } catch (error) {
+            const status = (error as { status?: number } | undefined)?.status;
+            const detail = error instanceof Error ? error.message : String(error);
+            message = status
+              ? `Authenticated, but repo probe ${firstWatchedRepo} returned ${status}: ${detail}`
+              : `Authenticated, but repo probe ${firstWatchedRepo} failed: ${detail}`;
+          }
+        }
+      }
+
+      results.push({
+        index: index + 1,
+        token: maskToken(token),
+        status: remaining === 0 ? "throttled" : "ok",
+        login: typeof user.data?.login === "string" ? user.data.login : null,
+        remaining,
+        resetAt,
+        message,
+        repoProbe: firstWatchedRepo,
+      });
+    } catch (error) {
+      const status = (error as { status?: number; response?: { headers?: Record<string, string> } } | undefined)?.status;
+      const headers = (error as { response?: { headers?: Record<string, string> } } | undefined)?.response?.headers ?? {};
+      const { remaining, resetAt } = parseRateLimitInfo(headers);
+      const message = error instanceof Error ? error.message : String(error);
+      results.push({
+        index: index + 1,
+        token: maskToken(token),
+        status: status === 403 && remaining === 0 ? "throttled" : "error",
+        login: null,
+        remaining,
+        resetAt,
+        message: status ? `GitHub returned ${status}: ${message}` : message,
+        repoProbe: firstWatchedRepo,
+      });
+    }
+  }
+
+  return {
+    testedAt: new Date().toISOString(),
+    results,
+  };
+}
 
 export async function registerRoutes(
   httpServer: Server,
@@ -137,6 +242,7 @@ export async function registerRoutes(
 ): Promise<Server> {
   const runtime = dependencies.runtime ?? createAppRuntime(dependencies);
   const appUpdateChecker = dependencies.appUpdateChecker ?? createAppUpdateChecker();
+  const testGitHubTokensFn = dependencies.testGitHubTokensFn ?? testGitHubTokens;
   await runtime.start();
 
   httpServer.on("close", () => {
@@ -153,6 +259,16 @@ export async function registerRoutes(
       limited: state.limited,
       resetAt: state.resetAt ? state.resetAt.toISOString() : null,
     });
+  });
+
+  app.post("/api/github-tokens/test", async (_req, res) => {
+    try {
+      const config = await runtime.getConfig();
+      const watchedRepos = (await runtime.listRepoSettings()).map((repo) => repo.repo);
+      res.json(await testGitHubTokensFn(config, watchedRepos));
+    } catch (error: unknown) {
+      sendAppAwareError(res, error);
+    }
   });
 
   app.get("/api/server-logs", (req, res) => {
