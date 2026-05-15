@@ -497,7 +497,7 @@ test("releases route keeps the QA-tested list, expand, copy, retry, and GitHub l
     ["empty release state", "No release activity yet."],
     ["watched repositories sidebar", "Watched repositories"],
   ]);
-  assertHasExpression(releases.sourceFile, "github releases polling", /refetchInterval:\s*60_000/);
+  assertHasExpression(releases.sourceFile, "github releases cache window", /staleTime:\s*5\s*\*\s*60\s*\*\s*1000/);
   assertHasExpression(releases.sourceFile, "github releases sync guard", /disabled=\{isFetchingGitHub \|\| runtimeState === undefined\}/);
 });
 
