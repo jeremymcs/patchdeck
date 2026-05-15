@@ -1544,6 +1544,7 @@ test("GET and POST /api/issues proxy the runtime issue monitor and work action",
   const workCalls: Array<{ repo: string; number: number }> = [];
   const evaluateCalls: Array<{ repo: string; number: number }> = [];
   const clearFailureCalls: Array<{ repo: string; number: number }> = [];
+  const syncCalls: Array<{ repo: string; number: number }> = [];
   const labelCalls: Array<{ repo: string; number: number; add?: string[]; remove?: string[] }> = [];
   const fakeRuntime = {
     start: async () => undefined,
@@ -1570,6 +1571,10 @@ test("GET and POST /api/issues proxy the runtime issue monitor and work action",
     clearIssueWorkFailures: async (repo: string, number: number) => {
       clearFailureCalls.push({ repo, number });
       return { repo, number, id: `${repo}#${number}`, cleared: 1 };
+    },
+    syncIssue: async (repo: string, number: number) => {
+      syncCalls.push({ repo, number });
+      return { ...issues[0], repo, number };
     },
     listActivities: async () => ({ failed: [], inProgress: [], queued: [], warnings: [], generatedAt: "2026-05-03T00:00:00.000Z" }),
     getRuntimeSnapshot: async () => ({ drainMode: false, drainRequestedAt: null, drainReason: null, activeRuns: 0 }),
@@ -1717,6 +1722,15 @@ test("GET and POST /api/issues proxy the runtime issue monitor and work action",
 
     assert.equal(clearResponse.status, 200);
     assert.deepEqual(clearFailureCalls, [{ repo: "acme/widgets", number: 17 }]);
+
+    const syncResponse = await fetch(`${harness.baseUrl}/api/issues/sync`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ repo: "acme/widgets", number: 17 }),
+    });
+
+    assert.equal(syncResponse.status, 200);
+    assert.deepEqual(syncCalls, [{ repo: "acme/widgets", number: 17 }]);
   } finally {
     await harness.close();
   }

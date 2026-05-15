@@ -155,6 +155,7 @@ export type AppRuntime = {
   evaluateIssue(repo: string, number: number): Promise<Issue>;
   workIssue(repo: string, number: number): Promise<Issue>;
   clearIssueWorkFailures(repo: string, number: number): Promise<{ repo: string; number: number; id: string; cleared: number }>;
+  syncIssue(repo: string, number: number): Promise<Issue>;
 };
 
 function getErrorMessage(error: unknown): string {
@@ -798,6 +799,39 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
   const notifyChange = () => {
     events.emit("change");
   };
+  const issueSyncState = new Map<string, {
+    lastSyncAttemptedAt: string | null;
+    lastSyncSucceededAt: string | null;
+    lastSyncError: string | null;
+  }>();
+
+  function markIssueSyncAttempt(targetId: string): string {
+    const now = new Date().toISOString();
+    const previous = issueSyncState.get(targetId);
+    issueSyncState.set(targetId, {
+      lastSyncAttemptedAt: now,
+      lastSyncSucceededAt: previous?.lastSyncSucceededAt ?? null,
+      lastSyncError: null,
+    });
+    return now;
+  }
+
+  function markIssueSyncSuccess(targetId: string, attemptedAt: string): void {
+    issueSyncState.set(targetId, {
+      lastSyncAttemptedAt: attemptedAt,
+      lastSyncSucceededAt: attemptedAt,
+      lastSyncError: null,
+    });
+  }
+
+  function markIssueSyncFailure(targetId: string, attemptedAt: string, error: string): void {
+    const previous = issueSyncState.get(targetId);
+    issueSyncState.set(targetId, {
+      lastSyncAttemptedAt: attemptedAt,
+      lastSyncSucceededAt: previous?.lastSyncSucceededAt ?? null,
+      lastSyncError: error,
+    });
+  }
 
   type IssueWorkQueueSource = "manual" | "automatic";
   type IssueEvaluationQueueSource = "manual" | "automatic";
@@ -1006,6 +1040,9 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       ...issue,
       id: targetId,
       repo: issue.repoFullName,
+      lastSyncAttemptedAt: issueSyncState.get(targetId)?.lastSyncAttemptedAt ?? null,
+      lastSyncSucceededAt: issueSyncState.get(targetId)?.lastSyncSucceededAt ?? null,
+      lastSyncError: issueSyncState.get(targetId)?.lastSyncError ?? null,
       workStatus: workState.workStatus,
       workStage,
       workJobId: workState.workJobId,
@@ -1058,6 +1095,8 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
 
     const issuesWithWorkLinks = await Promise.all(perRepoIssues.flat().map((issue) => {
       const targetId = formatIssueTargetId(issue.repoFullName, issue.number);
+      const attemptedAt = markIssueSyncAttempt(targetId);
+      markIssueSyncSuccess(targetId, attemptedAt);
       return applyIssueWorkState(issue, { issueJobs: workJobsByTarget.get(targetId) ?? [], octokit });
     }));
 
@@ -1078,8 +1117,16 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
     }
 
     const octokit = await buildOctokit(config);
-    const issue = await fetchIssueSummary(octokit, { ...parsedRepo, number });
-    return applyIssueWorkState(issue, { includePrMergeability: true, octokit });
+    const targetId = formatIssueTargetId(canonical, number);
+    const attemptedAt = markIssueSyncAttempt(targetId);
+    try {
+      const issue = await fetchIssueSummary(octokit, { ...parsedRepo, number });
+      markIssueSyncSuccess(targetId, attemptedAt);
+      return applyIssueWorkState(issue, { includePrMergeability: true, octokit });
+    } catch (error) {
+      markIssueSyncFailure(targetId, attemptedAt, getErrorMessage(error));
+      throw error;
+    }
   }
 
   async function updateIssueLabelsInternal(
@@ -1744,6 +1791,10 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       return getIssueInternal(repoInput, number);
     },
 
+    async syncIssue(repoInput, number) {
+      return getIssueInternal(repoInput, number);
+    },
+
     async updateIssueLabels(repoInput, number, updates) {
       return updateIssueLabelsInternal(repoInput, number, updates);
     },
@@ -1861,8 +1912,13 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
 
     async fetchPRFeedback(id) {
       const pr = assertFound(await storage.getPR(id), "PR not found");
-
-      await storage.updatePR(pr.id, { status: "processing", lastChecked: new Date().toISOString() });
+      const attemptedAt = new Date().toISOString();
+      await storage.updatePR(pr.id, {
+        status: "processing",
+        lastChecked: attemptedAt,
+        lastSyncAttemptedAt: attemptedAt,
+        lastSyncError: null,
+      });
       await storage.addLog(pr.id, "info", "Syncing GitHub comments/reviews...");
 
       try {
@@ -1871,7 +1927,11 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
         return updated;
       } catch (error) {
         const message = getErrorMessage(error);
-        await storage.updatePR(pr.id, { status: "error", lastChecked: new Date().toISOString() });
+        await storage.updatePR(pr.id, {
+          status: "error",
+          lastChecked: new Date().toISOString(),
+          lastSyncError: message,
+        });
         await storage.addLog(pr.id, "error", `Fetch failed: ${message}`);
         throw error;
       }

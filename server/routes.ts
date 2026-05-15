@@ -457,6 +457,18 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/issues/sync", async (req, res) => {
+    try {
+      const payload = z.object({
+        repo: z.string().min(1),
+        number: z.number().int().positive(),
+      }).parse(req.body);
+      res.json(await runtime.syncIssue(payload.repo, payload.number));
+    } catch (error: unknown) {
+      sendAppAwareError(res, error);
+    }
+  });
+
   app.patch("/api/issues/labels", async (req, res) => {
     try {
       const payload = z.object({
