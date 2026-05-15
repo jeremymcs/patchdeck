@@ -33,6 +33,8 @@ export type ParsedRepoSlug = {
 export type GitHubPullSummary = {
   number: number;
   title: string;
+  body: string | null;
+  bodyHtml: string | null;
   branch: string;
   author: string;
   url: string;
@@ -1267,9 +1269,12 @@ export async function fetchPullSummary(
   const pull = response.data;
   const baseRef = pull.base?.ref || pull.base?.repo?.default_branch || "";
 
+  const body = typeof pull.body === "string" ? pull.body : null;
   return {
     number: pull.number,
     title: pull.title || `PR #${pull.number}`,
+    body,
+    bodyHtml: body ? renderGitHubMarkdown(body) : null,
     branch: pull.head?.ref || "unknown",
     author: pull.user?.login || "",
     url: pull.html_url || `https://github.com/${parsed.owner}/${parsed.repo}/pull/${pull.number}`,
@@ -2008,9 +2013,13 @@ export async function listOpenPullsForRepo(
     per_page: 100,
   }));
 
-  return pulls.map((pull) => ({
+  return pulls.map((pull) => {
+    const body = typeof pull.body === "string" ? pull.body : null;
+    return {
     number: pull.number,
     title: pull.title || `PR #${pull.number}`,
+    body,
+    bodyHtml: body ? renderGitHubMarkdown(body) : null,
     branch: pull.head?.ref || "unknown",
     author: pull.user?.login || "",
     url: pull.html_url || `https://github.com/${repo.owner}/${repo.repo}/pull/${pull.number}`,
@@ -2023,7 +2032,8 @@ export async function listOpenPullsForRepo(
     baseRef: pull.base?.ref || pull.base?.repo?.default_branch || "",
     baseSha: pull.base?.sha || "",
     mergeable: null,
-  }));
+    };
+  });
 }
 
 export async function listOpenIssuesForRepo(

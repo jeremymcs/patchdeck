@@ -6,11 +6,17 @@ import { AppHeader } from "@/components/AppHeader";
 import { UpdateBanner } from "@/components/UpdateBanner";
 import { toast } from "@/hooks/use-toast";
 import { issueListPageSchema, issueSchema, type ActivitySnapshot, type Config, type Issue, type IssueListPage, type IssueSubtask, type LogEntry, type RuntimeState } from "@shared/schema";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
 import { buildQueueStatusIndex, type QueueStatusView } from "@/lib/activityQueue";
 import { QueueStatusBadge } from "@/components/QueueStatusBadge";
 import { ActivityMenu, EMPTY_ACTIVITY_SNAPSHOT } from "@/components/ActivityMenu";
+import { DetailHeader } from "@/components/detail/DetailHeader";
+import { DetailPanel } from "@/components/detail/DetailPanel";
+import { MetaBreadcrumb, type MetaItem } from "@/components/detail/MetaBreadcrumb";
+import { StageProgressBar } from "@/components/detail/StageProgressBar";
+import { StatusChip } from "@/components/detail/StatusChip";
+import { buildIssueStages } from "@/lib/stages";
+import { autoWorkTone, issueEvaluationTone, issueRowTone, issueWorkStatusTone, toneRailClass } from "@/lib/statusTones";
 
 const ISSUES_CACHE_KEY = "patchdeck:issues-cache:v2";
 const ISSUES_CACHE_MAX_AGE_MS = 5 * 60 * 1000;
@@ -187,19 +193,6 @@ function formatEvaluationConfidence(confidence: number): string {
   return `${grade} (${Math.round(confidence * 100)}%)`;
 }
 
-function getEvaluationBadgeClass(issue: Issue): string {
-  if (issue.evaluationStatus === "approved") {
-    return "border-success-border bg-success-muted text-success-foreground";
-  }
-  if (issue.evaluationStatus === "blocked") {
-    return "border-destructive bg-destructive/10 text-destructive";
-  }
-  if (issue.evaluationStatus === "needs_review") {
-    return "border-warning-border bg-warning-muted text-warning-foreground";
-  }
-  return "border-border text-muted-foreground";
-}
-
 type IssueWorkFilter = "all" | "ready" | "auto" | "needs_eval" | "review" | "failed" | "stale";
 
 function isStaleIssue(issue: Issue): boolean {
@@ -273,19 +266,12 @@ function getLogMetadataEntries(metadata: LogEntry["metadata"]): Array<{ key: str
 }
 
 function IssueStatusBadge({ issue }: { issue: Issue }) {
-  const cls =
-    issue.workStatus === "failed"
-      ? "border-destructive bg-destructive/10 text-destructive"
-      : issue.workStatus === "in_progress"
-        ? "border-primary bg-primary/10 text-primary animate-pulse"
-        : issue.workStatus === "queued"
-          ? "border-primary/50 text-primary"
-          : "border-border text-muted-foreground";
-
   return (
-    <span className={`rounded-md border px-1.5 py-0 text-[10px] font-medium uppercase tracking-wider ${cls}`}>
-      {issue.workStatus.replace("_", " ")}
-    </span>
+    <StatusChip
+      tone={issueWorkStatusTone(issue.workStatus)}
+      pulsing={issue.workStatus === "in_progress"}
+      label={issue.workStatus.replace("_", " ")}
+    />
   );
 }
 
@@ -348,7 +334,11 @@ function IssueRow({
         : null;
 
   return (
-    <div className={`cursor-pointer border-b border-l-2 border-border px-4 py-3 transition-colors ${selected ? "border-l-primary bg-muted" : "border-l-transparent hover:bg-muted/30"}`}>
+    <div className={`cursor-pointer border-b border-border px-4 py-3 transition-colors ${
+      selected
+        ? "border-l-[3px] border-l-primary bg-muted"
+        : `border-l-2 ${toneRailClass(issueRowTone(issue))} hover:bg-muted/30`
+    }`}>
       <button
         type="button"
         onClick={() => onSelect(issue.id)}
@@ -369,23 +359,24 @@ function IssueRow({
             {formatBodyPreview(issue.body)}
           </div>
           <div className="mt-2 flex flex-wrap gap-1">
-            <span
-              data-testid="issue-evaluation-state-list"
+            <StatusChip
+              tone={issueEvaluationTone(issue.evaluationStatus)}
+              label={formatEvaluationState(issue)}
               title={issue.evaluationSummary ?? undefined}
-              className={`border px-1.5 py-0 text-[10px] uppercase tracking-wider ${getEvaluationBadgeClass(issue)}`}
-            >
-              {formatEvaluationState(issue)}
-            </span>
+              testId="issue-evaluation-state-list"
+            />
             <QueueStatusBadge status={queueStatus} />
             {verifyState && <VerifyStateBadge state={verifyState} />}
+            {issue.isWorked && (
+              <StatusChip tone="success" label="worked" testId="issue-worked-badge" />
+            )}
             {issue.subtasks && issue.subtasks.length >= 2 && (
-              <span
-                data-testid="issue-multi-bug-badge"
+              <StatusChip
+                tone="primary"
+                label={`${issue.subtasks.length} bugs`}
                 title={issue.subtasks.map((task) => `• ${task.title}`).join("\n")}
-                className="border border-primary/60 bg-primary/10 px-1.5 py-0 text-[10px] uppercase tracking-wider text-primary"
-              >
-                {issue.subtasks.length} bugs
-              </span>
+                testId="issue-multi-bug-badge"
+              />
             )}
             {issue.labels.slice(0, 3).map((label) => (
               <span key={label} className="border border-border px-1.5 py-0 text-[10px] uppercase tracking-wider text-muted-foreground">
@@ -464,18 +455,15 @@ function SubtaskListPanel({ subtasks }: { subtasks: IssueSubtask[] }) {
   const doneCount = subtasks.reduce((sum, task) => sum + (task.status === "done" ? 1 : 0), 0);
 
   return (
-    <div
-      data-testid="issue-subtasks"
-      className="mt-3 border border-border/60 bg-muted/10"
-    >
-      <div className="flex items-center justify-between gap-2 border-b border-border/60 px-3 py-2">
-        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-          Subtasks
-        </div>
+    <DetailPanel
+      title="Subtasks"
+      testId="issue-subtasks"
+      chip={(
         <span className="font-mono text-[10px] text-muted-foreground">
           {doneCount} / {subtasks.length} done
         </span>
-      </div>
+      )}
+    >
       <ul className="divide-y divide-border/60">
         {subtasks.map((task) => (
           <li
@@ -508,7 +496,7 @@ function SubtaskListPanel({ subtasks }: { subtasks: IssueSubtask[] }) {
           </li>
         ))}
       </ul>
-    </div>
+    </DetailPanel>
   );
 }
 
@@ -553,6 +541,34 @@ function IssueLogRow({ entry }: { entry: LogEntry }) {
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+function IssueLogPanel({ logs, selected }: { logs: LogEntry[]; selected: boolean }) {
+  return (
+    <div className="flex min-h-[24rem] w-full shrink-0 flex-col border-t border-border lg:min-h-0 lg:w-80 lg:border-l lg:border-t-0">
+      <div className="flex shrink-0 border-b border-border">
+        <div
+          className="flex-1 bg-muted px-3 py-2 text-[11px] uppercase tracking-wider text-foreground shadow-[inset_0_-2px_0_0_hsl(var(--primary))]"
+          data-testid="tab-issue-activity"
+        >
+          Activity
+        </div>
+      </div>
+      <div className="flex-1 overflow-y-auto" data-testid="issue-detail-logs">
+        {!selected ? (
+          <div className="p-4 text-[12px] text-muted-foreground">
+            Select an issue to see logs.
+          </div>
+        ) : logs.length === 0 ? (
+          <div className="p-4 text-[12px] text-muted-foreground">
+            No workflow logs yet.
+          </div>
+        ) : (
+          logs.map((entry) => <IssueLogRow key={entry.id} entry={entry} />)
+        )}
+      </div>
     </div>
   );
 }
@@ -1240,82 +1256,62 @@ function IssuesPage() {
 
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           {selectedIssue ? (
-            <ScrollArea className="min-h-0 flex-1" data-testid="issue-detail-logs">
-              <div className="border-b border-border px-4 py-3">
-                <div className="mb-2 grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
-                  <div className="min-w-0">
-                    <h1 className="line-clamp-2 break-words text-[15px] font-semibold leading-snug tracking-tight">
-                      {selectedIssue.title}
-                    </h1>
-                    <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
-                      <span>{selectedIssue.repo} <span className="font-mono text-foreground/80">#{selectedIssue.number}</span></span>
-                      <span className="text-border" aria-hidden="true">·</span>
-                      <span>author: <span className="text-foreground/80">{selectedIssue.author || "unknown"}</span></span>
-                      <span className="text-border" aria-hidden="true">·</span>
-                      <span>comments: <span className="font-mono text-foreground/80">{selectedIssue.comments}</span></span>
-                      <span className="text-border" aria-hidden="true">·</span>
-                      <span>updated <span className="font-mono">{formatDateTime(selectedIssue.updatedAt)}</span></span>
-                      {selectedIssue.lastSyncSucceededAt && (
-                        <>
-                          <span className="text-border" aria-hidden="true">·</span>
-                          <span>synced <span className="font-mono">{formatDateTime(selectedIssue.lastSyncSucceededAt)}</span></span>
-                        </>
-                      )}
-                      {selectedIssue.lastSyncError && (
-                        <>
-                          <span className="text-border" aria-hidden="true">·</span>
-                          <span className="text-destructive">sync error</span>
-                        </>
-                      )}
-                    </div>
-                    <div className="mt-2 flex flex-wrap items-center gap-2">
-                      <IssueStatusBadge issue={selectedIssue} />
-                      <QueueStatusBadge status={selectedIssueQueueStatus} />
-                      {selectedIssue.workStage && selectedIssue.workStage !== selectedIssue.workStatus && (
-                        <span
-                          data-testid="issue-work-stage"
-                          className="border border-border px-1.5 py-0 text-[10px] uppercase tracking-wider text-muted-foreground"
-                        >
-                          {formatIssueWorkStage(selectedIssue)}
-                        </span>
-                      )}
-                      {formatIssueWorkAttempt(selectedIssue) && (
-                        <span
-                          data-testid="issue-work-attempt"
-                          className="border border-border px-1.5 py-0 text-[10px] uppercase tracking-wider text-muted-foreground"
-                        >
-                          {formatIssueWorkAttempt(selectedIssue)}
-                        </span>
-                      )}
-                      <span
-                        data-testid="issue-auto-work-state"
-                        className={`border px-1.5 py-0 text-[10px] uppercase tracking-wider ${
-                          selectedIssue.autoWorkEligible
-                            ? "border-success-border text-success-foreground"
-                            : "border-border text-muted-foreground"
-                        }`}
-                      >
-                        {formatAutoWorkState(selectedIssue)}
-                      </span>
-                      <span
-                        data-testid="issue-evaluation-state"
-                        title={selectedIssue.evaluationSummary ?? undefined}
-                        className={`border px-1.5 py-0 text-[10px] uppercase tracking-wider ${getEvaluationBadgeClass(selectedIssue)}`}
-                      >
-                        {formatEvaluationState(selectedIssue)}
-                      </span>
-                      <a
-                        href={selectedIssue.url}
-                        target="_blank"
-                        rel="noreferrer noopener"
-                        className="inline-flex items-center gap-1 text-[11px] text-muted-foreground underline decoration-border underline-offset-2 transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
-                      >
-                        <ExternalLink className="h-3.5 w-3.5" />
-                        open issue
-                      </a>
-                    </div>
-                  </div>
-                  <div className="flex shrink-0 justify-end gap-2">
+            <>
+              {(() => {
+                const metaItems: MetaItem[] = [
+                  { key: "repo", content: <span>{selectedIssue.repo} <span className="font-mono text-foreground/80">#{selectedIssue.number}</span></span> },
+                  { key: "author", content: <span>author: <span className="text-foreground/80">{selectedIssue.author || "unknown"}</span></span> },
+                  { key: "comments", content: <span>comments: <span className="font-mono text-foreground/80">{selectedIssue.comments}</span></span> },
+                  { key: "updated", content: <span>updated <span className="font-mono">{formatDateTime(selectedIssue.updatedAt)}</span></span> },
+                ];
+                if (selectedIssue.lastSyncSucceededAt) {
+                  metaItems.push({ key: "synced", content: <span>synced <span className="font-mono">{formatDateTime(selectedIssue.lastSyncSucceededAt)}</span></span> });
+                }
+                if (selectedIssue.lastSyncError) {
+                  metaItems.push({ key: "sync-error", content: <span className="text-destructive">sync error</span> });
+                }
+                return (
+              <DetailHeader
+                title={selectedIssue.title}
+                titleMultiline
+                accentTone="warning"
+                failed={selectedIssue.workStatus === "failed"}
+                stageBar={<StageProgressBar stages={buildIssueStages(selectedIssue)} testId="issue-stage-progress" />}
+                externalLink={{ href: selectedIssue.url, label: `${selectedIssue.repo}#${selectedIssue.number}` }}
+                meta={<MetaBreadcrumb items={metaItems} />}
+                chips={(
+                  <>
+                    <IssueStatusBadge issue={selectedIssue} />
+                    <QueueStatusBadge status={selectedIssueQueueStatus} />
+                    {selectedIssue.workStage && selectedIssue.workStage !== selectedIssue.workStatus && (
+                      <StatusChip
+                        tone="neutral"
+                        label={formatIssueWorkStage(selectedIssue)}
+                        testId="issue-work-stage"
+                      />
+                    )}
+                    {formatIssueWorkAttempt(selectedIssue) && (
+                      <StatusChip
+                        tone="neutral"
+                        label={formatIssueWorkAttempt(selectedIssue) ?? ""}
+                        testId="issue-work-attempt"
+                      />
+                    )}
+                    <StatusChip
+                      tone={autoWorkTone(selectedIssue.autoWorkEligible)}
+                      label={formatAutoWorkState(selectedIssue)}
+                      testId="issue-auto-work-state"
+                    />
+                    <StatusChip
+                      tone={issueEvaluationTone(selectedIssue.evaluationStatus)}
+                      label={formatEvaluationState(selectedIssue)}
+                      title={selectedIssue.evaluationSummary ?? undefined}
+                      testId="issue-evaluation-state"
+                    />
+                  </>
+                )}
+                actions={(
+                  <>
                     <button
                       type="button"
                       onClick={() => syncIssueMutation.mutate(selectedIssue)}
@@ -1417,8 +1413,13 @@ function IssuesPage() {
                         </>
                       )}
                     </button>
-                  </div>
-                </div>
+                  </>
+                )}
+              />
+                );
+              })()}
+              <div className="flex-1 overflow-y-auto" data-testid="issue-detail-body">
+              <div className="px-4 py-3">
                 <div data-testid="issue-label-editor" className="flex flex-wrap items-center gap-1">
                   {selectedIssue.labels.length > 0 ? selectedIssue.labels.map((label) => (
                     <span key={label} className="inline-flex max-w-full items-center gap-1 border border-border pl-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
@@ -1514,14 +1515,11 @@ function IssuesPage() {
                   </a>
                 )}
                 {selectedIssue.workStatus === "failed" && selectedIssue.lastError && (
-                  <div
-                    data-testid="issue-work-failed"
-                    className="mt-3 border border-destructive/40 bg-destructive/10 text-[11px] text-destructive"
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-destructive/20 px-3 py-2">
-                      <div className="text-[10px] uppercase tracking-wider text-destructive/70">
-                        Issue work failed
-                      </div>
+                  <DetailPanel
+                    title="Issue work failed"
+                    tone="destructive"
+                    testId="issue-work-failed"
+                    action={(
                       <button
                         type="button"
                         onClick={() => clearFailuresMutation.mutate(selectedIssue)}
@@ -1542,55 +1540,56 @@ function IssuesPage() {
                           </>
                         )}
                       </button>
-                    </div>
-                    <div className="max-h-80 overflow-auto whitespace-pre-wrap px-3 py-2 leading-5">
+                    )}
+                  >
+                    <div className="max-h-80 overflow-auto whitespace-pre-wrap px-3 py-2 text-[11px] leading-5 text-destructive">
                       {selectedIssue.lastError}
                     </div>
-                  </div>
+                  </DetailPanel>
                 )}
                 {selectedIssue.subtasks && selectedIssue.subtasks.length > 0 && (
                   <SubtaskListPanel subtasks={selectedIssue.subtasks} />
                 )}
-                <div
-                  data-testid="issue-evaluation-detail"
-                  className="mt-3 border border-border/60 bg-muted/10 px-3 py-2"
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                      Automation gate
-                    </div>
-                    <span className={`border px-1.5 py-0 text-[10px] uppercase tracking-wider ${getEvaluationBadgeClass(selectedIssue)}`}>
-                      {formatEvaluationState(selectedIssue)}
-                    </span>
-                  </div>
-                  <div className="mt-2 text-[12px] leading-5 text-foreground/85">
-                    {selectedIssue.evaluationSummary ?? selectedIssue.autoWorkBlockedReason ?? "Evaluate this issue before auto-mode can work it."}
-                  </div>
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    <span className="border border-border/60 px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
-                      auto: {selectedIssue.autoWorkEligible ? "enabled" : "blocked"}
-                    </span>
-                    {typeof selectedIssue.evaluationConfidence === "number" && (
-                      <span className="border border-border/60 px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
-                        confidence: {formatEvaluationConfidence(selectedIssue.evaluationConfidence)}
-                      </span>
-                    )}
-                    {selectedIssue.evaluationUpdatedAt && (
-                      <span className="border border-border/60 px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
-                        evaluated: {formatDateTime(selectedIssue.evaluationUpdatedAt)}
-                      </span>
-                    )}
-                  </div>
-                  {selectedIssue.evaluationSafetyFlags && selectedIssue.evaluationSafetyFlags.length > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      {selectedIssue.evaluationSafetyFlags.map((flag) => (
-                        <span key={flag} className="border border-destructive/40 px-2 py-0.5 text-[10px] uppercase tracking-wider text-destructive">
-                          {flag}
-                        </span>
-                      ))}
-                    </div>
+                <DetailPanel
+                  title="Automation gate"
+                  testId="issue-evaluation-detail"
+                  chip={(
+                    <StatusChip
+                      tone={issueEvaluationTone(selectedIssue.evaluationStatus)}
+                      label={formatEvaluationState(selectedIssue)}
+                    />
                   )}
-                </div>
+                >
+                  <div className="px-3 py-2">
+                    <div className="text-[12px] leading-5 text-foreground/85">
+                      {selectedIssue.evaluationSummary ?? selectedIssue.autoWorkBlockedReason ?? "Evaluate this issue before auto-mode can work it."}
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      <span className="border border-border/60 px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+                        auto: {selectedIssue.autoWorkEligible ? "enabled" : "blocked"}
+                      </span>
+                      {typeof selectedIssue.evaluationConfidence === "number" && (
+                        <span className="border border-border/60 px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+                          confidence: {formatEvaluationConfidence(selectedIssue.evaluationConfidence)}
+                        </span>
+                      )}
+                      {selectedIssue.evaluationUpdatedAt && (
+                        <span className="border border-border/60 px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+                          evaluated: {formatDateTime(selectedIssue.evaluationUpdatedAt)}
+                        </span>
+                      )}
+                    </div>
+                    {selectedIssue.evaluationSafetyFlags && selectedIssue.evaluationSafetyFlags.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {selectedIssue.evaluationSafetyFlags.map((flag) => (
+                          <span key={flag} className="border border-destructive/40 px-2 py-0.5 text-[10px] uppercase tracking-wider text-destructive">
+                            {flag}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </DetailPanel>
                 <div className="mt-3 text-[11px] uppercase tracking-wider text-muted-foreground">
                   Issue body
                 </div>
@@ -1606,32 +1605,16 @@ function IssuesPage() {
                   </pre>
                 )}
               </div>
-
-              <div className="grid min-h-0 grid-rows-[auto,1fr]">
-                <div className="border-b border-border px-4 py-2 text-[11px] uppercase tracking-wider text-muted-foreground">
-                  Recent issue work logs
-                </div>
-                <div>
-                  {issueLogs.length === 0 ? (
-                    <div className="p-4 text-[12px] text-muted-foreground">
-                      No workflow logs yet.
-                    </div>
-                  ) : (
-                    <div>
-                      {issueLogs.map((entry) => (
-                        <IssueLogRow key={entry.id} entry={entry} />
-                      ))}
-                    </div>
-                  )}
-                </div>
               </div>
-            </ScrollArea>
+            </>
           ) : (
             <div className="flex flex-1 items-center justify-center text-[12px] text-muted-foreground">
               Select an issue from the left panel.
             </div>
           )}
         </div>
+
+        <IssueLogPanel logs={issueLogs} selected={Boolean(selectedIssue)} />
       </div>
     </div>
   );

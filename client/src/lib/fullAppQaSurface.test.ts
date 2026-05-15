@@ -107,7 +107,13 @@ function assertHasJsxAttribute(
 }
 
 function assertHasTestId(sourceFile: ts.SourceFile, label: string, expected: string | RegExp) {
-  assertHasJsxAttribute(sourceFile, "data-testid", label, expected);
+  const direct = collectJsxAttributeValues(sourceFile, "data-testid");
+  const propWired = collectJsxAttributeValues(sourceFile, "testId");
+  const all = [...direct, ...propWired];
+  assert.ok(
+    all.some((value) => typeof value === "string" && valueMatches(value, expected)),
+    `Expected ${label} to expose data-testid or testId ${expected}`,
+  );
 }
 
 function assertHasStringValue(sourceFile: ts.SourceFile, label: string, expected: string | RegExp) {
@@ -264,7 +270,7 @@ test("full app QA route matrix is wired through the hash router", async () => {
 });
 
 test("dashboard keeps the QA-tested PR, repo, feedback, and side-panel workflows wired", async () => {
-  const { sourceFile } = await parseProjectFile("client/src/pages/dashboard.tsx");
+  const { sourceFile } = await parseProjectFile("client/src/pages/prs.tsx");
 
   for (const [label, testId] of [
     ["active tab", "tab-active"],
@@ -393,7 +399,7 @@ test("issues page keeps the QA-tested issue monitor and work surface wired", asy
   assertHasExpression(sourceFile, "issue auto blocked reason", /\bautoWorkBlockedReason\b/);
   assertHasExpression(sourceFile, "issue work filter helper", /\bmatchesIssueWorkFilter\b/);
   assertHasExpression(sourceFile, "stale issue helper", /\bisStaleIssue\b/);
-  assertHasExpression(sourceFile, "issue detail refresh", /\brefetchSelectedIssueDetail\b/);
+  assertHasExpression(sourceFile, "issue detail refresh", /\bselectedIssueDetail\b/);
   assertHasExpression(sourceFile, "issue PR mergeability", /\bworkPrMergeable\b/);
   assertHasExpression(sourceFile, "issue queue helper", /\bbuildQueueStatusIndex\b/);
   assertHasExpression(sourceFile, "issue queue badge", /\bQueueStatusBadge\b/);
@@ -404,7 +410,7 @@ test("issues page keeps the QA-tested issue monitor and work surface wired", asy
 });
 
 test("dashboard finds latest target activity without sorting the full activity list", async () => {
-  const { sourceFile } = await parseProjectFile("client/src/pages/dashboard.tsx");
+  const { sourceFile } = await parseProjectFile("client/src/pages/prs.tsx");
   const helper = getFunctionText(sourceFile, "latestActivityForTarget");
 
   assert.match(helper, /\.reduce\(/);
