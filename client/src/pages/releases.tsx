@@ -26,10 +26,6 @@ function isTerminalStatus(status: ReleaseRunStatus): boolean {
   return status === "published" || status === "skipped" || status === "error";
 }
 
-function hasReleaseRunStatus(value: unknown): value is { status: ReleaseRunStatus } {
-  return typeof value === "object" && value !== null && "status" in value && typeof value.status === "string";
-}
-
 function formatDateTime(value: string | null | undefined): string {
   if (!value) return "n/a";
   const date = new Date(value);
@@ -317,12 +313,7 @@ function RepoListButton({
 export default function Releases() {
   const { data: releases = [], isLoading } = useQuery<ReleaseRun[]>({
     queryKey: ["/api/releases"],
-    refetchInterval: (query) => {
-      const data = query.state.data;
-      return Array.isArray(data) && data.some((run) => hasReleaseRunStatus(run) && isActiveStatus(run.status))
-        ? 5000
-        : false;
-    },
+    staleTime: 5 * 60 * 1000,
   });
 
   const { data: runtimeState } = useQuery<RuntimeState>({
@@ -337,7 +328,7 @@ export default function Releases() {
   } = useQuery<RepoGitHubReleases[]>({
     queryKey: ["/api/github-releases"],
     enabled: runtimeState !== undefined,
-    refetchInterval: 60_000,
+    staleTime: 5 * 60 * 1000,
   });
 
   const { releaseLookup, orphans } = useMemo(() => {
