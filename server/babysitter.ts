@@ -76,6 +76,8 @@ const CONFLICT_REPAIR_FAILURE_KIND = "merge_conflict_repair";
 const CONFLICT_REPAIR_RETRY_BUDGET = 2;
 const CODE_OWNER_FALLBACK_TIMEOUT_MS = 30 * 60 * 1000;
 const AGENT_STREAM_LOG_LINE_LIMIT = 120;
+const MAX_FEEDBACK_SYNCS_PER_TICK = 20;
+const FEEDBACK_SYNC_RATE_LIMIT_COOLDOWN_MS = 5 * 60 * 1000;
 const APP_NAME = "patchdeck";
 const APP_REPOSITORY_URL = "https://github.com/jeremymcs/patchdeck";
 export const APP_COMMENT_FOOTER = formatAppCommentFooter(APP_NAME, true);
@@ -1180,6 +1182,14 @@ function summarizeUnknownError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function shouldApplyFeedbackSyncCooldown(message: string): boolean {
+  const lower = message.toLowerCase();
+  return lower.includes("rate limit")
+    || lower.includes("authenticate with")
+    || lower.includes("authentication failed")
+    || lower.includes("denied access");
+}
+
 function getNextCodingAgent(agent: CodingAgent): CodingAgent {
   return agent === "claude" ? "codex" : "claude";
 }
@@ -1308,6 +1318,7 @@ export class PRBabysitter {
   private readonly scheduleBackgroundJob?: ScheduleBackgroundJob;
   private readonly clock: () => Date;
   private readonly agentHealthCache = new Map<CodingAgent, { checkedAtMs: number; result: AgentHealthResult }>();
+  private readonly feedbackSyncCooldownUntilMs = new Map<string, number>();
 
   constructor(
     storage: IStorage,
@@ -1328,6 +1339,22 @@ export class PRBabysitter {
 
   private now(): Date {
     return this.clock();
+  }
+
+  private isFeedbackSyncCoolingDown(prId: string): boolean {
+    const untilMs = this.feedbackSyncCooldownUntilMs.get(prId);
+    if (!untilMs) {
+      return false;
+    }
+    if (untilMs <= this.now().getTime()) {
+      this.feedbackSyncCooldownUntilMs.delete(prId);
+      return false;
+    }
+    return true;
+  }
+
+  private markFeedbackSyncCooldown(prId: string): void {
+    this.feedbackSyncCooldownUntilMs.set(prId, this.now().getTime() + FEEDBACK_SYNC_RATE_LIMIT_COOLDOWN_MS);
   }
 
   private async findLatestDependencyPreflightFailure(prId: string, headSha: string): Promise<DeterministicFailureMarker | null> {
@@ -1752,6 +1779,9 @@ export class PRBabysitter {
       title: pr.title,
       status: pr.status,
       lastChecked: new Date().toISOString(),
+      lastSyncAttemptedAt: new Date().toISOString(),
+      lastSyncSucceededAt: new Date().toISOString(),
+      lastSyncError: null,
       feedbackItems: merged,
       accepted: counters.accepted,
       rejected: counters.rejected,
@@ -1790,6 +1820,7 @@ export class PRBabysitter {
       ...(await this.storage.getArchivedPRs()),
     ].filter(hasMissingReviewThreadMetadata);
     const syncedFeedbackPrIds = new Set<string>();
+    let feedbackSyncAttemptsThisTick = 0;
 
     for (const pr of repairCandidates) {
       try {
@@ -2053,14 +2084,25 @@ export class PRBabysitter {
           if (syncedFeedbackPrIds.has(local.id)) {
             continue;
           }
+          if (this.isFeedbackSyncCoolingDown(local.id)) {
+            continue;
+          }
+          if (feedbackSyncAttemptsThisTick >= MAX_FEEDBACK_SYNCS_PER_TICK) {
+            continue;
+          }
 
           try {
+            feedbackSyncAttemptsThisTick += 1;
             await this.syncFeedbackForPR(local.id, {
               phase: "watcher",
             });
             syncedFeedbackPrIds.add(local.id);
           } catch (error) {
-            await this.storage.addLog(local.id, "warn", `Could not sync GitHub feedback while automation is paused: ${summarizeUnknownError(error)}`, {
+            const message = summarizeUnknownError(error);
+            if (shouldApplyFeedbackSyncCooldown(message)) {
+              this.markFeedbackSyncCooldown(local.id);
+            }
+            await this.storage.addLog(local.id, "warn", `Could not sync GitHub feedback while automation is paused: ${message}`, {
               phase: "watcher",
             });
           }
@@ -2130,11 +2172,22 @@ export class PRBabysitter {
         const repoPrAutoMonitor = repoSettingsByRepo.get(repoSlug)?.prAutoMonitor ?? true;
         if (!repoPrAutoMonitor) {
           if (!syncedFeedbackPrIds.has(local.id)) {
+            if (this.isFeedbackSyncCoolingDown(local.id)) {
+              continue;
+            }
+            if (feedbackSyncAttemptsThisTick >= MAX_FEEDBACK_SYNCS_PER_TICK) {
+              continue;
+            }
             try {
+              feedbackSyncAttemptsThisTick += 1;
               await this.syncFeedbackForPR(local.id, { phase: "watcher" });
               syncedFeedbackPrIds.add(local.id);
             } catch (error) {
-              await this.storage.addLog(local.id, "warn", `Could not sync GitHub feedback while PR auto-monitor is manual: ${summarizeUnknownError(error)}`, {
+              const message = summarizeUnknownError(error);
+              if (shouldApplyFeedbackSyncCooldown(message)) {
+                this.markFeedbackSyncCooldown(local.id);
+              }
+              await this.storage.addLog(local.id, "warn", `Could not sync GitHub feedback while PR auto-monitor is manual: ${message}`, {
                 phase: "watcher",
               });
             }

@@ -1235,6 +1235,21 @@ export default function Dashboard() {
       showMutationError("Could not update PR watch state", error);
     },
   });
+  const syncPrMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await apiRequest("POST", `/api/prs/${id}/fetch`);
+      return res.json() as Promise<PR>;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/prs"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/prs/archived"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/logs"] });
+      toast({ description: "PR sync complete." });
+    },
+    onError: (error) => {
+      showMutationError("Could not sync PR", error);
+    },
+  });
 
   const updateConfigMutation = useMutation({
     mutationFn: async (updates: Partial<Config>) => {
@@ -1534,10 +1549,32 @@ export default function Dashboard() {
                           <span>checked <span className="font-mono">{formatClock(selectedPR.lastChecked)}</span></span>
                         </>
                       )}
+                      {selectedPR.lastSyncSucceededAt && (
+                        <>
+                          <span className="text-border" aria-hidden="true">·</span>
+                          <span>synced <span className="font-mono">{formatClock(selectedPR.lastSyncSucceededAt)}</span></span>
+                        </>
+                      )}
+                      {selectedPR.lastSyncError && (
+                        <>
+                          <span className="text-border" aria-hidden="true">·</span>
+                          <span className="text-destructive">sync error</span>
+                        </>
+                      )}
                     </div>
                   </div>
                   {!isArchived && (
                     <div className="flex flex-wrap items-center justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => syncPrMutation.mutate(selectedPR.id)}
+                        disabled={syncPrMutation.isPending || globalDrainMode}
+                        title={globalDrainMode ? DRAIN_PAUSED_TITLE : "Sync GitHub feedback now"}
+                        data-testid="button-sync-pr"
+                        className="cursor-pointer border border-border bg-transparent px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground transition-colors hover:border-foreground/30 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        {syncPrMutation.isPending ? "Syncing" : "Sync"}
+                      </button>
                       <button
                         type="button"
                         onClick={() => applyMutation.mutate(selectedPR.id)}

@@ -152,6 +152,9 @@ type PRRow = {
   tests_passed: number | null;
   lint_passed: number | null;
   last_checked: string | null;
+  last_sync_attempted_at: string | null;
+  last_sync_succeeded_at: string | null;
+  last_sync_error: string | null;
   watch_enabled: number;
   docs_assessment_json: string | null;
   added_at: string;
@@ -588,6 +591,9 @@ export class SqliteStorage implements IStorage {
         tests_passed INTEGER,
         lint_passed INTEGER,
         last_checked TEXT,
+        last_sync_attempted_at TEXT,
+        last_sync_succeeded_at TEXT,
+        last_sync_error TEXT,
         watch_enabled INTEGER NOT NULL DEFAULT 1,
         docs_assessment_json TEXT,
         added_at TEXT NOT NULL,
@@ -901,6 +907,9 @@ export class SqliteStorage implements IStorage {
     this.ensureColumn("release_runs", "source", "TEXT NOT NULL DEFAULT 'automatic'");
     this.ensureColumn("prs", "watch_enabled", "INTEGER NOT NULL DEFAULT 1");
     this.ensureColumn("prs", "docs_assessment_json", "TEXT");
+    this.ensureColumn("prs", "last_sync_attempted_at", "TEXT");
+    this.ensureColumn("prs", "last_sync_succeeded_at", "TEXT");
+    this.ensureColumn("prs", "last_sync_error", "TEXT");
 
     const configExists = this.get<{ present: number }>("SELECT 1 AS present FROM config WHERE id = 1");
     if (!configExists) {
@@ -1210,6 +1219,9 @@ export class SqliteStorage implements IStorage {
       testsPassed: row.tests_passed === null ? null : Boolean(row.tests_passed),
       lintPassed: row.lint_passed === null ? null : Boolean(row.lint_passed),
       lastChecked: row.last_checked,
+      lastSyncAttemptedAt: row.last_sync_attempted_at ?? null,
+      lastSyncSucceededAt: row.last_sync_succeeded_at ?? null,
+      lastSyncError: row.last_sync_error ?? null,
       watchEnabled: Boolean(row.watch_enabled),
       docsAssessment: this.parseDocsAssessment(row.docs_assessment_json),
       addedAt: row.added_at,
@@ -1500,7 +1512,7 @@ export class SqliteStorage implements IStorage {
   async getPRs(): Promise<PR[]> {
     const rows = this.all<PRRow>(`
       SELECT id, number, title, repo, branch, author, url, status, accepted, rejected, flagged,
-             tests_passed, lint_passed, last_checked, watch_enabled, docs_assessment_json, added_at
+             tests_passed, lint_passed, last_checked, last_sync_attempted_at, last_sync_succeeded_at, last_sync_error, watch_enabled, docs_assessment_json, added_at
       FROM prs
       WHERE status != 'archived'
       ORDER BY datetime(added_at) DESC
@@ -1514,7 +1526,7 @@ export class SqliteStorage implements IStorage {
   async getArchivedPRs(): Promise<PR[]> {
     const rows = this.all<PRRow>(`
       SELECT id, number, title, repo, branch, author, url, status, accepted, rejected, flagged,
-             tests_passed, lint_passed, last_checked, watch_enabled, docs_assessment_json, added_at
+             tests_passed, lint_passed, last_checked, last_sync_attempted_at, last_sync_succeeded_at, last_sync_error, watch_enabled, docs_assessment_json, added_at
       FROM prs
       WHERE status = 'archived'
       ORDER BY datetime(added_at) DESC
@@ -1528,7 +1540,7 @@ export class SqliteStorage implements IStorage {
   async getPR(id: string): Promise<PR | undefined> {
     const row = this.get<PRRow>(`
       SELECT id, number, title, repo, branch, author, url, status, accepted, rejected, flagged,
-             tests_passed, lint_passed, last_checked, watch_enabled, docs_assessment_json, added_at
+             tests_passed, lint_passed, last_checked, last_sync_attempted_at, last_sync_succeeded_at, last_sync_error, watch_enabled, docs_assessment_json, added_at
       FROM prs
       WHERE id = ?
     `, id);
@@ -1544,7 +1556,7 @@ export class SqliteStorage implements IStorage {
   async getPRByRepoAndNumber(repo: string, number: number): Promise<PR | undefined> {
     const row = this.get<PRRow>(`
       SELECT id, number, title, repo, branch, author, url, status, accepted, rejected, flagged,
-             tests_passed, lint_passed, last_checked, watch_enabled, docs_assessment_json, added_at
+             tests_passed, lint_passed, last_checked, last_sync_attempted_at, last_sync_succeeded_at, last_sync_error, watch_enabled, docs_assessment_json, added_at
       FROM prs
       WHERE repo = ? AND number = ?
     `, repo, number);
@@ -1564,8 +1576,8 @@ export class SqliteStorage implements IStorage {
       this.run(`
         INSERT INTO prs (
           id, number, title, repo, branch, author, url, status, accepted, rejected, flagged,
-          tests_passed, lint_passed, last_checked, watch_enabled, docs_assessment_json, added_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          tests_passed, lint_passed, last_checked, last_sync_attempted_at, last_sync_succeeded_at, last_sync_error, watch_enabled, docs_assessment_json, added_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
         full.id,
         full.number,
@@ -1581,6 +1593,9 @@ export class SqliteStorage implements IStorage {
         full.testsPassed === null ? null : Number(full.testsPassed),
         full.lintPassed === null ? null : Number(full.lintPassed),
         full.lastChecked,
+        full.lastSyncAttemptedAt ?? null,
+        full.lastSyncSucceededAt ?? null,
+        full.lastSyncError ?? null,
         Number(full.watchEnabled),
         full.docsAssessment ? JSON.stringify(full.docsAssessment) : null,
         full.addedAt,
@@ -1603,7 +1618,8 @@ export class SqliteStorage implements IStorage {
       this.run(`
         UPDATE prs
         SET number = ?, title = ?, repo = ?, branch = ?, author = ?, url = ?, status = ?,
-            accepted = ?, rejected = ?, flagged = ?, tests_passed = ?, lint_passed = ?, last_checked = ?, watch_enabled = ?, docs_assessment_json = ?
+            accepted = ?, rejected = ?, flagged = ?, tests_passed = ?, lint_passed = ?, last_checked = ?,
+            last_sync_attempted_at = ?, last_sync_succeeded_at = ?, last_sync_error = ?, watch_enabled = ?, docs_assessment_json = ?
         WHERE id = ?
       `,
         updated.number,
@@ -1619,6 +1635,9 @@ export class SqliteStorage implements IStorage {
         updated.testsPassed === null ? null : Number(updated.testsPassed),
         updated.lintPassed === null ? null : Number(updated.lintPassed),
         updated.lastChecked,
+        updated.lastSyncAttemptedAt ?? null,
+        updated.lastSyncSucceededAt ?? null,
+        updated.lastSyncError ?? null,
         Number(updated.watchEnabled),
         updated.docsAssessment ? JSON.stringify(updated.docsAssessment) : null,
         id,

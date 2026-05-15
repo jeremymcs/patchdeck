@@ -627,6 +627,26 @@ export default function Issues() {
       toast({ variant: "destructive", description: `Could not queue issue evaluation: ${error.message}` });
     },
   });
+  const syncIssueMutation = useMutation({
+    mutationFn: async (issue: Issue) => {
+      const res = await apiRequest("POST", "/api/issues/sync", {
+        repo: issue.repo,
+        number: issue.number,
+      });
+      return res.json() as Promise<Issue>;
+    },
+    onSuccess: async (issue) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["/api/issues"] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/issues/detail", issue.repo, issue.number] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/logs", issue.id] }),
+      ]);
+      toast({ description: `Synced issue #${issue.number}.` });
+    },
+    onError: (error) => {
+      toast({ variant: "destructive", description: `Could not sync issue: ${error.message}` });
+    },
+  });
 
   const labelMutation = useMutation({
     mutationFn: async ({ issue, add, remove }: { issue: Issue; add?: string[]; remove?: string[] }) => {
@@ -910,6 +930,18 @@ export default function Issues() {
                       <span>comments: <span className="font-mono text-foreground/80">{selectedIssue.comments}</span></span>
                       <span className="text-border" aria-hidden="true">·</span>
                       <span>updated <span className="font-mono">{formatDateTime(selectedIssue.updatedAt)}</span></span>
+                      {selectedIssue.lastSyncSucceededAt && (
+                        <>
+                          <span className="text-border" aria-hidden="true">·</span>
+                          <span>synced <span className="font-mono">{formatDateTime(selectedIssue.lastSyncSucceededAt)}</span></span>
+                        </>
+                      )}
+                      {selectedIssue.lastSyncError && (
+                        <>
+                          <span className="text-border" aria-hidden="true">·</span>
+                          <span className="text-destructive">sync error</span>
+                        </>
+                      )}
                     </div>
                     <div className="mt-2 flex flex-wrap items-center gap-2">
                       <IssueStatusBadge issue={selectedIssue} />
@@ -959,6 +991,26 @@ export default function Issues() {
                     </div>
                   </div>
                   <div className="flex shrink-0 justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => syncIssueMutation.mutate(selectedIssue)}
+                      disabled={syncIssueMutation.isPending || Boolean(runtime?.drainMode)}
+                      title={runtime?.drainMode ? "Issue sync is paused by drain mode" : "Sync issue from GitHub now"}
+                      data-testid="button-sync-issue"
+                      className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-border bg-transparent px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground transition-colors hover:border-foreground/30 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      {syncIssueMutation.isPending ? (
+                        <>
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          Syncing
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw className="h-3.5 w-3.5" />
+                          Sync
+                        </>
+                      )}
+                    </button>
                     <button
                       type="button"
                       onClick={() => evaluateMutation.mutate(selectedIssue)}

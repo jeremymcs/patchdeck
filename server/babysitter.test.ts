@@ -1305,6 +1305,125 @@ test("syncAndBabysitTrackedRepos skips automatic babysits when pr watch is pause
   assert.ok(!logs.some((log) => log.message.includes("Watcher queued autonomous babysitter run")));
 });
 
+test("syncAndBabysitTrackedRepos caps feedback sync attempts per tick while automation is paused", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig({ autoPrs: false, autoIssues: true });
+  const feedbackFetchTargets: number[] = [];
+
+  const pulls = Array.from({ length: 30 }, (_, index) => ({
+    number: 100 + index,
+    title: `PR ${index + 1}`,
+    branch: `feature/${index + 1}`,
+    author: "octocat",
+    url: `https://github.com/octo/example/pull/${100 + index}`,
+  }));
+
+  for (const pull of pulls) {
+    await storage.addPR({
+      number: pull.number,
+      title: pull.title,
+      repo: "octo/example",
+      branch: pull.branch,
+      author: pull.author,
+      url: pull.url,
+      status: "watching",
+      feedbackItems: [],
+      accepted: 0,
+      rejected: 0,
+      flagged: 0,
+      testsPassed: null,
+      lintPassed: null,
+      lastChecked: null,
+      watchEnabled: true,
+    });
+  }
+
+  const babysitter = new PRBabysitter(
+    storage,
+    makeWatcherGitHubService({
+      listOpenPullsForRepo: async () => pulls,
+      fetchFeedbackItemsForPR: async (_octokit, parsed) => {
+        feedbackFetchTargets.push(parsed.number);
+        return [];
+      },
+    }),
+    {
+      resolveAgent: async () => "codex",
+      ciPollIntervalMs: 0,
+      evaluateFixNecessityWithAgent: async () => ({ needsFix: false, reason: "unused" }),
+      applyFixesWithAgent: async () => ({ code: 0, stdout: "", stderr: "" }),
+      runCommand: async () => ({ code: 0, stdout: "", stderr: "" }),
+    },
+  );
+
+  await babysitter.syncAndBabysitTrackedRepos();
+
+  assert.equal(feedbackFetchTargets.length, 20);
+  const prs = await storage.getPRs();
+  const refreshedCount = prs.filter((pr) => pr.lastChecked !== null).length;
+  assert.equal(refreshedCount, 20);
+});
+
+test("syncAndBabysitTrackedRepos applies cooldown after rate-limit feedback sync failures", async () => {
+  const storage = new MemStorage();
+  let nowMs = Date.parse("2026-05-14T23:00:00.000Z");
+  let feedbackFetches = 0;
+
+  await storage.addPR({
+    number: 42,
+    title: "Example PR",
+    repo: "octo/example",
+    branch: "feature/example",
+    author: "octocat",
+    url: "https://github.com/octo/example/pull/42",
+    status: "watching",
+    feedbackItems: [],
+    accepted: 0,
+    rejected: 0,
+    flagged: 0,
+    testsPassed: null,
+    lintPassed: null,
+    lastChecked: null,
+    watchEnabled: true,
+  });
+  await storage.updateRepoSettings("octo/example", {
+    prAutoMonitor: false,
+  });
+
+  const babysitter = new PRBabysitter(
+    storage,
+    makeWatcherGitHubService({
+      listOpenPullsForRepo: async () => [{
+        number: 42,
+        title: "Example PR",
+        branch: "feature/example",
+        author: "octocat",
+        url: "https://github.com/octo/example/pull/42",
+      }],
+      fetchFeedbackItemsForPR: async () => {
+        feedbackFetches += 1;
+        throw new Error("GitHub rate limit reached while loading review comments for octo/example#42");
+      },
+    }),
+    {
+      resolveAgent: async () => "codex",
+      ciPollIntervalMs: 0,
+      now: () => new Date(nowMs),
+      evaluateFixNecessityWithAgent: async () => ({ needsFix: false, reason: "unused" }),
+      applyFixesWithAgent: async () => ({ code: 0, stdout: "", stderr: "" }),
+      runCommand: async () => ({ code: 0, stdout: "", stderr: "" }),
+    },
+  );
+
+  await babysitter.syncAndBabysitTrackedRepos();
+  await babysitter.syncAndBabysitTrackedRepos();
+  assert.equal(feedbackFetches, 1);
+
+  nowMs += 6 * 60 * 1000;
+  await babysitter.syncAndBabysitTrackedRepos();
+  assert.equal(feedbackFetches, 2);
+});
+
 test("syncAndBabysitTrackedRepos returns early while drain mode is enabled", async () => {
   const storage = new MemStorage();
   let listOpenPullsCalls = 0;

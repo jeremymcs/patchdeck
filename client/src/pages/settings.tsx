@@ -98,6 +98,14 @@ function emptyToNull(value: string): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function msToSeconds(ms: number): number {
+  return Math.max(1, Math.round(ms / 1000));
+}
+
+function secondsToMs(seconds: number): number {
+  return Math.max(1, seconds) * 1000;
+}
+
 function repoTestId(repo: string): string {
   return repo.replace("/", "-");
 }
@@ -1092,17 +1100,17 @@ export default function Settings() {
                 disabled={updateConfigMutation.isPending}
               />
               <SettingRow
-                label="Poll interval (ms)"
+                label="Poll interval (seconds)"
                 description="How often to check for new feedback"
-                value={config?.pollIntervalMs ?? 120000}
-                onChange={(v) => updateConfigMutation.mutate({ pollIntervalMs: v })}
+                value={msToSeconds(config?.pollIntervalMs ?? 120000)}
+                onChange={(v) => updateConfigMutation.mutate({ pollIntervalMs: secondsToMs(v) })}
                 disabled={updateConfigMutation.isPending}
               />
               <SettingRow
-                label="Batch window (ms)"
+                label="Batch window (seconds)"
                 description="Time to batch feedback before processing"
-                value={config?.batchWindowMs ?? 300000}
-                onChange={(v) => updateConfigMutation.mutate({ batchWindowMs: v })}
+                value={msToSeconds(config?.batchWindowMs ?? 300000)}
+                onChange={(v) => updateConfigMutation.mutate({ batchWindowMs: secondsToMs(v) })}
                 disabled={updateConfigMutation.isPending}
               />
               <SettingRow
@@ -1159,10 +1167,10 @@ export default function Settings() {
                 disabled={updateConfigMutation.isPending}
               />
               <SettingRow
-                label="Healing cooldown (ms)"
+                label="Healing cooldown (seconds)"
                 description="Backoff before a cooldowned session can retry"
-                value={config?.healingCooldownMs ?? 300000}
-                onChange={(v) => updateConfigMutation.mutate({ healingCooldownMs: v })}
+                value={msToSeconds(config?.healingCooldownMs ?? 300000)}
+                onChange={(v) => updateConfigMutation.mutate({ healingCooldownMs: secondsToMs(v) })}
                 disabled={updateConfigMutation.isPending}
               />
             </div>
