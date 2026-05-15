@@ -2,7 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import type { Config } from "@shared/schema";
 import { buildOctokit } from "./github";
-import { clearRateLimitStateForTests, clearRateLimited, getRateLimitState } from "./rateLimitState";
+import {
+  clearRateLimitStateForTests,
+  clearRateLimited,
+  getCoreBudget,
+  getRateLimitState,
+  recordCoreBudget,
+} from "./rateLimitState";
+import { runWithRequestPriority } from "./requestPriority";
 
 const config: Config = {
   githubTokens: [],
@@ -97,6 +104,63 @@ test("octokit throttle caps concurrent search requests below the secondary limit
   // the search cap of 2 must hold the peak at 2.
   assert.ok(peak >= 2, `expected search requests to overlap, peak was ${peak}`);
   assert.ok(peak <= 2, `expected search concurrency capped at 2, peak was ${peak}`);
+});
+
+test("low-priority requests are gated while the core budget sits in the reserve band", async () => {
+  let fetchCalls = 0;
+  const octokit = await buildOctokit(
+    { ...config, githubToken: "ghp_fake" },
+    {
+      ignoreCache: true,
+      requestFetch: async () => {
+        fetchCalls += 1;
+        return new Response(JSON.stringify({ login: "octo" }), {
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+            "x-ratelimit-remaining": "4999",
+            "x-ratelimit-limit": "5000",
+          },
+        });
+      },
+    },
+  );
+
+  recordCoreBudget(100, 5000); // 2% remaining — well inside the reserve
+
+  await assert.rejects(
+    () => runWithRequestPriority("low", () => octokit.request("GET /user")),
+    /budget/i,
+  );
+  assert.equal(fetchCalls, 0, "a gated low-priority request must not reach GitHub");
+
+  // High-priority work still goes through with the budget in the reserve band.
+  const ok = await runWithRequestPriority("high", () => octokit.request("GET /user"));
+  assert.equal(ok.data.login, "octo");
+  assert.equal(fetchCalls, 1);
+});
+
+test("the hook records the core budget from response headers", async () => {
+  const octokit = await buildOctokit(
+    { ...config, githubToken: "ghp_fake" },
+    {
+      ignoreCache: true,
+      requestFetch: async () =>
+        new Response(JSON.stringify({ login: "octo" }), {
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+            "x-ratelimit-remaining": "1234",
+            "x-ratelimit-limit": "5000",
+            "x-ratelimit-resource": "core",
+          },
+        }),
+    },
+  );
+
+  assert.equal(getCoreBudget(), null);
+  await octokit.request("GET /user");
+  assert.deepEqual(getCoreBudget(), { remaining: 1234, limit: 5000 });
 });
 
 test("octokit hook records rate-limit reset from 403 response headers", async () => {

@@ -9,9 +9,12 @@ import {
   clearRateLimited,
   deriveRateLimitResource,
   getRateLimitState,
+  isCoreBudgetBelowReserve,
   markRateLimited,
+  recordCoreBudget,
   type RateLimitResource,
 } from "./rateLimitState";
+import { getRequestPriority } from "./requestPriority";
 
 const octokitLog = childLogger("octokit");
 
@@ -766,6 +769,25 @@ async function withGitHubErrorHandling<T>(
   throw toGitHubIntegrationError(lastError, context, resource);
 }
 
+/**
+ * Thrown before dispatch when a low-priority (background sweep) request would
+ * eat into the core REST budget reserved for high-priority work. Callers in the
+ * sweep paths already treat thrown errors as a transient failure and back off,
+ * so the sweep simply retries on a later tick once the budget recovers.
+ */
+class BudgetReserveError extends Error {
+  readonly status = 403;
+  // `x-ratelimit-remaining: "0"` keeps shouldFallbackToGhAuth from retrying
+  // this deliberate gate via the gh-auth fallback token (same marker the
+  // RateLimitGateError uses).
+  readonly response: { headers: Record<string, string> };
+  constructor() {
+    super("GitHub core REST budget is in the reserve band; deferring low-priority request");
+    this.name = "BudgetReserveError";
+    this.response = { headers: { "x-ratelimit-remaining": "0" } };
+  }
+}
+
 class RateLimitGateError extends Error {
   readonly status = 403;
   readonly response: { headers: Record<string, string> };
@@ -989,6 +1011,15 @@ function attachRateLimitHook(
       throw new RateLimitGateError(resourceState.resetAt, requestResource);
     }
 
+    // Hold a reserve of the core budget for high-priority work.
+    if (
+      requestResource === "core"
+      && getRequestPriority() === "low"
+      && isCoreBudgetBelowReserve()
+    ) {
+      throw new BudgetReserveError();
+    }
+
     const dispatch = async (): Promise<ReturnType<typeof request>> => {
       const response = await request(options);
       const headerResourceRaw = typeof response.headers?.["x-ratelimit-resource"] === "string"
@@ -999,6 +1030,13 @@ function attachRateLimitHook(
         : requestResource;
       const remainingRaw = response.headers?.["x-ratelimit-remaining"];
       const remaining = typeof remainingRaw === "string" ? Number.parseInt(remainingRaw, 10) : Number.NaN;
+      if (responseResource === "core") {
+        const limitRaw = response.headers?.["x-ratelimit-limit"];
+        const limit = typeof limitRaw === "string" ? Number.parseInt(limitRaw, 10) : Number.NaN;
+        if (Number.isFinite(remaining) && Number.isFinite(limit)) {
+          recordCoreBudget(remaining, limit);
+        }
+      }
       if (Number.isFinite(remaining) && remaining > 0) {
         clearRateLimited(responseResource);
       }

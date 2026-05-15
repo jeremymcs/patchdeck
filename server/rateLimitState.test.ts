@@ -4,8 +4,11 @@ import {
   clearRateLimitStateForTests,
   clearRateLimited,
   deriveRateLimitResource,
+  getCoreBudget,
   getRateLimitState,
+  isCoreBudgetBelowReserve,
   markRateLimited,
+  recordCoreBudget,
 } from "./rateLimitState";
 
 test.beforeEach(() => clearRateLimitStateForTests());
@@ -110,4 +113,29 @@ test("aggregate resetAt is the latest among limited resources", () => {
 
   const aggregate = getRateLimitState();
   assert.equal(aggregate.resetAt!.getTime(), later * 1000);
+});
+
+test("recordCoreBudget keeps the latest observation", () => {
+  assert.equal(getCoreBudget(), null);
+  recordCoreBudget(4200, 5000);
+  assert.deepEqual(getCoreBudget(), { remaining: 4200, limit: 5000 });
+  recordCoreBudget(900, 5000);
+  assert.deepEqual(getCoreBudget(), { remaining: 900, limit: 5000 });
+});
+
+test("recordCoreBudget ignores non-finite or non-positive values", () => {
+  recordCoreBudget(Number.NaN, 5000);
+  assert.equal(getCoreBudget(), null);
+  recordCoreBudget(100, 0);
+  assert.equal(getCoreBudget(), null);
+});
+
+test("isCoreBudgetBelowReserve gates only inside the 30% reserve band", () => {
+  assert.equal(isCoreBudgetBelowReserve(), false, "an unknown budget never gates");
+  recordCoreBudget(2000, 5000); // 40% remaining
+  assert.equal(isCoreBudgetBelowReserve(), false);
+  recordCoreBudget(1500, 5000); // exactly 30% — at the reserve edge
+  assert.equal(isCoreBudgetBelowReserve(), true);
+  recordCoreBudget(200, 5000); // 4%
+  assert.equal(isCoreBudgetBelowReserve(), true);
 });

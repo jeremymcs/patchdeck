@@ -24,6 +24,7 @@ import { verifySubtasksAgainstPr } from "./issueVerify";
 import { runIssueWorkRepair } from "./issueWorkAgent";
 import { answerPRQuestion } from "./prQuestionAgent";
 import type { ReleaseManager } from "./releaseManager";
+import { runWithRequestPriority } from "./requestPriority";
 import type { IStorage } from "./storage";
 
 type BackgroundJobHandlerDeps = {
@@ -124,7 +125,9 @@ export function createBackgroundJobHandlers(params: {
   return {
     sync_watched_repos: babysitter
       ? async () => {
-        await babysitter.syncAndBabysitTrackedRepos();
+        // The routine sweep runs at low priority so it yields core REST
+        // budget to interactive routes and active babysitter sessions.
+        await runWithRequestPriority("low", () => babysitter.syncAndBabysitTrackedRepos());
       }
       : undefined,
 

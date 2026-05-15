@@ -46,6 +46,7 @@ import { buildActivityPayload, readActivityPayload } from "./activityPayload";
 import { createWatcherScheduler, type WatcherScheduler } from "./watcherScheduler";
 import { startLogsRetentionJob, type RetentionJobHandle } from "./logsRetention";
 import { getRateLimitState } from "./rateLimitState";
+import { runWithRequestPriority } from "./requestPriority";
 import { ReleaseManager } from "./releaseManager";
 import type { ReleaseAgentPullSummary } from "./releaseAgent";
 import { DeploymentHealingManager } from "./deploymentHealingManager";
@@ -851,7 +852,10 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
         "runtime:1",
         buildBackgroundJobDedupeKey("sync_watched_repos", "runtime:1"),
       );
-      await syncStoredIssuesStep();
+      // The routine issue sweep is low priority — it yields core REST budget
+      // to interactive routes and active babysitter sessions. A manual
+      // syncRepos() stays high priority.
+      await runWithRequestPriority("low", () => syncStoredIssuesStep());
       await queueAutomaticIssueWorkInternal();
     },
     (error) => {
