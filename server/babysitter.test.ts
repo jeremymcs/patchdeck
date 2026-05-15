@@ -366,6 +366,78 @@ test("syncFeedbackForPR logs completion even when no new feedback items arrive",
   assert.equal(logs.at(-1)?.message, "GitHub sync complete: 1 feedback item (0 new)");
 });
 
+test("syncAndBabysitTrackedRepos deprioritizes a repo whose PR list is unchanged", async () => {
+  const storage = new MemStorage();
+  await storage.addPR({
+    number: 1,
+    title: "Tracked PR",
+    repo: "octo/example",
+    branch: "feature/x",
+    author: "octocat",
+    url: "https://github.com/octo/example/pull/1",
+    status: "watching",
+    feedbackItems: [],
+    accepted: 0,
+    rejected: 0,
+    flagged: 0,
+    testsPassed: null,
+    lintPassed: null,
+    lastChecked: null,
+    watchEnabled: false,
+  });
+
+  const deprioritizeSamplePull = {
+    number: 1,
+    title: "Tracked PR",
+    body: null,
+    bodyHtml: null,
+    branch: "feature/x",
+    author: "octocat",
+    url: "https://github.com/octo/example/pull/1",
+    repoFullName: "octo/example",
+    repoCloneUrl: "https://github.com/octo/example.git",
+    headSha: "head1",
+    headRef: "feature/x",
+    headRepoFullName: "octo/example",
+    headRepoCloneUrl: "https://github.com/octo/example.git",
+    baseRef: "main",
+    baseSha: "base1",
+    mergeable: null,
+  };
+
+  let deprioritizeConditionalCalls = 0;
+  const deprioritizeBabysitter = new PRBabysitter(
+    storage,
+    makeWatcherGitHubService({
+      listOpenPullsForRepoConditional: async () => {
+        deprioritizeConditionalCalls += 1;
+        return deprioritizeConditionalCalls === 1
+          ? { notModified: false as const, etag: 'W/"pulls-v1"', pulls: [deprioritizeSamplePull] }
+          : { notModified: true as const };
+      },
+    }),
+    {
+      resolveAgent: async () => "codex",
+      ciPollIntervalMs: 0,
+      evaluateFixNecessityWithAgent: async () => ({ needsFix: false, reason: "unused" }),
+      applyFixesWithAgent: async () => ({ code: 0, stdout: "", stderr: "" }),
+      runCommand: async () => ({ code: 0, stdout: "", stderr: "" }),
+    },
+  );
+
+  await deprioritizeBabysitter.syncAndBabysitTrackedRepos(); // 200 — the list changed
+  let deprioritizeState = (await storage.getRepoSyncStates("prs")).find((s) => s.repo === "octo/example");
+  assert.equal(deprioritizeState?.nextEligibleAt, null, "a changed repo stays in the every-tick rotation");
+
+  await deprioritizeBabysitter.syncAndBabysitTrackedRepos(); // 304 — the list is unchanged
+  deprioritizeState = (await storage.getRepoSyncStates("prs")).find((s) => s.repo === "octo/example");
+  assert.ok(deprioritizeState?.nextEligibleAt, "an unchanged repo must be deprioritized");
+  assert.ok(
+    new Date(deprioritizeState!.nextEligibleAt!).getTime() > Date.now() + 9 * 60_000,
+    "the quiet cooldown should be ~10 minutes out",
+  );
+});
+
 test("syncAndBabysitTrackedRepos reuses the cached PR list on a conditional 304", async () => {
   const storage = new MemStorage();
   await storage.addPR({

@@ -240,6 +240,10 @@ const AUTO_WORK_READY_LABELS = new Set([
 const DEFAULT_ISSUES_PAGE_SIZE = 100;
 const MAX_ISSUES_PAGE_SIZE = 100;
 const MAX_AUTO_ISSUE_SWEEP_PAGES = 50;
+// After a repo's sweep comes back unchanged, defer its next sweep by this long
+// so quiet repos yield watcher slots and rate-limit budget to active ones. Any
+// observed change clears the cooldown and the repo returns to every-tick.
+const QUIET_REPO_COOLDOWN_MS = 10 * 60_000;
 const AUTO_WORK_BLOCKED_LABELS = new Set([
   "blocked",
   "question",
@@ -1257,11 +1261,12 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
           const cachedEtag = (await storage.getGithubEtag(etagKey)) ?? null;
           const probe = await probeRepoIssuesChanged(octokit, parsed, cachedEtag);
           if (probe.notModified) {
-            // A 304 confirms the repo's issue list is current — clear backoff
-            // and record the freshness check as a successful sync.
+            // A 304 confirms the repo's issue list is current. Record the
+            // freshness check and defer the next sweep — a quiet repo does not
+            // need an every-tick slot.
             await storage.upsertRepoSyncState(repoSlug, "issues", {
               lastSyncedAt: new Date().toISOString(),
-              nextEligibleAt: null,
+              nextEligibleAt: new Date(Date.now() + QUIET_REPO_COOLDOWN_MS).toISOString(),
             });
             const index = config.watchedRepos.indexOf(repoSlug);
             issueRepoCursor = index === -1 ? issueRepoCursor : (index + 1) % repoCount;
