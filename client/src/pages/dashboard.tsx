@@ -1,8 +1,8 @@
 import { useMemo } from "react";
 import { Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, GitPullRequest, ListTodo, Loader2 } from "lucide-react";
-import type { ActivitySnapshot, Config, IssueListPage, PR } from "@shared/schema";
+import { AlertTriangle, ExternalLink, GitPullRequest, ListTodo, Loader2 } from "lucide-react";
+import type { ActivityItem, ActivitySnapshot, BackgroundJobKind, Config, IssueListPage, PR } from "@shared/schema";
 import { fetchJson } from "@/lib/queryClient";
 import { AppHeader } from "@/components/AppHeader";
 import { UpdateBanner } from "@/components/UpdateBanner";
@@ -41,6 +41,106 @@ function buildPRBreakdown(prs: PR[]): PRBreakdown {
   return result;
 }
 
+function activityTargetRoute(kind: BackgroundJobKind): string | null {
+  switch (kind) {
+    case "babysit_pr":
+    case "answer_pr_question":
+      return "/prs";
+    case "evaluate_issue":
+    case "verify_issue":
+    case "work_issue":
+      return "/issues";
+    case "process_release_run":
+      return "/releases";
+    case "sync_watched_repos":
+    case "heal_deployment":
+    case "generate_social_changelog":
+    default:
+      return null;
+  }
+}
+
+function ActivityRow({ item, accent, leadingIcon, timeRef }: {
+  item: ActivityItem;
+  accent?: "destructive" | "warning" | "neutral";
+  leadingIcon?: React.ReactNode;
+  timeRef?: "queuedAt" | "startedAt" | "updatedAt";
+}) {
+  const route = activityTargetRoute(item.kind);
+  const timestamp = timeRef === "queuedAt"
+    ? item.queuedAt
+    : timeRef === "startedAt"
+      ? (item.startedAt ?? item.updatedAt)
+      : item.updatedAt;
+  const errorMessage = accent === "destructive" ? item.lastError : null;
+
+  const labelClass = accent === "destructive"
+    ? "inline-flex items-center gap-1 truncate text-[12px] font-medium text-destructive"
+    : "inline-flex items-center gap-1 truncate text-[12px] text-foreground";
+
+  const content = (
+    <>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className={labelClass}>
+          {leadingIcon}
+          {item.label}
+        </span>
+        <span className="font-mono text-[10px] text-muted-foreground">{formatRelative(timestamp)}</span>
+      </div>
+      {item.detail && (
+        <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{item.detail}</div>
+      )}
+      {errorMessage && (
+        <div
+          title={errorMessage}
+          className="mt-1 line-clamp-2 break-words text-[11px] leading-snug text-destructive/85"
+        >
+          {errorMessage}
+        </div>
+      )}
+      {(route || item.targetUrl) && (
+        <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground">
+          {route && (
+            <span className="inline-flex items-center gap-1 text-primary">
+              open {route === "/prs" ? "PR" : route === "/issues" ? "issue" : "page"} →
+            </span>
+          )}
+          {item.targetUrl && (
+            <a
+              href={item.targetUrl}
+              target="_blank"
+              rel="noreferrer noopener"
+              onClick={(event) => event.stopPropagation()}
+              className="inline-flex items-center gap-1 underline decoration-border underline-offset-2 hover:text-foreground"
+            >
+              <ExternalLink className="h-3 w-3" />
+              GitHub
+            </a>
+          )}
+        </div>
+      )}
+    </>
+  );
+
+  if (route) {
+    return (
+      <Link
+        href={route}
+        data-testid={`activity-row-${item.id}`}
+        className="block cursor-pointer border-b border-border/60 px-3 py-2 transition-colors last:border-b-0 hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+      >
+        {content}
+      </Link>
+    );
+  }
+
+  return (
+    <div data-testid={`activity-row-${item.id}`} className="border-b border-border/60 px-3 py-2 last:border-b-0">
+      {content}
+    </div>
+  );
+}
+
 function formatRelative(value: string | null | undefined): string {
   if (!value) return "never";
   const parsed = Date.parse(value);
@@ -52,16 +152,24 @@ function formatRelative(value: string | null | undefined): string {
   return `${Math.round(diffMs / 86_400_000)}d ago`;
 }
 
+function scrollToId(id: string): void {
+  if (typeof document === "undefined") return;
+  const target = document.getElementById(id);
+  if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
 function KpiCell({
   label,
   value,
   tone = "neutral",
   testId,
+  scrollTo,
 }: {
   label: string;
   value: number | string;
   tone?: "neutral" | "primary" | "success" | "warning" | "destructive";
   testId?: string;
+  scrollTo?: string;
 }) {
   const toneClass = tone === "destructive"
     ? "border-destructive/40 bg-destructive/[0.04] text-destructive"
@@ -73,11 +181,24 @@ function KpiCell({
           ? "border-primary/40 bg-primary/[0.04] text-primary"
           : "border-border bg-muted/20 text-foreground";
 
+  const baseClass = `flex flex-col gap-1 rounded-md border px-3 py-2 ${toneClass}`;
+
+  if (scrollTo) {
+    return (
+      <button
+        type="button"
+        data-testid={testId}
+        onClick={() => scrollToId(scrollTo)}
+        className={`${baseClass} text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring`}
+      >
+        <div className="text-[10px] font-medium uppercase tracking-wider opacity-80">{label}</div>
+        <div className="font-mono text-xl leading-none">{value}</div>
+      </button>
+    );
+  }
+
   return (
-    <div
-      data-testid={testId}
-      className={`flex flex-col gap-1 rounded-md border px-3 py-2 ${toneClass}`}
-    >
+    <div data-testid={testId} className={baseClass}>
       <div className="text-[10px] font-medium uppercase tracking-wider opacity-80">{label}</div>
       <div className="font-mono text-xl leading-none">{value}</div>
     </div>
@@ -133,30 +254,29 @@ function RepoCard({ stats }: { stats: RepoStats }) {
 function DashboardActivityPanel({ activities }: { activities: ActivitySnapshot }) {
   return (
     <div className="flex flex-col gap-3">
-      <DetailPanel
-        title="Failed"
-        tone={activities.failed.length > 0 ? "destructive" : "neutral"}
-        testId="dashboard-activity-failed"
-        chip={<span className="font-mono text-[10px] text-muted-foreground">{activities.failed.length}</span>}
-      >
-        <div className="max-h-48 overflow-y-auto">
-          {activities.failed.length === 0 ? (
-            <div className="px-3 py-2 text-[12px] text-muted-foreground">No failures.</div>
-          ) : (
-            activities.failed.slice(0, 8).map((item) => (
-              <div key={item.id} className="border-b border-border/60 px-3 py-2 last:border-b-0">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="truncate text-[12px] text-foreground">{item.label}</span>
-                  <span className="font-mono text-[10px] text-muted-foreground">{formatRelative(item.updatedAt)}</span>
-                </div>
-                {item.detail && (
-                  <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{item.detail}</div>
-                )}
-              </div>
-            ))
-          )}
-        </div>
-      </DetailPanel>
+      <div id="failed-activity" className="scroll-mt-4">
+        <DetailPanel
+          title="Failed"
+          tone={activities.failed.length > 0 ? "destructive" : "neutral"}
+          testId="dashboard-activity-failed"
+          chip={<span className="font-mono text-[10px] text-muted-foreground">{activities.failed.length}</span>}
+        >
+          <div className="max-h-72 overflow-y-auto">
+            {activities.failed.length === 0 ? (
+              <div className="px-3 py-2 text-[12px] text-muted-foreground">No failures.</div>
+            ) : (
+              activities.failed.slice(0, 12).map((item) => (
+                <ActivityRow
+                  key={item.id}
+                  item={item}
+                  accent="destructive"
+                  leadingIcon={<AlertTriangle className="h-3 w-3 text-destructive" />}
+                />
+              ))
+            )}
+          </div>
+        </DetailPanel>
+      </div>
 
       <DetailPanel
         title="In progress"
@@ -169,18 +289,12 @@ function DashboardActivityPanel({ activities }: { activities: ActivitySnapshot }
             <div className="px-3 py-2 text-[12px] text-muted-foreground">No active jobs.</div>
           ) : (
             activities.inProgress.slice(0, 8).map((item) => (
-              <div key={item.id} className="border-b border-border/60 px-3 py-2 last:border-b-0">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="inline-flex items-center gap-1 truncate text-[12px] text-foreground">
-                    <Loader2 className="h-3 w-3 animate-spin text-primary" />
-                    {item.label}
-                  </span>
-                  <span className="font-mono text-[10px] text-muted-foreground">{formatRelative(item.startedAt ?? item.updatedAt)}</span>
-                </div>
-                {item.detail && (
-                  <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{item.detail}</div>
-                )}
-              </div>
+              <ActivityRow
+                key={item.id}
+                item={item}
+                leadingIcon={<Loader2 className="h-3 w-3 animate-spin text-primary" />}
+                timeRef="startedAt"
+              />
             ))
           )}
         </div>
@@ -196,15 +310,7 @@ function DashboardActivityPanel({ activities }: { activities: ActivitySnapshot }
             <div className="px-3 py-2 text-[12px] text-muted-foreground">Queue is empty.</div>
           ) : (
             activities.queued.slice(0, 8).map((item) => (
-              <div key={item.id} className="border-b border-border/60 px-3 py-2 last:border-b-0">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="truncate text-[12px] text-foreground">{item.label}</span>
-                  <span className="font-mono text-[10px] text-muted-foreground">{formatRelative(item.queuedAt)}</span>
-                </div>
-                {item.detail && (
-                  <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{item.detail}</div>
-                )}
-              </div>
+              <ActivityRow key={item.id} item={item} timeRef="queuedAt" />
             ))
           )}
         </div>
@@ -264,7 +370,14 @@ export default function Dashboard() {
             <span><span className="font-mono text-foreground">{totalPRs}</span> PRs</span>
             <span><span className="font-mono text-foreground">{totalIssues}</span> issues</span>
             {failedTotal > 0 && (
-              <span className="text-destructive"><span className="font-mono">{failedTotal}</span> failed</span>
+              <button
+                type="button"
+                onClick={() => scrollToId("failed-activity")}
+                data-testid="header-failed-link"
+                className="cursor-pointer rounded-md border border-destructive/40 bg-destructive/[0.06] px-1.5 py-0 text-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              >
+                <span className="font-mono">{failedTotal}</span> failed →
+              </button>
             )}
           </>
         )}
@@ -293,6 +406,7 @@ export default function Dashboard() {
               value={failedTotal}
               tone={failedTotal > 0 ? "destructive" : "neutral"}
               testId="kpi-failed"
+              scrollTo={failedTotal > 0 ? "failed-activity" : undefined}
             />
           </section>
 
