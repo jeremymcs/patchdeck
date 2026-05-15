@@ -764,7 +764,7 @@ function IssuesPage() {
     },
     [filteredIssues, issueNumberSearch, issues, selectedIssueId, selectedRepo, selectedWorkFilter],
   );
-  const { data: selectedIssueDetail, refetch: refetchSelectedIssueDetail } = useQuery<Issue>({
+  const { data: selectedIssueDetail } = useQuery<Issue>({
     queryKey: ["/api/issues/detail", selectedIssueFromList?.repo ?? "", selectedIssueFromList?.number ?? 0],
     queryFn: async () => {
       if (!selectedIssueFromList) {
