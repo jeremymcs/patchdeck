@@ -42,6 +42,8 @@ type OnboardingStatus = {
 type GitHubRateLimitState = {
   limited: boolean;
   resetAt: string | null;
+  recentlyLimited: boolean;
+  lastLimitedAt: string | null;
 };
 
 type CodeReviewPresence = {
@@ -272,7 +274,7 @@ export function OnboardingPanel() {
   if (isLoading || !status) return null;
 
   const effectiveGithubError = status.githubError
-    ?? (githubRateLimit?.limited ? "rate limit gate active" : undefined);
+    ?? ((githubRateLimit?.limited || githubRateLimit?.recentlyLimited) ? "rate limit gate active" : undefined);
   const transientGithubWarning = isTransientGitHubWarning(effectiveGithubError);
   const hasCurrentReviewer = status.repos.some((repo) => hasDetectedCodeReviewWorkflow(repo.codeReviews));
   const shouldUseCachedRepoStatus = transientGithubWarning && status.repos.length === 0 && lastHasTrackedRepo;

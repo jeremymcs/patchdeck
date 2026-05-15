@@ -175,18 +175,15 @@ describe("MemStorage", () => {
       assert.equal(prs[0].title, "Active");
     });
 
-    it("sorts by addedAt descending", async (t) => {
-      t.mock.timers.enable({ apis: ["Date"], now: new Date("2024-01-01T00:00:00.000Z") });
-
-      await storage.addPR(makePRInput({ title: "First" }));
-      t.mock.timers.tick(100);
-      await storage.addPR(makePRInput({ title: "Second" }));
+    it("sorts by number descending", async () => {
+      await storage.addPR(makePRInput({ title: "First", number: 10 }));
+      await storage.addPR(makePRInput({ title: "Second", number: 20 }));
 
       const prs = await storage.getPRs();
-      // Most recent first
       assert.equal(prs[0].title, "Second");
       assert.equal(prs[1].title, "First");
-      assert.ok(new Date(prs[0].addedAt).getTime() > new Date(prs[1].addedAt).getTime());
+      assert.equal(prs[0].number, 20);
+      assert.equal(prs[1].number, 10);
     });
   });
 

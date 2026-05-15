@@ -9,12 +9,14 @@ import type {
   DeploymentHealingSession,
   DeploymentHealingState,
   IssueEvaluation,
+  IssueSubtaskSet,
   LogEntry,
   FailureFingerprint,
   HealingAttempt,
   HealingAttemptStatus,
   NewPR,
   PR,
+  PRSummary,
   PRQuestion,
   HealingSession,
   HealingSessionState,
@@ -31,6 +33,7 @@ import {
   applyHealingAttemptUpdate,
   applyHealingSessionUpdate,
   applyIssueEvaluationUpdate,
+  applyIssueSubtaskSetUpdate,
   applyPRQuestionUpdate,
   applyPRUpdate,
   applyReleaseRunUpdate,
@@ -44,13 +47,14 @@ import {
   createHealingAttempt,
   createHealingSession,
   createIssueEvaluation,
+  createIssueSubtaskSet,
   createPR,
   createPRQuestion,
   createReleaseRun,
   createSocialChangelog,
   touchAgentRun,
 } from "@shared/models";
-import type { IStorage } from "./storage";
+import type { IStorage, StoredIssueRecord } from "./storage";
 import { DEFAULT_CONFIG } from "./defaultConfig";
 
 export class MemStorage implements IStorage {
@@ -74,6 +78,8 @@ export class MemStorage implements IStorage {
   private deploymentHealingSessions: Map<string, DeploymentHealingSession> = new Map();
   private repoSettings: Map<string, WatchedRepo> = new Map();
   private issueEvaluations: Map<string, IssueEvaluation> = new Map();
+  private issueSubtaskSets: Map<string, IssueSubtaskSet> = new Map();
+  private syncedIssues: Map<string, StoredIssueRecord> = new Map();
 
   private cloneConfig(config: Config): Config {
     return structuredClone(config);
@@ -115,20 +121,39 @@ export class MemStorage implements IStorage {
     };
   }
 
+  private toPRSummary(pr: PR): PRSummary {
+    const { feedbackItems: _feedbackItems, ...summary } = pr;
+    return summary;
+  }
+
   async getPRs(): Promise<PR[]> {
     return Array.from(this.prs.values())
       .filter((pr) => pr.status !== "archived")
-      .sort((a, b) => new Date(b.addedAt).getTime() - new Date(a.addedAt).getTime());
+      .sort((a, b) => b.number - a.number);
   }
 
   async getArchivedPRs(): Promise<PR[]> {
     return Array.from(this.prs.values())
       .filter((pr) => pr.status === "archived")
-      .sort((a, b) => new Date(b.addedAt).getTime() - new Date(a.addedAt).getTime());
+      .sort((a, b) => b.number - a.number);
   }
 
   async getPR(id: string): Promise<PR | undefined> {
     return this.prs.get(id);
+  }
+
+  async getPRSummaries(): Promise<PRSummary[]> {
+    return Array.from(this.prs.values())
+      .filter((pr) => pr.status !== "archived")
+      .sort((a, b) => b.number - a.number)
+      .map((pr) => this.toPRSummary(pr));
+  }
+
+  async getArchivedPRSummaries(): Promise<PRSummary[]> {
+    return Array.from(this.prs.values())
+      .filter((pr) => pr.status === "archived")
+      .sort((a, b) => b.number - a.number)
+      .map((pr) => this.toPRSummary(pr));
   }
 
   async getPRByRepoAndNumber(repo: string, number: number): Promise<PR | undefined> {
@@ -294,6 +319,85 @@ export class MemStorage implements IStorage {
       : createIssueEvaluation(evaluation);
     this.issueEvaluations.set(next.targetId, next);
     return { ...next, safetyFlags: [...next.safetyFlags], recommendedLabels: [...next.recommendedLabels] };
+  }
+
+  async getIssueSubtasks(targetId: string): Promise<IssueSubtaskSet | undefined> {
+    const set = this.issueSubtaskSets.get(targetId);
+    return set ? { ...set, subtasks: set.subtasks.map((task) => ({ ...task })) } : undefined;
+  }
+
+  async upsertIssueSubtasks(
+    input: Omit<IssueSubtaskSet, "analyzedAt" | "updatedAt"> & { analyzedAt?: string },
+  ): Promise<IssueSubtaskSet> {
+    const existing = this.issueSubtaskSets.get(input.targetId);
+    const next = existing
+      ? applyIssueSubtaskSetUpdate(existing, { ...input, analyzedAt: input.analyzedAt ?? existing.analyzedAt })
+      : createIssueSubtaskSet(input);
+    this.issueSubtaskSets.set(next.targetId, next);
+    return { ...next, subtasks: next.subtasks.map((task) => ({ ...task })) };
+  }
+
+  async markRepoIssuesStale(repo: string): Promise<void> {
+    for (const [key, record] of Array.from(this.syncedIssues.entries())) {
+      if (record.repo !== repo) continue;
+      this.syncedIssues.set(key, { ...record, isOpen: false });
+    }
+  }
+
+  async upsertSyncedIssues(repo: string, issues: StoredIssueRecord["payload"][], seenAt: string): Promise<void> {
+    for (const issue of issues) {
+      const key = `${repo}#${issue.number}`;
+      const existing = this.syncedIssues.get(key);
+      if (existing?.isWorked) {
+        continue;
+      }
+      this.syncedIssues.set(key, {
+        repo,
+        number: issue.number,
+        payload: { ...issue },
+        isOpen: true,
+        isWorked: existing?.isWorked ?? false,
+        firstSeenAt: existing?.firstSeenAt ?? seenAt,
+        lastSeenAt: seenAt,
+      });
+    }
+  }
+
+  async listSyncedIssues(input: { repos: string[]; limit: number; offset: number; includeWorked?: boolean }): Promise<{ items: StoredIssueRecord[]; hasMore: boolean }> {
+    const repos = new Set(input.repos.map((repo) => repo.toLowerCase()));
+    const includeWorked = input.includeWorked ?? false;
+    const all = Array.from(this.syncedIssues.values())
+      .filter((record) => record.isOpen && repos.has(record.repo.toLowerCase()) && (includeWorked || !record.isWorked))
+      .sort((a, b) => b.number - a.number);
+    const items = all.slice(input.offset, input.offset + input.limit).map((record) => structuredClone(record));
+    return { items, hasMore: input.offset + items.length < all.length };
+  }
+
+  async listSyncedIssueCounts(input: { repos: string[]; includeWorked?: boolean }): Promise<{ totalCount: number; repoTotals: Record<string, number> }> {
+    const repos = new Set(input.repos.map((repo) => repo.toLowerCase()));
+    const includeWorked = input.includeWorked ?? false;
+    const repoTotals: Record<string, number> = {};
+    let totalCount = 0;
+    for (const record of Array.from(this.syncedIssues.values())) {
+      if (!record.isOpen) continue;
+      if (!repos.has(record.repo.toLowerCase())) continue;
+      if (!includeWorked && record.isWorked) continue;
+      repoTotals[record.repo] = (repoTotals[record.repo] ?? 0) + 1;
+      totalCount += 1;
+    }
+    return { totalCount, repoTotals };
+  }
+
+  async getSyncedIssue(repo: string, number: number): Promise<StoredIssueRecord | undefined> {
+    const record = this.syncedIssues.get(`${repo}#${number}`);
+    return record ? structuredClone(record) : undefined;
+  }
+
+  async markSyncedIssueWorked(repo: string, number: number): Promise<void> {
+    const key = `${repo}#${number}`;
+    const existing = this.syncedIssues.get(key);
+    if (!existing) return;
+    this.syncedIssues.set(key, { ...existing, isWorked: true });
   }
 
   private syncRepoSettings(): void {

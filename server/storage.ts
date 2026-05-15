@@ -9,6 +9,7 @@ import type {
   DeploymentHealingSession,
   DeploymentHealingState,
   IssueEvaluation,
+  IssueSubtaskSet,
   LogEntry,
   FailureFingerprint,
   HealingAttempt,
@@ -17,6 +18,7 @@ import type {
   HealingSessionState,
   NewPR,
   PR,
+  PRSummary,
   PRQuestion,
   ReleaseRun,
   ReleaseRunStatus,
@@ -27,10 +29,36 @@ import type {
 export { MemStorage } from "./memoryStorage";
 import { SqliteStorage } from "./sqliteStorage";
 
+export type StoredIssueRecord = {
+  repo: string;
+  number: number;
+  payload: {
+    number: number;
+    title: string;
+    body: string | null;
+    bodyHtml: string | null;
+    url: string;
+    repoFullName: string;
+    repoCloneUrl: string;
+    author: string;
+    labels: string[];
+    assignees: string[];
+    comments: number;
+    createdAt: string;
+    updatedAt: string;
+  };
+  isOpen: boolean;
+  isWorked: boolean;
+  firstSeenAt: string;
+  lastSeenAt: string;
+};
+
 export interface IStorage {
   // PRs
   getPRs(): Promise<PR[]>;
   getArchivedPRs(): Promise<PR[]>;
+  getPRSummaries(): Promise<PRSummary[]>;
+  getArchivedPRSummaries(): Promise<PRSummary[]>;
   getPR(id: string): Promise<PR | undefined>;
   getPRByRepoAndNumber(repo: string, number: number): Promise<PR | undefined>;
   addPR(pr: NewPR): Promise<PR>;
@@ -75,6 +103,14 @@ export interface IStorage {
   updateRepoSettings(repo: string, updates: Partial<Omit<WatchedRepo, "repo">>): Promise<WatchedRepo>;
   getIssueEvaluation(targetId: string): Promise<IssueEvaluation | undefined>;
   upsertIssueEvaluation(evaluation: Omit<IssueEvaluation, "createdAt" | "updatedAt">): Promise<IssueEvaluation>;
+  getIssueSubtasks(targetId: string): Promise<IssueSubtaskSet | undefined>;
+  upsertIssueSubtasks(set: Omit<IssueSubtaskSet, "analyzedAt" | "updatedAt"> & { analyzedAt?: string }): Promise<IssueSubtaskSet>;
+  markRepoIssuesStale(repo: string): Promise<void>;
+  upsertSyncedIssues(repo: string, issues: StoredIssueRecord["payload"][], seenAt: string): Promise<void>;
+  listSyncedIssues(input: { repos: string[]; limit: number; offset: number; includeWorked?: boolean }): Promise<{ items: StoredIssueRecord[]; hasMore: boolean }>;
+  listSyncedIssueCounts(input: { repos: string[]; includeWorked?: boolean }): Promise<{ totalCount: number; repoTotals: Record<string, number> }>;
+  getSyncedIssue(repo: string, number: number): Promise<StoredIssueRecord | undefined>;
+  markSyncedIssueWorked(repo: string, number: number): Promise<void>;
 
   // CI healing
   getHealingSession(id: string): Promise<HealingSession | undefined>;

@@ -299,6 +299,24 @@ export async function applyFixesWithAgent(params: {
   );
 }
 
+export async function runAgentOneShot(params: {
+  agent: CodingAgent;
+  prompt: string;
+  cwd: string;
+  settings?: AgentRuntimeSettings;
+  env?: NodeJS.ProcessEnv;
+  timeoutMs?: number;
+}): Promise<CommandResult> {
+  return applyFixesWithAgent({
+    agent: params.agent,
+    cwd: params.cwd,
+    prompt: params.prompt,
+    settings: params.settings,
+    env: params.env,
+    timeoutMs: params.timeoutMs ?? 30000,
+  });
+}
+
 export function buildAgentCommandArgs(
   agent: CodingAgent,
   args: string[],

@@ -12,11 +12,15 @@ import {
   addLabelsToIssue,
   createIssueComment,
   fetchIssueSummary,
+  fetchPullDiff,
+  parsePRUrl,
   parseRepoSlug,
   resolveGitHubAuthToken,
 } from "./github";
 import { buildIssueEvaluationComment, evaluateIssueForAutomation } from "./issueEvaluator";
-import { buildIssueReplyBody, buildIssueWorkStatusComment, buildPullRequestBody } from "./issueFormatter";
+import { buildIssueReplyBody, buildIssueVerifyComment, buildIssueWorkStatusComment, buildPullRequestBody } from "./issueFormatter";
+import { decomposeIssueBody, hashIssueBody } from "./issueDecompose";
+import { verifySubtasksAgainstPr } from "./issueVerify";
 import { runIssueWorkRepair } from "./issueWorkAgent";
 import { answerPRQuestion } from "./prQuestionAgent";
 import type { ReleaseManager } from "./releaseManager";
@@ -218,6 +222,115 @@ export function createBackgroundJobHandlers(params: {
       );
     },
 
+    verify_issue: async (job) => {
+      const repo = readStringPayload(job, "repo");
+      const issueNumber = Number(job.payload.issueNumber);
+      const workPrUrl = readStringPayload(job, "workPrUrl");
+      const workPrNumber = Number(job.payload.workPrNumber);
+
+      if (!repo || !workPrUrl || !Number.isFinite(issueNumber) || !Number.isFinite(workPrNumber)) {
+        throw new CancelBackgroundJobError(`Background job ${job.id} is missing required verify fields`);
+      }
+
+      const parsedRepo = parseRepoSlug(repo);
+      if (!parsedRepo) {
+        throw new CancelBackgroundJobError(`Background job ${job.id} has invalid repo context: ${repo}`);
+      }
+
+      const parsedPr = parsePRUrl(workPrUrl);
+      if (!parsedPr) {
+        throw new CancelBackgroundJobError(`Background job ${job.id} has invalid work PR URL: ${workPrUrl}`);
+      }
+
+      const config = await storage.getConfig();
+      const octokit = await buildOctokitFn(config);
+      const issue = await fetchIssueSummary(octokit, { ...parsedRepo, number: issueNumber });
+      const targetId = `${issue.repoFullName}#${issue.number}`;
+      const baseMetadata = {
+        repo: issue.repoFullName,
+        issueNumber: issue.number,
+        prNumber: workPrNumber,
+        prUrl: workPrUrl,
+        jobId: job.id,
+      };
+
+      const diff = await fetchPullDiff(octokit, parsedPr);
+
+      const repoSettings = await storage.getRepoSettings(issue.repoFullName);
+      const agent = resolveRepoCodingAgent(config, repoSettings);
+      const agentSettings = resolveRepoAgentRuntimeSettings(config, repoSettings);
+
+      const freshDecomposed = await decomposeIssueBody({
+        body: issue.body,
+        agent,
+        settings: agentSettings,
+      });
+      const existingSet = await storage.getIssueSubtasks(targetId);
+      const subtasks = freshDecomposed.length >= 2
+        ? freshDecomposed
+        : existingSet?.subtasks?.length
+          ? existingSet.subtasks
+          : [{
+            id: "issue",
+            title: issue.title.slice(0, 120),
+            summary: (issue.body ?? "").trim().slice(0, 500) || issue.title.slice(0, 500),
+            status: "pending" as const,
+          }];
+
+      const result = await verifySubtasksAgainstPr({
+        issueTitle: issue.title,
+        issueBody: issue.body,
+        subtasks,
+        prDiff: diff,
+        agent,
+        settings: agentSettings,
+      });
+
+      await storage.upsertIssueSubtasks({
+        targetId,
+        repo: issue.repoFullName,
+        issueNumber: issue.number,
+        subtasks: result.subtasks,
+        analyzedBodyHash: hashIssueBody(issue.body),
+      });
+
+      if (config.postGitHubProgressReplies) {
+        try {
+          await octokit.issues.createComment({
+            owner: parsedPr.owner,
+            repo: parsedPr.repo,
+            issue_number: workPrNumber,
+            body: buildIssueVerifyComment({
+              repoFullName: issue.repoFullName,
+              issueNumber: issue.number,
+              issueTitle: issue.title,
+              issueUrl: issue.url,
+              prNumber: workPrNumber,
+              prUrl: workPrUrl,
+              subtasks: result.subtasks,
+              doneCount: result.doneCount,
+              totalCount: result.totalCount,
+            }),
+          });
+        } catch (error) {
+          await addIssueWorkStageLog(
+            targetId,
+            "verifying",
+            `Failed to post verification comment on PR #${workPrNumber}: ${error instanceof Error ? error.message : String(error)}`,
+            baseMetadata,
+            "warn",
+          );
+        }
+      }
+
+      await addIssueWorkStageLog(
+        targetId,
+        "verifying",
+        `Verified work PR #${workPrNumber} for ${issue.repoFullName}#${issue.number} — ${result.doneCount} of ${result.totalCount} subtasks addressed`,
+        baseMetadata,
+      );
+    },
+
     work_issue: async (job) => {
       const repo = readStringPayload(job, "repo");
       const issueNumber = Number(job.payload.issueNumber);
@@ -281,6 +394,25 @@ export function createBackgroundJobHandlers(params: {
         const repoSettings = await storage.getRepoSettings(issue.repoFullName);
         const agent = resolveRepoCodingAgent(config, repoSettings);
         const agentSettings = resolveRepoAgentRuntimeSettings(config, repoSettings);
+
+        const bodyHash = hashIssueBody(issue.body);
+        const existingSubtasks = await storage.getIssueSubtasks(targetId);
+        let subtasks = existingSubtasks?.subtasks ?? [];
+        if (!existingSubtasks || existingSubtasks.analyzedBodyHash !== bodyHash) {
+          subtasks = await decomposeIssueBody({
+            body: issue.body,
+            agent,
+            settings: agentSettings,
+          });
+          await storage.upsertIssueSubtasks({
+            targetId,
+            repo: issue.repoFullName,
+            issueNumber: issue.number,
+            subtasks,
+            analyzedBodyHash: bodyHash,
+          });
+        }
+
         repairResult = await runIssueWorkRepairFn({
           repo: issue.repoFullName,
           issueNumber: issue.number,
@@ -293,6 +425,7 @@ export function createBackgroundJobHandlers(params: {
           repoCloneUrl: buildGitHubCloneUrl(issue.repoFullName, githubToken),
           agent,
           agentSettings,
+          subtasks: subtasks.length >= 2 ? subtasks : undefined,
         });
       } catch (error) {
         if (progressRepliesEnabled) {
@@ -356,6 +489,16 @@ export function createBackgroundJobHandlers(params: {
         throw new TerminalBackgroundJobError(repairResult.rejectionReason ?? "Issue work not accepted");
       }
 
+      if (repairResult.subtasks && repairResult.subtasks.length >= 2) {
+        await storage.upsertIssueSubtasks({
+          targetId,
+          repo: issue.repoFullName,
+          issueNumber: issue.number,
+          subtasks: repairResult.subtasks,
+          analyzedBodyHash: hashIssueBody(issue.body),
+        });
+      }
+
       await addIssueWorkStageLog(
         targetId,
         "verifying",
@@ -407,6 +550,7 @@ export function createBackgroundJobHandlers(params: {
           issueUrl: issue.url,
           summary: repairResult.summary,
           branch: repairResult.fixBranch,
+          subtasks: repairResult.subtasks,
         }),
       });
 
@@ -439,6 +583,7 @@ export function createBackgroundJobHandlers(params: {
           branch: repairResult.fixBranch,
         },
       );
+      await storage.markSyncedIssueWorked(issue.repoFullName, issue.number);
     },
 
     answer_pr_question: async (job) => {

@@ -12,6 +12,7 @@ import type {
   LogEntry,
   OperatorWarning,
   PR,
+  PRSummary,
   PRQuestion,
   ReleaseRun,
   ReleaseSocialPost,
@@ -62,7 +63,6 @@ import {
   listOpenLinkedPullRequestsForIssue,
   listReleasesForRepo,
   listUnreleasedMergedPulls,
-  type GitHubIssueSummary,
   type MergedPRSummary,
   parsePRUrl,
   parseRepoSlug,
@@ -119,7 +119,7 @@ export type AppRuntime = {
   updateRepoSettings(repoInput: string, updates: Partial<Omit<WatchedRepo, "repo">>): Promise<WatchedRepo>;
   syncRepos(): Promise<{ ok: true }>;
   createManualRelease(repoInput: string): Promise<ReleaseRun>;
-  listPRs(view?: "active" | "archived"): Promise<PR[]>;
+  listPRs(view?: "active" | "archived"): Promise<PRSummary[]>;
   getPR(id: string): Promise<PR | null>;
   addPR(url: string): Promise<PR>;
   removePR(id: string): Promise<{ ok: true }>;
@@ -155,6 +155,7 @@ export type AppRuntime = {
   getIssue(repo: string, number: number): Promise<Issue>;
   updateIssueLabels(repo: string, number: number, updates: { add?: string[]; remove?: string[] }): Promise<Issue>;
   evaluateIssue(repo: string, number: number): Promise<Issue>;
+  verifyIssueWork(repo: string, number: number): Promise<Issue>;
   workIssue(repo: string, number: number): Promise<Issue>;
   clearIssueWorkFailures(repo: string, number: number): Promise<{ repo: string; number: number; id: string; cleared: number }>;
   syncIssue(repo: string, number: number): Promise<Issue>;
@@ -184,6 +185,8 @@ function fallbackJobLabel(job: BackgroundJob): string {
       return "Answering PR question";
     case "evaluate_issue":
       return "Evaluating issue";
+    case "verify_issue":
+      return "Verifying issue work";
     case "work_issue":
       return "Working issue";
     case "generate_social_changelog":
@@ -217,11 +220,9 @@ const AUTO_WORK_READY_LABELS = new Set([
   "agent-ready",
   "ready",
 ]);
-const DEFAULT_ISSUES_PAGE_SIZE = 20;
+const DEFAULT_ISSUES_PAGE_SIZE = 100;
 const MAX_ISSUES_PAGE_SIZE = 100;
-const ISSUES_PAGE_CACHE_TTL_HOT_MS = 60 * 1000;
-const ISSUES_PAGE_CACHE_TTL_WARM_MS = 10 * 60 * 1000;
-const ISSUES_PAGE_CACHE_TTL_COLD_MS = 30 * 60 * 1000;
+const MAX_AUTO_ISSUE_SWEEP_PAGES = 50;
 const AUTO_WORK_BLOCKED_LABELS = new Set([
   "blocked",
   "question",
@@ -793,6 +794,7 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
         "runtime:1",
         buildBackgroundJobDedupeKey("sync_watched_repos", "runtime:1"),
       );
+      await syncStoredIssuesStep();
       await queueAutomaticIssueWorkInternal();
     },
     (error) => {
@@ -816,24 +818,9 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
     lastSyncSucceededAt: string | null;
     lastSyncError: string | null;
   }>();
-  const issuePageCache = new Map<string, {
-    items: GitHubIssueSummary[];
-    hasMore: boolean;
-    fetchedAt: string;
-    staleAt: string;
-    expiresAtMs: number;
-  }>();
-  const issuePageRefreshes = new Map<string, Promise<void>>();
-
-  function issuePageCacheKey(repo: string, limit: number, offset: number): string {
-    return `${repo}|${limit}|${offset}`;
-  }
-
-  function issuePageCacheTtlMs(offset: number): number {
-    if (offset <= 0) return ISSUES_PAGE_CACHE_TTL_HOT_MS;
-    if (offset < 100) return ISSUES_PAGE_CACHE_TTL_WARM_MS;
-    return ISSUES_PAGE_CACHE_TTL_COLD_MS;
-  }
+  const issueRepoSyncOffsets = new Map<string, number>();
+  const issueRepoBackoffUntilMs = new Map<string, number>();
+  let issueRepoCursor = 0;
 
   function markIssueSyncAttempt(targetId: string): string {
     const now = new Date().toISOString();
@@ -925,6 +912,77 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
 
     notifyChange();
     return applyIssueWorkState(issue);
+  }
+
+  async function verifyIssueWorkInternal(
+    repoInput: string,
+    number: number,
+  ): Promise<Issue> {
+    const parsedRepo = parseRepoSlug(repoInput);
+    if (!parsedRepo) {
+      throw new AppRuntimeError(400, "Invalid repository. Use owner/repo or https://github.com/owner/repo");
+    }
+
+    const canonical = formatRepoSlug(parsedRepo);
+    const config = await storage.getConfig();
+    if (!config.watchedRepos.includes(canonical)) {
+      throw new AppRuntimeError(404, `Repository ${canonical} is not being watched`);
+    }
+
+    const runtimeState = await storage.getRuntimeState();
+    if (runtimeState.drainMode) {
+      await rejectManualRunDuringDrain(runtimeState, {
+        logMessageBase: "Manual issue verification blocked because drain mode is enabled",
+        metadata: { repo: canonical, issueNumber: number },
+      });
+    }
+
+    const octokit = await buildOctokit(config);
+    const issueSummary = await fetchIssueSummary(octokit, { ...parsedRepo, number });
+    const enriched = await applyIssueWorkState(issueSummary);
+    const targetId = formatIssueTargetId(issueSummary.repoFullName, issueSummary.number);
+
+    if (!enriched.workPrUrl || enriched.workPrNumber === undefined || enriched.workPrNumber === null) {
+      throw new AppRuntimeError(400, `Issue ${issueSummary.repoFullName}#${issueSummary.number} has no work PR to verify yet`);
+    }
+
+    const job = await scheduleBackgroundJob(
+      "verify_issue",
+      targetId,
+      buildBackgroundJobDedupeKey("verify_issue", targetId),
+      {
+        repo: issueSummary.repoFullName,
+        issueNumber: issueSummary.number,
+        issueTitle: issueSummary.title,
+        issueUrl: issueSummary.url,
+        workPrNumber: enriched.workPrNumber,
+        workPrUrl: enriched.workPrUrl,
+        ...buildActivityPayload({
+          label: `Verifying issue #${issueSummary.number}`,
+          detail: `${issueSummary.repoFullName} - ${issueSummary.title}`,
+          targetUrl: enriched.workPrUrl,
+        }),
+      },
+    );
+
+    await storage.addLog(
+      targetId,
+      "info",
+      `Queued verification for ${issueSummary.repoFullName}#${issueSummary.number} against PR #${enriched.workPrNumber}`,
+      {
+        metadata: {
+          repo: issueSummary.repoFullName,
+          issueNumber: issueSummary.number,
+          prNumber: enriched.workPrNumber,
+          prUrl: enriched.workPrUrl,
+          jobId: job.id,
+          stage: "queued_verification",
+        },
+      },
+    );
+
+    notifyChange();
+    return enriched;
   }
 
   async function queueIssueWorkInternal(
@@ -1031,6 +1089,7 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
     const workState = issueWorkStatusFromJobs(issueJobs);
     const workLogs = latestJob ? await storage.getLogs(targetId) : [];
     const evaluation = await storage.getIssueEvaluation(targetId);
+    const subtaskSet = await storage.getIssueSubtasks(targetId);
     const readyPr = latestJob?.status === "completed"
       ? issueWorkPrFromLogs(workLogs, issue.repoFullName)
       : null;
@@ -1094,7 +1153,56 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       evaluationSafetyFlags: evaluation?.safetyFlags ?? [],
       evaluationRecommendedLabels: evaluation?.recommendedLabels ?? [],
       evaluationUpdatedAt: evaluation?.updatedAt ?? null,
+      subtasks: subtaskSet?.subtasks ?? null,
     };
+  }
+
+  async function syncStoredIssuesStep(options?: { fullSweep?: boolean }): Promise<void> {
+    const config = await storage.getConfig();
+    if (config.watchedRepos.length === 0) return;
+    const octokit = await buildOctokit(config);
+    const nowMs = Date.now();
+    const repoCount = config.watchedRepos.length;
+    const candidates = options?.fullSweep
+      ? config.watchedRepos
+      : Array.from({ length: repoCount }).map((_, i) => config.watchedRepos[(issueRepoCursor + i) % repoCount]).filter(Boolean) as string[];
+
+    for (const repoSlug of candidates) {
+      try {
+        const backoffUntilMs = issueRepoBackoffUntilMs.get(repoSlug) ?? 0;
+        if (backoffUntilMs > nowMs) continue;
+        const parsed = parseRepoSlug(repoSlug);
+        if (!parsed) continue;
+        const limit = MAX_ISSUES_PAGE_SIZE;
+        const loops = options?.fullSweep ? MAX_AUTO_ISSUE_SWEEP_PAGES : 1;
+        let nextOffset = options?.fullSweep ? 0 : (issueRepoSyncOffsets.get(repoSlug) ?? 0);
+        let didWork = false;
+        for (let i = 0; i < loops; i += 1) {
+          const page = await listOpenIssuesForRepo(octokit, parsed, { limit, offset: nextOffset });
+          const seenAt = new Date().toISOString();
+          if (nextOffset === 0) {
+            await storage.markRepoIssuesStale(repoSlug);
+          }
+          await storage.upsertSyncedIssues(repoSlug, page.items, seenAt);
+          nextOffset = page.hasMore ? nextOffset + limit : 0;
+          issueRepoSyncOffsets.set(repoSlug, nextOffset);
+          didWork = true;
+          if (!page.hasMore || !options?.fullSweep) break;
+        }
+        if (didWork) {
+          issueRepoBackoffUntilMs.delete(repoSlug);
+          const index = config.watchedRepos.indexOf(repoSlug);
+          issueRepoCursor = index === -1 ? issueRepoCursor : (index + 1) % repoCount;
+          if (!options?.fullSweep) return;
+        }
+      } catch (error) {
+        issueRepoBackoffUntilMs.set(repoSlug, Date.now() + 60_000);
+        log.warn(
+          { err: error instanceof Error ? error.message : String(error), repo: repoSlug },
+          "Issue sync step failed; backing off",
+        );
+      }
+    }
   }
 
   async function listIssuesInternal(input?: { limit?: number; offset?: number }): Promise<IssueListPage> {
@@ -1103,89 +1211,22 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
     const config = await storage.getConfig();
     const nowMs = Date.now();
     if (config.watchedRepos.length === 0) {
-      const ttlMs = issuePageCacheTtlMs(offset);
       return {
         items: [],
         limit,
         offset,
         nextOffset: null,
         hasMore: false,
+        totalCount: 0,
+        repoTotals: {},
         fetchedAt: new Date(nowMs).toISOString(),
-        staleAt: new Date(nowMs + ttlMs).toISOString(),
+        staleAt: new Date(nowMs).toISOString(),
       };
     }
 
+    const synced = await storage.listSyncedIssues({ repos: config.watchedRepos, limit, offset });
+    const counts = await storage.listSyncedIssueCounts({ repos: config.watchedRepos });
     const octokit = await buildOctokit(config);
-    const refreshIssuePageCache = async (parsed: ReturnType<typeof parseRepoSlug>, limitValue: number, offsetValue: number): Promise<void> => {
-      if (!parsed) return;
-      const canonicalRepo = formatRepoSlug(parsed);
-      const cacheKey = issuePageCacheKey(canonicalRepo, limitValue, offsetValue);
-      const existing = issuePageRefreshes.get(cacheKey);
-      if (existing) {
-        await existing;
-        return;
-      }
-
-      const refreshPromise = (async () => {
-        const fetched = await listOpenIssuesForRepo(octokit, parsed, { limit: limitValue, offset: offsetValue });
-        const now = Date.now();
-        const ttlMs = issuePageCacheTtlMs(offsetValue);
-        issuePageCache.set(cacheKey, {
-          items: fetched.items,
-          hasMore: fetched.hasMore,
-          fetchedAt: new Date(now).toISOString(),
-          staleAt: new Date(now + ttlMs).toISOString(),
-          expiresAtMs: now + ttlMs,
-        });
-      })();
-
-      issuePageRefreshes.set(cacheKey, refreshPromise);
-      try {
-        await refreshPromise;
-      } finally {
-        issuePageRefreshes.delete(cacheKey);
-      }
-    };
-
-    const perRepoPages = await Promise.all(
-      config.watchedRepos.map(async (repoSlug) => {
-        const ttlMs = issuePageCacheTtlMs(offset);
-        const fetchedAt = new Date(nowMs).toISOString();
-        const staleAt = new Date(nowMs + ttlMs).toISOString();
-        const parsed = parseRepoSlug(repoSlug);
-        if (!parsed) {
-          return { items: [], hasMore: false, fetchedAt, staleAt };
-        }
-        const canonicalRepo = formatRepoSlug(parsed);
-        const cacheKey = issuePageCacheKey(canonicalRepo, limit, offset);
-        const cached = issuePageCache.get(cacheKey);
-        if (cached) {
-          if (cached.expiresAtMs <= nowMs) {
-            void refreshIssuePageCache(parsed, limit, offset).catch((error) => {
-              log.warn(
-                {
-                  err: error instanceof Error ? error.message : String(error),
-                  repo: canonicalRepo,
-                  limit,
-                  offset,
-                },
-                "Issue page cache refresh failed",
-              );
-            });
-          }
-          return { items: cached.items, hasMore: cached.hasMore, fetchedAt: cached.fetchedAt, staleAt: cached.staleAt };
-        }
-
-        await refreshIssuePageCache(parsed, limit, offset);
-        const refreshed = issuePageCache.get(cacheKey);
-        return {
-          items: refreshed?.items ?? [],
-          hasMore: refreshed?.hasMore ?? false,
-          fetchedAt: refreshed?.fetchedAt ?? fetchedAt,
-          staleAt: refreshed?.staleAt ?? staleAt,
-        };
-      }),
-    );
     const workJobs = await storage.listBackgroundJobs({ kind: "work_issue" });
     const workJobsByTarget = new Map<string, BackgroundJob[]>();
 
@@ -1195,7 +1236,8 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       workJobsByTarget.set(job.targetId, existing);
     }
 
-    const issuesWithWorkLinks = await Promise.all(perRepoPages.flatMap((repoPage) => repoPage.items).map((issue) => {
+    const issuesWithWorkLinks = await Promise.all(synced.items.map((record) => {
+      const issue = record.payload;
       const targetId = formatIssueTargetId(issue.repoFullName, issue.number);
       const attemptedAt = markIssueSyncAttempt(targetId);
       markIssueSyncSuccess(targetId, attemptedAt);
@@ -1203,16 +1245,18 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
     }));
 
     const sortedItems = issuesWithWorkLinks
-      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-    const hasMore = perRepoPages.some((repoPage) => repoPage.hasMore);
-    const fetchedAtMs = Math.min(...perRepoPages.map((repoPage) => new Date(repoPage.fetchedAt).getTime()));
-    const staleAtMs = Math.min(...perRepoPages.map((repoPage) => new Date(repoPage.staleAt).getTime()));
+      .sort((a, b) => b.number - a.number);
+    const hasMore = synced.hasMore;
+    const fetchedAtMs = Date.now();
+    const staleAtMs = fetchedAtMs;
     return {
       items: sortedItems,
       limit,
       offset,
       nextOffset: hasMore ? offset + limit : null,
       hasMore,
+      totalCount: counts.totalCount,
+      repoTotals: counts.repoTotals,
       fetchedAt: new Date(fetchedAtMs).toISOString(),
       staleAt: new Date(staleAtMs).toISOString(),
     };
@@ -1241,6 +1285,33 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       markIssueSyncFailure(targetId, attemptedAt, getErrorMessage(error));
       throw error;
     }
+  }
+
+  async function syncIssueInternal(repoInput: string, number: number): Promise<Issue> {
+    const parsedRepo = parseRepoSlug(repoInput);
+    if (!parsedRepo) {
+      throw new AppRuntimeError(400, "Invalid repository. Use owner/repo or https://github.com/owner/repo");
+    }
+
+    const canonical = formatRepoSlug(parsedRepo);
+    const config = await storage.getConfig();
+    if (!config.watchedRepos.includes(canonical)) {
+      throw new AppRuntimeError(404, `Repository ${canonical} is not being watched`);
+    }
+
+    const existing = await storage.getSyncedIssue(canonical, number);
+    const targetId = formatIssueTargetId(canonical, number);
+    const attemptedAt = markIssueSyncAttempt(targetId);
+    if (existing?.isWorked) {
+      markIssueSyncSuccess(targetId, attemptedAt);
+      return applyIssueWorkState(existing.payload, { includePrMergeability: true });
+    }
+
+    const octokit = await buildOctokit(config);
+    const issue = await fetchIssueSummary(octokit, { ...parsedRepo, number });
+    await storage.upsertSyncedIssues(canonical, [issue], new Date().toISOString());
+    markIssueSyncSuccess(targetId, attemptedAt);
+    return applyIssueWorkState(issue, { includePrMergeability: true, octokit });
   }
 
   async function updateIssueLabelsInternal(
@@ -1345,13 +1416,26 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       return;
     }
 
-    const [repoSettings, issuesPage, evaluationJobs, workJobs] = await Promise.all([
+    const [repoSettings, firstIssuesPage, evaluationJobs, workJobs] = await Promise.all([
       storage.listRepoSettings(),
       listIssuesInternal({ limit: MAX_ISSUES_PAGE_SIZE, offset: 0 }),
       storage.listBackgroundJobs({ kind: "evaluate_issue" }),
       storage.listBackgroundJobs({ kind: "work_issue" }),
     ]);
-    const issues = issuesPage.items;
+    const issuesById = new Map(firstIssuesPage.items.map((issue) => [issue.id, issue]));
+    let nextOffset = firstIssuesPage.nextOffset;
+    let pageCount = 1;
+    while (nextOffset !== null && pageCount < MAX_AUTO_ISSUE_SWEEP_PAGES) {
+      const page = await listIssuesInternal({ limit: MAX_ISSUES_PAGE_SIZE, offset: nextOffset });
+      for (const issue of page.items) {
+        if (!issuesById.has(issue.id)) {
+          issuesById.set(issue.id, issue);
+        }
+      }
+      nextOffset = page.nextOffset;
+      pageCount += 1;
+    }
+    const issues = Array.from(issuesById.values());
 
     const isJobActive = (status: string) => status === "queued" || status === "leased";
     const activeEvaluationTargets = new Set(
@@ -1869,7 +1953,13 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
     },
 
     async syncRepos() {
-      await watcherScheduler.runAndReportErrors();
+      const runtimeState = await storage.getRuntimeState();
+      if (runtimeState.drainMode) {
+        return { ok: true as const };
+      }
+
+      await babysitter.syncAndBabysitTrackedRepos({ includeAllOpenPrs: true, fullSweep: true });
+      await syncStoredIssuesStep({ fullSweep: true });
       notifyChange();
       return { ok: true as const };
     },
@@ -1907,7 +1997,7 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
     },
 
     async syncIssue(repoInput, number) {
-      return getIssueInternal(repoInput, number);
+      return syncIssueInternal(repoInput, number);
     },
 
     async updateIssueLabels(repoInput, number, updates) {
@@ -1916,6 +2006,10 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
 
     async evaluateIssue(repoInput, number) {
       return queueIssueEvaluationInternal(repoInput, number, "manual");
+    },
+
+    async verifyIssueWork(repoInput, number) {
+      return verifyIssueWorkInternal(repoInput, number);
     },
 
     async workIssue(repoInput, number) {
@@ -1928,10 +2022,10 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
 
     async listPRs(view = "active") {
       if (view === "archived") {
-        return storage.getArchivedPRs();
+        return storage.getArchivedPRSummaries();
       }
 
-      return storage.getPRs();
+      return storage.getPRSummaries();
     },
 
     async getPR(id) {

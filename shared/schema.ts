@@ -80,6 +80,11 @@ export const prSchema = z.object({
 });
 export type PR = z.infer<typeof prSchema>;
 
+export const prSummarySchema = prSchema.omit({
+  feedbackItems: true,
+});
+export type PRSummary = z.infer<typeof prSummarySchema>;
+
 export const newPRSchema = prSchema.omit({
   id: true,
   addedAt: true,
@@ -135,6 +140,7 @@ export const backgroundJobKindEnum = z.enum([
   "process_release_run",
   "answer_pr_question",
   "evaluate_issue",
+  "verify_issue",
   "work_issue",
   "generate_social_changelog",
   "heal_deployment",
@@ -209,6 +215,18 @@ export type IssueWorkStage = z.infer<typeof issueWorkStageEnum>;
 export const issueEvaluationStatusEnum = z.enum(["approved", "blocked", "needs_review"]);
 export type IssueEvaluationStatus = z.infer<typeof issueEvaluationStatusEnum>;
 
+export const issueSubtaskStatusEnum = z.enum(["pending", "done", "skipped", "deferred"]);
+export type IssueSubtaskStatus = z.infer<typeof issueSubtaskStatusEnum>;
+
+export const issueSubtaskSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  summary: z.string(),
+  status: issueSubtaskStatusEnum,
+  statusReason: z.string().nullable().optional(),
+});
+export type IssueSubtask = z.infer<typeof issueSubtaskSchema>;
+
 export const issueSchema = z.object({
   id: z.string(),
   number: z.number(),
@@ -247,6 +265,7 @@ export const issueSchema = z.object({
   evaluationSafetyFlags: z.array(z.string()).optional(),
   evaluationRecommendedLabels: z.array(z.string()).optional(),
   evaluationUpdatedAt: z.string().nullable().optional(),
+  subtasks: z.array(issueSubtaskSchema).nullable().optional(),
 });
 export type Issue = z.infer<typeof issueSchema>;
 
@@ -256,6 +275,8 @@ export const issueListPageSchema = z.object({
   offset: z.number().int().nonnegative(),
   nextOffset: z.number().int().nonnegative().nullable(),
   hasMore: z.boolean(),
+  totalCount: z.number().int().nonnegative(),
+  repoTotals: z.record(z.string(), z.number().int().nonnegative()),
   fetchedAt: z.string(),
   staleAt: z.string(),
 });
@@ -275,6 +296,17 @@ export const issueEvaluationSchema = z.object({
   updatedAt: z.string(),
 });
 export type IssueEvaluation = z.infer<typeof issueEvaluationSchema>;
+
+export const issueSubtaskSetSchema = z.object({
+  targetId: z.string(),
+  repo: z.string(),
+  issueNumber: z.number().int().positive(),
+  subtasks: z.array(issueSubtaskSchema),
+  analyzedBodyHash: z.string(),
+  analyzedAt: z.string(),
+  updatedAt: z.string(),
+});
+export type IssueSubtaskSet = z.infer<typeof issueSubtaskSetSchema>;
 
 export const operatorWarningSchema = z.object({
   id: z.string(),
