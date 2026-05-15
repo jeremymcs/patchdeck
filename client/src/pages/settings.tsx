@@ -85,9 +85,23 @@ type GitHubTokenTestResponse = {
   results: GitHubTokenTestResult[];
 };
 
+type GitHubTokenTestLogEntry =
+  | { kind: "result"; data: GitHubTokenTestResult }
+  | { kind: "info"; message: string }
+  | { kind: "error"; message: string };
+
 type GitHubTokenTestLog = {
   timestamp: string;
-  lines: string[];
+  tokensTested: number;
+  entries: GitHubTokenTestLogEntry[];
+};
+
+const TOKEN_TEST_LOG_LIMIT = 12;
+
+const TOKEN_TEST_STATUS_CLASS: Record<GitHubTokenTestResult["status"], string> = {
+  ok: "border-success-border bg-success-muted text-success-foreground",
+  throttled: "border-warning-border bg-warning-muted text-warning-foreground",
+  error: "border-destructive/40 bg-destructive/10 text-destructive",
 };
 
 type WatchScope = (typeof WATCH_SCOPE_OPTIONS)[number]["value"];
@@ -459,35 +473,28 @@ export default function Settings() {
       return res.json() as Promise<GitHubTokenTestResponse>;
     },
     onSuccess: (result) => {
-      const lines = result.results.length === 0
-        ? ["No configured GitHub tokens to test."]
-        : result.results.map((entry) => {
-          const remaining = entry.remaining === null ? "?" : String(entry.remaining);
-          const resetAt = entry.resetAt ? new Date(entry.resetAt).toLocaleTimeString("en-US") : "unknown";
-          const login = entry.login ? `login=${entry.login}` : "login=unknown";
-          const repoProbe = entry.repoProbe ? `probe=${entry.repoProbe}` : "probe=none";
-          return `#${entry.index} ${entry.token} ${entry.status.toUpperCase()} ${login} remaining=${remaining} reset=${resetAt} ${repoProbe} :: ${entry.message}`;
-        });
+      const entries: GitHubTokenTestLogEntry[] = result.results.length === 0
+        ? [{ kind: "info", message: "No configured GitHub tokens to test." }]
+        : result.results.map((data) => ({ kind: "result", data }));
 
       setTokenTestLogs((previous) => [
-        {
-          timestamp: result.testedAt,
-          lines,
-        },
+        { timestamp: result.testedAt, tokensTested: result.results.length, entries },
         ...previous,
-      ].slice(0, 12));
+      ].slice(0, TOKEN_TEST_LOG_LIMIT));
 
       toast({ description: "GitHub key test complete." });
     },
     onError: (error) => {
       const message = error instanceof Error ? error.message : String(error);
+      const errorEntries: GitHubTokenTestLogEntry[] = [{ kind: "error", message }];
       setTokenTestLogs((previous) => [
         {
           timestamp: new Date().toISOString(),
-          lines: [`ERROR ${message}`],
+          tokensTested: 0,
+          entries: errorEntries,
         },
         ...previous,
-      ].slice(0, 12));
+      ].slice(0, TOKEN_TEST_LOG_LIMIT));
       toast({ variant: "destructive", description: `GitHub key test failed: ${message}` });
     },
   });
@@ -1370,26 +1377,90 @@ export default function Settings() {
                     <div className="text-[11px] text-muted-foreground">
                       Run a direct GitHub auth and rate-limit check for each configured token.
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => testGitHubTokensMutation.mutate()}
-                      disabled={testGitHubTokensMutation.isPending}
-                      data-testid="button-test-github-tokens"
-                      className="border border-border px-2 py-1 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
-                    >
-                      {testGitHubTokensMutation.isPending ? "Testing..." : "Test keys"}
-                    </button>
+                    <div className="flex items-center gap-2">
+                      {tokenTestLogs.length > 0 ? (
+                        <button
+                          type="button"
+                          onClick={() => setTokenTestLogs([])}
+                          data-testid="button-clear-github-token-tests"
+                          className="px-2 py-1 text-xs text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+                        >
+                          clear
+                        </button>
+                      ) : null}
+                      <button
+                        type="button"
+                        onClick={() => testGitHubTokensMutation.mutate()}
+                        disabled={testGitHubTokensMutation.isPending}
+                        data-testid="button-test-github-tokens"
+                        className="border border-border px-2 py-1 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
+                      >
+                        {testGitHubTokensMutation.isPending
+                          ? `testing ${githubTokens.length} key${githubTokens.length === 1 ? "" : "s"}…`
+                          : "test keys"}
+                      </button>
+                    </div>
                   </div>
-                  <div className="max-h-52 overflow-y-auto border border-border/80 bg-background/40 p-2 font-mono text-[11px] leading-relaxed">
+                  <div className="min-h-[8rem] max-h-52 overflow-y-auto border border-border/80 bg-background/40 p-2 text-[11px] leading-relaxed">
                     {tokenTestLogs.length === 0 ? (
                       <div className="text-muted-foreground">No key tests run yet.</div>
                     ) : (
-                      tokenTestLogs.map((entry, index) => (
-                        <div key={`${entry.timestamp}-${index}`} className="mb-2 last:mb-0">
-                          <div className="text-muted-foreground">[{new Date(entry.timestamp).toLocaleString()}]</div>
-                          {entry.lines.map((line, lineIndex) => (
-                            <div key={`${entry.timestamp}-${index}-${lineIndex}`}>{line}</div>
-                          ))}
+                      tokenTestLogs.map((log, logIndex) => (
+                        <div
+                          key={`${log.timestamp}-${logIndex}`}
+                          className="mb-3 last:mb-0 border-b border-border/40 pb-2 last:border-b-0 last:pb-0"
+                        >
+                          <div className="mb-1 text-[10px] uppercase tracking-wider text-muted-foreground">
+                            {new Date(log.timestamp).toLocaleTimeString("en-US")}
+                            {log.tokensTested > 0
+                              ? ` · ${log.tokensTested} key${log.tokensTested === 1 ? "" : "s"}`
+                              : ""}
+                          </div>
+                          <div className="flex flex-col gap-1.5">
+                            {log.entries.map((item, itemIndex) => {
+                              const key = `${log.timestamp}-${logIndex}-${itemIndex}`;
+                              if (item.kind === "result") {
+                                const { data } = item;
+                                const remaining = data.remaining === null ? "?" : String(data.remaining);
+                                const resetAt = data.resetAt
+                                  ? new Date(data.resetAt).toLocaleTimeString("en-US")
+                                  : "—";
+                                return (
+                                  <div key={key} className="flex flex-col gap-0.5">
+                                    <div className="flex flex-wrap items-center gap-2 font-mono">
+                                      <span className="text-muted-foreground">#{data.index}</span>
+                                      <span
+                                        className={`inline-flex items-center rounded-sm border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider ${TOKEN_TEST_STATUS_CLASS[data.status]}`}
+                                      >
+                                        {data.status}
+                                      </span>
+                                      <span className="text-foreground">{data.token}</span>
+                                      <span className="text-muted-foreground">
+                                        {data.login ?? "no login"} · remaining {remaining} · reset {resetAt}
+                                        {data.repoProbe ? ` · probe ${data.repoProbe}` : ""}
+                                      </span>
+                                    </div>
+                                    <div className="break-words pl-1 text-muted-foreground">
+                                      {data.message}
+                                    </div>
+                                  </div>
+                                );
+                              }
+                              if (item.kind === "error") {
+                                return (
+                                  <div key={key} className="flex flex-wrap items-center gap-2 font-mono">
+                                    <span className="inline-flex items-center rounded-sm border border-destructive/40 bg-destructive/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-destructive">
+                                      error
+                                    </span>
+                                    <span className="break-words text-destructive">{item.message}</span>
+                                  </div>
+                                );
+                              }
+                              return (
+                                <div key={key} className="text-muted-foreground">{item.message}</div>
+                              );
+                            })}
+                          </div>
                         </div>
                       ))
                     )}
