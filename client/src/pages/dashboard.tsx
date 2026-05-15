@@ -1,5 +1,5 @@
-import { useMemo } from "react";
-import { Link } from "wouter";
+import { useMemo, type KeyboardEvent } from "react";
+import { Link, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, ExternalLink, GitPullRequest, ListTodo, Loader2 } from "lucide-react";
 import type { ActivityItem, ActivitySnapshot, BackgroundJobKind, Config, IssueListPage, PR } from "@shared/schema";
@@ -66,6 +66,7 @@ function ActivityRow({ item, accent, leadingIcon, timeRef }: {
   leadingIcon?: React.ReactNode;
   timeRef?: "queuedAt" | "startedAt" | "updatedAt";
 }) {
+  const [, setLocation] = useLocation();
   const route = activityTargetRoute(item.kind);
   const timestamp = timeRef === "queuedAt"
     ? item.queuedAt
@@ -78,8 +79,38 @@ function ActivityRow({ item, accent, leadingIcon, timeRef }: {
     ? "inline-flex items-center gap-1 truncate text-[12px] font-medium text-destructive"
     : "inline-flex items-center gap-1 truncate text-[12px] text-foreground";
 
-  const content = (
-    <>
+  const handleNavigate = () => {
+    if (!route) return;
+    setLocation(route);
+  };
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (!route) return;
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      setLocation(route);
+    }
+  };
+
+  const interactiveProps = route
+    ? {
+        role: "link" as const,
+        tabIndex: 0,
+        onClick: handleNavigate,
+        onKeyDown: handleKeyDown,
+      }
+    : {};
+
+  return (
+    <div
+      data-testid={`activity-row-${item.id}`}
+      {...interactiveProps}
+      className={`border-b border-border/60 px-3 py-2 last:border-b-0 ${
+        route
+          ? "cursor-pointer transition-colors hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+          : ""
+      }`}
+    >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className={labelClass}>
           {leadingIcon}
@@ -119,24 +150,6 @@ function ActivityRow({ item, accent, leadingIcon, timeRef }: {
           )}
         </div>
       )}
-    </>
-  );
-
-  if (route) {
-    return (
-      <Link
-        href={route}
-        data-testid={`activity-row-${item.id}`}
-        className="block cursor-pointer border-b border-border/60 px-3 py-2 transition-colors last:border-b-0 hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
-      >
-        {content}
-      </Link>
-    );
-  }
-
-  return (
-    <div data-testid={`activity-row-${item.id}`} className="border-b border-border/60 px-3 py-2 last:border-b-0">
-      {content}
     </div>
   );
 }
