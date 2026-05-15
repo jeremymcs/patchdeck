@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearch } from "wouter";
+import { useQuery } from "@tanstack/react-query";
 import { fetchJson } from "@/lib/queryClient";
 import { AppHeader } from "@/components/AppHeader";
 import { UpdateBanner } from "@/components/UpdateBanner";
+import type { ActivitySnapshot } from "@shared/schema";
+import { EMPTY_ACTIVITY_SNAPSHOT } from "@/components/ActivityMenu";
 
 const LEVELS = ["trace", "debug", "info", "warn", "error", "fatal"] as const;
 type Level = (typeof LEVELS)[number];
@@ -108,6 +111,10 @@ export default function Logs() {
   const [records, setRecords] = useState<LogRecord[]>([]);
   const [sources, setSources] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const { data: activities = EMPTY_ACTIVITY_SNAPSHOT } = useQuery<ActivitySnapshot>({
+    queryKey: ["/api/activities"],
+    refetchInterval: 3000,
+  });
 
   const recordsRef = useRef<LogRecord[]>([]);
   recordsRef.current = records;
@@ -195,6 +202,13 @@ export default function Logs() {
     }
     return out;
   }, [records, level, source, searchTerm]);
+
+  const activityItems = useMemo(
+    () => [...activities.failed, ...activities.inProgress, ...activities.queued]
+      .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
+      .slice(0, 100),
+    [activities.failed, activities.inProgress, activities.queued],
+  );
 
   const onCopy = async () => {
     try {
@@ -291,6 +305,27 @@ export default function Logs() {
       )}
 
       <div ref={containerRef} className="flex-1 overflow-y-auto p-3 font-mono text-[11px] leading-relaxed">
+        <div className="mb-3 border border-border/60">
+          <div className="border-b border-border/60 px-2 py-1 text-[10px] uppercase tracking-wider text-muted-foreground">
+            Activity
+          </div>
+          <div className="max-h-56 overflow-y-auto">
+            {activityItems.length === 0 ? (
+              <div className="px-2 py-2 text-[10px] text-muted-foreground">No active activity.</div>
+            ) : (
+              activityItems.map((item) => (
+                <div key={item.id} className="border-b border-border/40 px-2 py-1.5 last:border-b-0">
+                  <div className="flex items-center justify-between gap-2 text-[10px] uppercase tracking-wider text-muted-foreground">
+                    <span>{item.kind.replace("_", " ")}</span>
+                    <span>{item.status.replace("_", " ")}</span>
+                  </div>
+                  <div className="mt-0.5 text-[11px] text-foreground/85">{item.label}</div>
+                  {item.detail && <div className="text-[10px] text-muted-foreground">{item.detail}</div>}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
         {filteredRecords.length === 0 ? (
           <div className="text-center text-muted-foreground">No log records match the current filter.</div>
         ) : (
