@@ -38,7 +38,7 @@ for (const { route, file, waitFor } of PAGES) {
   await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45_000 });
   await page.waitForSelector(waitFor, { timeout: 10_000 });
   // Allow dashboard polls and activity-driven UI to settle before capture.
-  await page.waitForTimeout(5000);
+  await page.waitForTimeout(10000);
   const out = resolve(OUT_DIR, file);
   await page.screenshot({ path: out, fullPage: false });
   await mkdir(dirname(out), { recursive: true });
