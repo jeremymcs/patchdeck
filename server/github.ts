@@ -173,6 +173,12 @@ const GH_AUTH_CACHE_TTL_MS = 15000;
 const GITHUB_MAX_CONCURRENT_REQUESTS = 20;
 const GITHUB_REST_POINT_INTERVAL_MS = 67;
 const GITHUB_CONTENT_REQUEST_INTERVAL_MS = 750;
+
+// Per-endpoint-class concurrency caps. The global cap above protects against
+// connection-count secondary limits; these tighter caps keep the burst-prone
+// endpoints (search, content-creating writes) under their own abuse limits.
+const GITHUB_SEARCH_MAX_CONCURRENT = 2;
+const GITHUB_WRITE_MAX_CONCURRENT = 4;
 const REVIEW_THREADS_QUERY = `
   query CodeFactoryReviewThreads($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
     repository(owner: $owner, name: $repo) {
@@ -782,6 +788,32 @@ const RATE_LIMIT_AUTO_RETRY_MAX_WAIT_MS = 15_000;
 
 type GitHubRequestOptions = {
   method?: string;
+  url?: string;
+};
+
+export type GitHubConcurrencyClass = "search" | "write" | "default";
+
+/**
+ * Buckets a request for per-endpoint concurrency limiting. Search has a strict
+ * secondary limit; content-creating writes have their own abuse limit.
+ */
+export function classifyGitHubConcurrency(
+  options: { method?: string; url?: string },
+): GitHubConcurrencyClass {
+  if ((options.url ?? "").toLowerCase().includes("/search/")) {
+    return "search";
+  }
+  const method = options.method?.toUpperCase() ?? "GET";
+  if (method === "POST" || method === "PATCH" || method === "PUT" || method === "DELETE") {
+    return "write";
+  }
+  return "default";
+}
+
+const GITHUB_CONCURRENCY_CAPS: Record<GitHubConcurrencyClass, number> = {
+  search: GITHUB_SEARCH_MAX_CONCURRENT,
+  write: GITHUB_WRITE_MAX_CONCURRENT,
+  default: GITHUB_MAX_CONCURRENT_REQUESTS,
 };
 
 type GitHubRateLimitResourceSnapshot = {
@@ -807,6 +839,11 @@ class GitHubRequestThrottle {
   private active = 0;
   private pointReadyAt = 0;
   private contentReadyAt = 0;
+  private readonly activeByClass: Record<GitHubConcurrencyClass, number> = {
+    search: 0,
+    write: 0,
+    default: 0,
+  };
   private readonly queue: Array<QueuedGitHubRequest<unknown>> = [];
 
   schedule<T>(options: GitHubRequestOptions, run: () => Promise<T>): Promise<T> {
@@ -822,11 +859,20 @@ class GitHubRequestThrottle {
   }
 
   private drain(): void {
-    while (this.active < GITHUB_MAX_CONCURRENT_REQUESTS && this.queue.length > 0) {
-      const item = this.queue.shift();
-      if (!item) return;
+    while (this.active < GITHUB_MAX_CONCURRENT_REQUESTS) {
+      // Pick the first queued request whose endpoint class is below its cap.
+      // Skipping a capped class keeps a search burst from blocking the queue.
+      const index = this.queue.findIndex((item) => {
+        const cls = classifyGitHubConcurrency(item.options);
+        return this.activeByClass[cls] < GITHUB_CONCURRENCY_CAPS[cls];
+      });
+      if (index === -1) break;
+
+      const [item] = this.queue.splice(index, 1);
+      const cls = classifyGitHubConcurrency(item.options);
 
       this.active += 1;
+      this.activeByClass[cls] += 1;
       const delayMs = this.reserveDelay(item.options);
       setTimeout(() => {
         item.run()
@@ -834,6 +880,7 @@ class GitHubRequestThrottle {
           .catch(item.reject)
           .finally(() => {
             this.active -= 1;
+            this.activeByClass[cls] -= 1;
             this.drain();
           });
       }, delayMs);

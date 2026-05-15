@@ -64,6 +64,41 @@ test("octokit hook spaces concurrent REST requests under GitHub secondary limits
   );
 });
 
+test("octokit throttle caps concurrent search requests below the secondary limit", async () => {
+  let active = 0;
+  let peak = 0;
+  const octokit = await buildOctokit(
+    { ...config, githubToken: "ghp_fake" },
+    {
+      ignoreCache: true,
+      requestFetch: async (input) => {
+        const url = typeof input === "string"
+          ? input
+          : input instanceof URL ? input.toString() : input.url;
+        if (url.includes("/search/")) {
+          active += 1;
+          peak = Math.max(peak, active);
+          await new Promise((resolve) => setTimeout(resolve, 200));
+          active -= 1;
+        }
+        return new Response(JSON.stringify({ items: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json", "x-ratelimit-remaining": "4999" },
+        });
+      },
+    },
+  );
+
+  await Promise.all(
+    Array.from({ length: 6 }, () => octokit.request("GET /search/issues", { q: "is:open is:pr" })),
+  );
+
+  // 200ms fetches with ~67ms point spacing would overlap 3-deep uncapped;
+  // the search cap of 2 must hold the peak at 2.
+  assert.ok(peak >= 2, `expected search requests to overlap, peak was ${peak}`);
+  assert.ok(peak <= 2, `expected search concurrency capped at 2, peak was ${peak}`);
+});
+
 test("octokit hook records rate-limit reset from 403 response headers", async () => {
   const resetUnixSeconds = Math.floor(Date.now() / 1000) + 600;
   const octokit = await buildOctokit(

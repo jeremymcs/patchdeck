@@ -5,6 +5,7 @@ import {
   addLabelsToIssue,
   buildGitHubCloneUrl,
   buildOctokit,
+  classifyGitHubConcurrency,
   GitHubIntegrationError,
   buildFeedbackAuditToken,
   checkOnboardingStatus,
@@ -884,6 +885,21 @@ test("listOpenIssuesForRepo continues pagination when a page contains pull reque
   assert.equal(page.items.length, 51);
   assert.equal(page.items[0]?.number, 51);
   assert.equal(page.items[50]?.number, 101);
+});
+
+test("classifyGitHubConcurrency buckets search, writes, and default reads", () => {
+  assert.equal(classifyGitHubConcurrency({ method: "GET", url: "/search/issues" }), "search");
+  // A search URL outranks the HTTP method.
+  assert.equal(classifyGitHubConcurrency({ method: "POST", url: "/search/code" }), "search");
+  assert.equal(
+    classifyGitHubConcurrency({ method: "POST", url: "/repos/o/r/issues/1/comments" }),
+    "write",
+  );
+  assert.equal(classifyGitHubConcurrency({ method: "PATCH", url: "/repos/o/r/pulls/1" }), "write");
+  assert.equal(classifyGitHubConcurrency({ method: "DELETE", url: "/repos/o/r/git/refs/heads/x" }), "write");
+  assert.equal(classifyGitHubConcurrency({ method: "PUT", url: "/repos/o/r/contents/file" }), "write");
+  assert.equal(classifyGitHubConcurrency({ method: "GET", url: "/repos/o/r/pulls" }), "default");
+  assert.equal(classifyGitHubConcurrency({}), "default");
 });
 
 test("probeRepoIssuesChanged returns the response etag on a 200", async () => {
