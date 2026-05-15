@@ -7,6 +7,7 @@ import type { CheckSnapshot, FeedbackItem } from "@shared/schema";
 import { APP_COMMENT_FOOTER, PRBabysitter } from "./babysitter";
 import { BackgroundJobQueue } from "./backgroundJobQueue";
 import { MemStorage } from "./memoryStorage";
+import { clearRateLimitStateForTests, recordResourceBudget } from "./rateLimitState";
 
 function makeFeedbackItem(overrides: Partial<FeedbackItem> = {}): FeedbackItem {
   return {
@@ -776,6 +777,83 @@ test("syncAndBabysitTrackedRepos enqueues babysit_pr jobs when a background sche
   assert.equal(jobs[0].payload.activityLabel, "Babysitting PR #42");
   assert.equal(jobs[0].payload.activityDetail, "octo/example - Example PR");
   assert.equal(jobs[0].payload.activityTargetUrl, pr.url);
+});
+
+function makeOctocatPull(n: number) {
+  return {
+    number: n,
+    title: `PR ${n}`,
+    branch: `feature/${n}`,
+    author: "octocat",
+    url: `https://github.com/octo/example/pull/${n}`,
+    headSha: `head${n}`,
+    baseRef: "main",
+    baseSha: "base",
+  };
+}
+
+test("syncAndBabysitTrackedRepos caps babysit_pr enqueues per repo per sweep", async () => {
+  clearRateLimitStateForTests();
+  const storage = new MemStorage();
+  await storage.updateConfig({ watchedRepos: ["octo/example"] });
+  const backgroundJobQueue = new BackgroundJobQueue(storage);
+  const pulls = Array.from({ length: 15 }, (_, i) => makeOctocatPull(100 + i));
+
+  const babysitter = new PRBabysitter(
+    storage,
+    makeWatcherGitHubService({ listOpenPullsForRepo: async () => pulls }),
+    {
+      resolveAgent: async () => "codex",
+      ciPollIntervalMs: 0,
+      evaluateFixNecessityWithAgent: async () => ({ needsFix: false, reason: "unused" }),
+      applyFixesWithAgent: async () => ({ code: 0, stdout: "", stderr: "" }),
+      runCommand: async () => ({ code: 0, stdout: "", stderr: "" }),
+    },
+    undefined,
+    async (...args) => backgroundJobQueue.enqueue(...args),
+  );
+  babysitter.babysitPR = async () => {
+    throw new Error("watcher should enqueue, not babysit directly");
+  };
+
+  await babysitter.syncAndBabysitTrackedRepos();
+
+  const jobs = await storage.listBackgroundJobs({ kind: "babysit_pr", status: "queued" });
+  assert.equal(jobs.length, 10, "at most 10 babysit jobs are enqueued per repo per sweep");
+});
+
+test("syncAndBabysitTrackedRepos enqueues no babysit_pr jobs while the core budget is in the reserve", async () => {
+  clearRateLimitStateForTests();
+  const storage = new MemStorage();
+  await storage.updateConfig({ watchedRepos: ["octo/example"] });
+  const backgroundJobQueue = new BackgroundJobQueue(storage);
+  const pulls = Array.from({ length: 5 }, (_, i) => makeOctocatPull(200 + i));
+
+  const babysitter = new PRBabysitter(
+    storage,
+    makeWatcherGitHubService({ listOpenPullsForRepo: async () => pulls }),
+    {
+      resolveAgent: async () => "codex",
+      ciPollIntervalMs: 0,
+      evaluateFixNecessityWithAgent: async () => ({ needsFix: false, reason: "unused" }),
+      applyFixesWithAgent: async () => ({ code: 0, stdout: "", stderr: "" }),
+      runCommand: async () => ({ code: 0, stdout: "", stderr: "" }),
+    },
+    undefined,
+    async (...args) => backgroundJobQueue.enqueue(...args),
+  );
+  babysitter.babysitPR = async () => {
+    throw new Error("watcher should not babysit while the budget is tight");
+  };
+
+  recordResourceBudget("core", 500, 5000); // 10% remaining — core budget in the reserve band
+  try {
+    await babysitter.syncAndBabysitTrackedRepos();
+    const jobs = await storage.listBackgroundJobs({ kind: "babysit_pr", status: "queued" });
+    assert.equal(jobs.length, 0, "no new babysit jobs are enqueued while the budget is tight");
+  } finally {
+    clearRateLimitStateForTests();
+  }
 });
 
 test("syncAndBabysitTrackedRepos refreshes repository status during drain without queueing babysits", async () => {

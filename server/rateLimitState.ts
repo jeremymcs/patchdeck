@@ -26,6 +26,11 @@ const RECENT_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 // gated once `remaining` falls to or below this fraction of the limit.
 const BUDGET_RESERVE_FRACTION = 0.3;
 
+// Hard floor: below this fraction every request is gated regardless of
+// priority, so a burst of high-priority automation cannot drain the budget to
+// zero. Leaves a sliver so the next hourly reset is not met from empty.
+const BUDGET_FLOOR_FRACTION = 0.05;
+
 const state: Record<RateLimitResource, ResourceState> = {
   core: { resetAt: null, lastLimitedAt: null },
   graphql: { resetAt: null, lastLimitedAt: null },
@@ -173,6 +178,18 @@ export function isResourceBudgetBelowReserve(resource: RateLimitResource): boole
   const budget = budgets[resource];
   if (!budget) return false;
   return budget.remaining <= budget.limit * BUDGET_RESERVE_FRACTION;
+}
+
+/**
+ * True when a resource's budget has fallen below the hard floor. While true,
+ * every request against that resource is gated regardless of priority — a
+ * burst of high-priority automation must not be able to drain the budget to
+ * zero. Returns false when the budget is unknown.
+ */
+export function isResourceBudgetBelowFloor(resource: RateLimitResource): boolean {
+  const budget = budgets[resource];
+  if (!budget) return false;
+  return budget.remaining <= budget.limit * BUDGET_FLOOR_FRACTION;
 }
 
 export function clearRateLimitStateForTests(): void {
