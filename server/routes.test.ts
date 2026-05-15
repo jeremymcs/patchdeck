@@ -229,9 +229,16 @@ test("GET /api/github-rate-limit reports the current reset time", async () => {
     const response = await fetch(`${harness.baseUrl}/api/github-rate-limit`);
     assert.equal(response.status, 200);
 
-    const body = await response.json() as { limited: boolean; resetAt: string | null };
+    const body = await response.json() as {
+      limited: boolean;
+      resetAt: string | null;
+      recentlyLimited: boolean;
+      lastLimitedAt: string | null;
+    };
     assert.equal(body.limited, true);
     assert.equal(body.resetAt, resetAt.toISOString());
+    assert.equal(body.recentlyLimited, true);
+    assert.ok(body.lastLimitedAt);
   } finally {
     clearRateLimited();
     await harness.close();
@@ -504,7 +511,7 @@ test("POST /api/prs/:id/feedback/:feedbackId/retry reports drain reason and does
   }
 });
 
-test("POST /api/repos/sync enqueues a durable sync_watched_repos job", async () => {
+test("POST /api/repos/sync runs immediate sync without queueing sync_watched_repos", async () => {
   const harness = await createHarness();
 
   try {
@@ -520,9 +527,7 @@ test("POST /api/repos/sync enqueues a durable sync_watched_repos job", async () 
       kind: "sync_watched_repos",
       status: "queued",
     });
-    assert.equal(jobs.length, 1);
-    assert.equal(jobs[0].targetId, "runtime:1");
-    assert.equal(jobs[0].dedupeKey, "sync_watched_repos");
+    assert.equal(jobs.length, 0);
   } finally {
     await harness.close();
   }

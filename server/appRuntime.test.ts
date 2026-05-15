@@ -214,7 +214,7 @@ test("runtime updateConfig persists updates and exposes them through getConfig",
   assert.equal(config.postGitHubProgressReplies, true);
 });
 
-test("watcher tick does not enqueue sync jobs while global manual mode is on", async () => {
+test("manual sync runs immediately even when global manual mode is on", async () => {
   const storage = new MemStorage();
   const runtime = createAppRuntime({
     storage,

@@ -241,6 +241,19 @@ export async function registerRoutes(
   dependencies: RouteDependencies = {},
 ): Promise<Server> {
   const runtime = dependencies.runtime ?? createAppRuntime(dependencies);
+  const PR_DETAIL_CACHE_TTL_MS = 2_000;
+  const PR_DETAIL_CACHE_MAX_ENTRIES = 200;
+  const prDetailCache = new Map<string, {
+    expiresAt: number;
+    value: NonNullable<Awaited<ReturnType<AppRuntime["getPR"]>>>;
+  }>();
+  const invalidatePrDetailCache = (prId?: string): void => {
+    if (prId) {
+      prDetailCache.delete(prId);
+      return;
+    }
+    prDetailCache.clear();
+  };
   const appUpdateChecker = dependencies.appUpdateChecker ?? createAppUpdateChecker();
   const testGitHubTokensFn = dependencies.testGitHubTokensFn ?? testGitHubTokens;
   await runtime.start();
@@ -258,6 +271,8 @@ export async function registerRoutes(
     res.json({
       limited: state.limited,
       resetAt: state.resetAt ? state.resetAt.toISOString() : null,
+      recentlyLimited: state.recentlyLimited,
+      lastLimitedAt: state.lastLimitedAt ? state.lastLimitedAt.toISOString() : null,
     });
   });
 
@@ -426,7 +441,9 @@ export async function registerRoutes(
 
   app.post("/api/repos/sync", async (_req, res) => {
     try {
-      res.json(await runtime.syncRepos());
+      const result = await runtime.syncRepos();
+      invalidatePrDetailCache();
+      res.json(result);
     } catch (error: unknown) {
       sendAppAwareError(res, error);
     }
@@ -450,9 +467,30 @@ export async function registerRoutes(
   });
 
   app.get("/api/prs/:id", async (req, res) => {
+    const now = Date.now();
+    const cached = prDetailCache.get(req.params.id);
+    if (cached && cached.expiresAt > now) {
+      return res.json(cached.value);
+    }
+
     const pr = await runtime.getPR(req.params.id);
     if (!pr) {
       return res.status(404).json({ error: "PR not found" });
+    }
+
+    prDetailCache.set(req.params.id, {
+      value: pr,
+      expiresAt: now + PR_DETAIL_CACHE_TTL_MS,
+    });
+    if (prDetailCache.size > PR_DETAIL_CACHE_MAX_ENTRIES) {
+      for (const [id, entry] of Array.from(prDetailCache.entries())) {
+        if (entry.expiresAt <= now || prDetailCache.size > PR_DETAIL_CACHE_MAX_ENTRIES) {
+          prDetailCache.delete(id);
+        }
+        if (prDetailCache.size <= PR_DETAIL_CACHE_MAX_ENTRIES) {
+          break;
+        }
+      }
     }
 
     res.json(pr);
@@ -460,7 +498,9 @@ export async function registerRoutes(
 
   app.post("/api/prs", async (req, res) => {
     try {
-      res.status(201).json(await runtime.addPR(req.body?.url));
+      const pr = await runtime.addPR(req.body?.url);
+      invalidatePrDetailCache(pr.id);
+      res.status(201).json(pr);
     } catch (error: unknown) {
       sendAppAwareError(res, error);
     }
@@ -468,7 +508,9 @@ export async function registerRoutes(
 
   app.delete("/api/prs/:id", async (req, res) => {
     try {
-      res.json(await runtime.removePR(req.params.id));
+      const result = await runtime.removePR(req.params.id);
+      invalidatePrDetailCache(req.params.id);
+      res.json(result);
     } catch (error: unknown) {
       sendAppAwareError(res, error);
     }
@@ -477,7 +519,9 @@ export async function registerRoutes(
   app.patch("/api/prs/:id/watch", async (req, res) => {
     try {
       const { enabled } = z.object({ enabled: z.boolean() }).parse(req.body);
-      res.json(await runtime.setPRWatchEnabled(req.params.id, enabled));
+      const pr = await runtime.setPRWatchEnabled(req.params.id, enabled);
+      invalidatePrDetailCache(req.params.id);
+      res.json(pr);
     } catch (error: unknown) {
       sendAppAwareError(res, error);
     }
@@ -485,7 +529,9 @@ export async function registerRoutes(
 
   app.post("/api/prs/:id/fetch", async (req, res) => {
     try {
-      res.json(await runtime.fetchPRFeedback(req.params.id));
+      const pr = await runtime.fetchPRFeedback(req.params.id);
+      invalidatePrDetailCache(req.params.id);
+      res.json(pr);
     } catch (error: unknown) {
       sendAppAwareError(res, error);
     }
@@ -493,7 +539,9 @@ export async function registerRoutes(
 
   app.post("/api/prs/:id/triage", async (req, res) => {
     try {
-      res.json(await runtime.triagePR(req.params.id));
+      const pr = await runtime.triagePR(req.params.id);
+      invalidatePrDetailCache(req.params.id);
+      res.json(pr);
     } catch (error: unknown) {
       sendAppAwareError(res, error);
     }
@@ -501,7 +549,9 @@ export async function registerRoutes(
 
   app.post("/api/prs/:id/apply", async (req, res) => {
     try {
-      res.json(await runtime.applyPR(req.params.id));
+      const pr = await runtime.applyPR(req.params.id);
+      invalidatePrDetailCache(req.params.id);
+      res.json(pr);
     } catch (error: unknown) {
       sendAppAwareError(res, error);
     }
@@ -509,7 +559,9 @@ export async function registerRoutes(
 
   app.post("/api/prs/:id/babysit", async (req, res) => {
     try {
-      res.json(await runtime.babysitPR(req.params.id));
+      const pr = await runtime.babysitPR(req.params.id);
+      invalidatePrDetailCache(req.params.id);
+      res.json(pr);
     } catch (error: unknown) {
       sendAppAwareError(res, error);
     }
@@ -521,7 +573,9 @@ export async function registerRoutes(
         decision: z.enum(["accept", "reject", "flag"]),
       }).parse(req.body);
 
-      res.json(await runtime.setFeedbackDecision(req.params.id, req.params.feedbackId, decision));
+      const pr = await runtime.setFeedbackDecision(req.params.id, req.params.feedbackId, decision);
+      invalidatePrDetailCache(req.params.id);
+      res.json(pr);
     } catch (error: unknown) {
       sendAppAwareError(res, error);
     }
@@ -529,7 +583,9 @@ export async function registerRoutes(
 
   app.post("/api/prs/:id/feedback/:feedbackId/retry", async (req, res) => {
     try {
-      res.json(await runtime.retryFeedback(req.params.id, req.params.feedbackId));
+      const pr = await runtime.retryFeedback(req.params.id, req.params.feedbackId);
+      invalidatePrDetailCache(req.params.id);
+      res.json(pr);
     } catch (error: unknown) {
       sendAppAwareError(res, error);
     }
@@ -641,6 +697,19 @@ export async function registerRoutes(
       }).parse(req.body);
 
       res.status(201).json(await runtime.evaluateIssue(payload.repo, payload.number));
+    } catch (error: unknown) {
+      sendAppAwareError(res, error);
+    }
+  });
+
+  app.post("/api/issues/verify", async (req, res) => {
+    try {
+      const payload = z.object({
+        repo: z.string().min(1),
+        number: z.number().int().positive(),
+      }).parse(req.body);
+
+      res.status(201).json(await runtime.verifyIssueWork(payload.repo, payload.number));
     } catch (error: unknown) {
       sendAppAwareError(res, error);
     }

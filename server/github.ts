@@ -1285,6 +1285,22 @@ export async function fetchPullSummary(
   };
 }
 
+export async function fetchPullDiff(
+  octokit: Octokit,
+  parsed: ParsedPRUrl,
+): Promise<string> {
+  const response = await withGitHubErrorHandling("PR diff", parsed, () =>
+    octokit.pulls.get({
+      owner: parsed.owner,
+      repo: parsed.repo,
+      pull_number: parsed.number,
+      mediaType: { format: "diff" },
+    }),
+  );
+
+  return typeof response.data === "string" ? response.data : String(response.data ?? "");
+}
+
 export async function fetchPullCloseState(
   octokit: Octokit,
   parsed: ParsedPRUrl,
@@ -2097,7 +2113,7 @@ export async function listOpenIssuesForRepo(
     }));
 
     collected.push(...pageItems);
-    if (pageItems.length < perPage) {
+    if (issues.data.length < perPage) {
       break;
     }
 

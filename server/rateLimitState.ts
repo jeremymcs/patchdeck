@@ -5,9 +5,13 @@ const log = childLogger("rateLimit");
 export type RateLimitSnapshot = {
   limited: boolean;
   resetAt: Date | null;
+  recentlyLimited: boolean;
+  lastLimitedAt: Date | null;
 };
 
 let resetAt: Date | null = null;
+let lastLimitedAt: Date | null = null;
+const RECENT_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 
 export function markRateLimited(reset: Date | number | undefined): Date {
   let parsed: Date | null = null;
@@ -32,19 +36,22 @@ export function markRateLimited(reset: Date | number | undefined): Date {
       "GitHub rate limit reached; gating further requests until reset",
     );
   }
+  lastLimitedAt = new Date();
 
   return resetAt;
 }
 
 export function getRateLimitState(): RateLimitSnapshot {
+  const now = Date.now();
+  const recentlyLimited = lastLimitedAt !== null && (now - lastLimitedAt.getTime()) <= RECENT_RATE_LIMIT_WINDOW_MS;
   if (!resetAt) {
-    return { limited: false, resetAt: null };
+    return { limited: false, resetAt: null, recentlyLimited, lastLimitedAt };
   }
-  if (resetAt.getTime() <= Date.now()) {
+  if (resetAt.getTime() <= now) {
     resetAt = null;
-    return { limited: false, resetAt: null };
+    return { limited: false, resetAt: null, recentlyLimited, lastLimitedAt };
   }
-  return { limited: true, resetAt };
+  return { limited: true, resetAt, recentlyLimited, lastLimitedAt };
 }
 
 export function clearRateLimited(): void {
@@ -52,4 +59,9 @@ export function clearRateLimited(): void {
     log.info({}, "GitHub rate limit cleared by a successful request");
     resetAt = null;
   }
+}
+
+export function clearRateLimitStateForTests(): void {
+  resetAt = null;
+  lastLimitedAt = null;
 }

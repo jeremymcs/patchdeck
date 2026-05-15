@@ -1,13 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { clearRateLimited, getRateLimitState, markRateLimited } from "./rateLimitState";
+import { clearRateLimitStateForTests, clearRateLimited, getRateLimitState, markRateLimited } from "./rateLimitState";
 
-test.beforeEach(() => clearRateLimited());
+test.beforeEach(() => clearRateLimitStateForTests());
 
 test("getRateLimitState reports unlimited by default", () => {
   const state = getRateLimitState();
   assert.equal(state.limited, false);
   assert.equal(state.resetAt, null);
+  assert.equal(state.recentlyLimited, false);
+  assert.equal(state.lastLimitedAt, null);
 });
 
 test("markRateLimited with unix seconds sets a future reset", () => {
@@ -18,6 +20,8 @@ test("markRateLimited with unix seconds sets a future reset", () => {
   assert.equal(state.limited, true);
   assert.ok(state.resetAt);
   assert.equal(state.resetAt!.getTime(), reset * 1000);
+  assert.equal(state.recentlyLimited, true);
+  assert.ok(state.lastLimitedAt);
 });
 
 test("markRateLimited with no reset falls back to a 60s gate", () => {
@@ -31,6 +35,7 @@ test("markRateLimited with no reset falls back to a 60s gate", () => {
   // Reset should be roughly +60s from when we marked it.
   assert.ok(state.resetAt!.getTime() >= before + 59_500);
   assert.ok(state.resetAt!.getTime() <= after + 60_500);
+  assert.equal(state.recentlyLimited, true);
 });
 
 test("markRateLimited extends but never shortens an active gate", () => {
@@ -47,4 +52,5 @@ test("clearRateLimited resets the gate", () => {
   markRateLimited(Math.floor(Date.now() / 1000) + 600);
   clearRateLimited();
   assert.equal(getRateLimitState().limited, false);
+  assert.equal(getRateLimitState().recentlyLimited, true);
 });

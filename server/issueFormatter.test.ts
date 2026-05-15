@@ -72,6 +72,47 @@ test("buildIssueWorkStatusComment renders the issue workflow milestones", () => 
   assert.match(failed, /agent timed out/);
 });
 
+test("buildPullRequestBody renders a Bugs Addressed section when subtasks are present", () => {
+  const body = buildPullRequestBody({
+    repoFullName: input.repoFullName,
+    issueNumber: input.issueNumber,
+    issueTitle: input.issueTitle,
+    issueUrl: input.issueUrl,
+    summary: input.summary,
+    branch: input.branch,
+    subtasks: [
+      { id: "bug-1", title: "Exit code inverted", summary: "x", status: "done" },
+      {
+        id: "bug-2",
+        title: "Preference overrides plan",
+        summary: "x",
+        status: "deferred",
+        statusReason: "needs config redesign",
+      },
+      { id: "bug-3", title: "Path not resolved", summary: "x", status: "skipped", statusReason: "out of scope" },
+    ],
+  });
+
+  assert.match(body, /## Bugs Addressed/);
+  assert.match(body, /- \[x\] \*\*Exit code inverted\*\*/);
+  assert.match(body, /- \[ \] \*\*Preference overrides plan\*\* _\(deferred: needs config redesign\)_/);
+  assert.match(body, /- \[ \] \*\*Path not resolved\*\* _\(skipped: out of scope\)_/);
+});
+
+test("buildPullRequestBody omits Bugs Addressed when there are fewer than two subtasks", () => {
+  const body = buildPullRequestBody({
+    repoFullName: input.repoFullName,
+    issueNumber: input.issueNumber,
+    issueTitle: input.issueTitle,
+    issueUrl: input.issueUrl,
+    summary: input.summary,
+    branch: input.branch,
+    subtasks: [{ id: "bug-1", title: "lonely", summary: "x", status: "done" }],
+  });
+
+  assert.doesNotMatch(body, /## Bugs Addressed/);
+});
+
 test("buildIssueWorkStatusComment redacts local file paths from failure details", () => {
   const failed = buildIssueWorkStatusComment({
     repoFullName: input.repoFullName,

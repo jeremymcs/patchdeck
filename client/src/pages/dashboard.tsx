@@ -4,7 +4,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import * as Collapsible from "@radix-ui/react-collapsible";
 import { AlertTriangle, Bot, ChevronDown, ChevronUp, Loader2, RefreshCw, Trash2 } from "lucide-react";
 import { queryClient, apiRequest, fetchJson } from "@/lib/queryClient";
-import type { ActivityItem, ActivitySnapshot, Config, FeedbackItem, HealingSession, Issue, LogEntry, OperatorWarning, PR, PRQuestion, RuntimeState, WatchedRepo } from "@shared/schema";
+import type { ActivityItem, ActivitySnapshot, Config, FeedbackItem, HealingSession, Issue, IssueListPage, LogEntry, OperatorWarning, PR, PRQuestion, PRSummary, RuntimeState, WatchedRepo } from "@shared/schema";
 import { AppHeader } from "@/components/AppHeader";
 import { OnboardingPanel } from "@/components/OnboardingPanel";
 import { UpdateBanner } from "@/components/UpdateBanner";
@@ -24,6 +24,7 @@ import {
 } from "@/lib/ciHealing";
 import { buildQueueStatusIndex, type QueueStatusView } from "@/lib/activityQueue";
 import { QueueStatusBadge } from "@/components/QueueStatusBadge";
+import { Skeleton } from "@/components/ui/skeleton";
 
 function formatClock(timestamp: string | null): string | null {
   if (!timestamp) {
@@ -33,7 +34,7 @@ function formatClock(timestamp: string | null): string | null {
   return new Date(timestamp).toLocaleTimeString("en-US", { hour12: false });
 }
 
-function isPRWatchEnabled(pr: PR): boolean {
+function isPRWatchEnabled(pr: Pick<PRSummary, "watchEnabled">): boolean {
   return pr.watchEnabled;
 }
 
@@ -113,7 +114,11 @@ function scrollToDashboardErrors() {
   document.getElementById("dashboard-errors")?.scrollIntoView({ block: "start" });
 }
 
-function getPRFeedbackFailureReason(pr: PR): string | null {
+function getPRFeedbackFailureReason(pr: PR | PRSummary | null): string | null {
+  if (!pr || !("feedbackItems" in pr)) {
+    return null;
+  }
+
   const failedItem = pr.feedbackItems.find((item) =>
     (item.status === "failed" || item.status === "warning") && Boolean(item.statusReason),
   );
@@ -421,17 +426,12 @@ function ReadyToMergeIndicator({
   );
 }
 
-function AgentIndicator({ pr }: { pr: PR }) {
-  const agentCount = countActiveFeedbackStatuses(pr.feedbackItems).inProgress;
+function AgentIndicator({ pr }: { pr: PRSummary }) {
   const isProcessing = pr.status === "processing";
 
-  if (!isProcessing && agentCount === 0) {
+  if (!isProcessing) {
     return null;
   }
-
-  const label = agentCount > 0
-    ? `${agentCount} agent${agentCount !== 1 ? "s" : ""} running on this PR`
-    : "Agent run active on this PR";
 
   return (
     <Tooltip>
@@ -441,15 +441,33 @@ function AgentIndicator({ pr }: { pr: PR }) {
           data-testid={`agent-indicator-${pr.id}`}
         >
           <Bot className="h-3.5 w-3.5 animate-pulse" aria-hidden="true" />
-          {agentCount > 0 && (
-            <span className="font-mono text-[10px] text-muted-foreground">{agentCount}</span>
-          )}
         </span>
       </TooltipTrigger>
       <TooltipContent side="top">
-        <p className="text-xs">{label}</p>
+        <p className="text-xs">Agent run active on this PR</p>
       </TooltipContent>
     </Tooltip>
+  );
+}
+
+function PRRowSkeleton() {
+  return (
+    <div className="border-b border-l-2 border-l-transparent border-border px-4 py-3">
+      <div className="flex items-start gap-3">
+        <Skeleton className="mt-1.5 h-2 w-2 rounded-full" />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-3">
+            <Skeleton className="h-3 w-10" />
+            <Skeleton className="h-3.5 w-2/3" />
+          </div>
+          <div className="mt-2 ml-[3.75rem] flex items-center gap-3">
+            <Skeleton className="h-2.5 w-24" />
+            <Skeleton className="h-2.5 w-16" />
+            <Skeleton className="h-2.5 w-14" />
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -461,7 +479,7 @@ const PRRow = memo(function PRRow({
   queueStatus,
   issueLink,
 }: {
-  pr: PR;
+  pr: PRSummary;
   isSelected: boolean;
   onSelect: (id: string) => void;
   failureMessage?: string | null;
@@ -470,9 +488,6 @@ const PRRow = memo(function PRRow({
 }) {
   const checkedAt = formatClock(pr.lastChecked);
   const watchEnabled = isPRWatchEnabled(pr);
-  const agentActive = pr.status === "processing" || countActiveFeedbackStatuses(pr.feedbackItems).inProgress > 0;
-  const readyToMerge = !agentActive && isPRReadyToMerge(pr.feedbackItems);
-
   return (
     <div
       onClick={() => onSelect(pr.id)}
@@ -510,16 +525,6 @@ const PRRow = memo(function PRRow({
               </span>
             )}
           </div>
-          {readyToMerge && (
-            <ReadyToMergeIndicator
-              href={pr.url}
-              testId={`ready-to-merge-${pr.id}`}
-              label="Ready to merge"
-              onClick={(event) => event.stopPropagation()}
-              className="mt-1.5 ml-[3.75rem] gap-1.5 whitespace-nowrap px-2 py-0.5 text-[10px] tracking-wider"
-              dotClassName="h-1.5 w-1.5"
-            />
-          )}
           {pr.status === "error" && failureMessage && (
             <div className="mt-2 ml-[3.75rem] border border-destructive/40 bg-destructive/10 px-2 py-1 text-[11px] leading-4 text-destructive">
               <span className="font-medium uppercase tracking-wider">Error:</span>{" "}
@@ -539,16 +544,7 @@ const PRRow = memo(function PRRow({
             <span>{formatStatusLabel(pr.status)}</span>
             <QueueStatusBadge status={queueStatus} />
             {!watchEnabled && <WatchPausedIndicator />}
-            {pr.feedbackItems.length > 0 && (() => {
-              const counts = countActiveFeedbackStatuses(pr.feedbackItems);
-              const parts: string[] = [];
-              if (counts.queued > 0) parts.push(`${counts.queued}q`);
-              if (counts.inProgress > 0) parts.push(`${counts.inProgress} active`);
-              if (counts.failed > 0) parts.push(`${counts.failed} failed`);
-              if (counts.warning > 0) parts.push(`${counts.warning} warn`);
-              if (parts.length === 0) return <span>{pr.feedbackItems.length} items</span>;
-              return <span>{parts.join(" · ")}</span>;
-            })()}
+            <span>{pr.accepted + pr.rejected + pr.flagged} triaged</span>
             {checkedAt && <span>checked {checkedAt}</span>}
           </div>
         </div>
@@ -1125,12 +1121,12 @@ export default function Dashboard() {
     }
   };
 
-  const { data: prs = [], isLoading } = useQuery<PR[]>({
+  const { data: prs = [], isLoading } = useQuery<PRSummary[]>({
     queryKey: ["/api/prs"],
     refetchInterval: 3000,
   });
 
-  const { data: archivedPRs = [], isLoading: isLoadingArchived } = useQuery<PR[]>({
+  const { data: archivedPRs = [], isLoading: isLoadingArchived } = useQuery<PRSummary[]>({
     queryKey: ["/api/prs/archived"],
     refetchInterval: 10000,
   });
@@ -1141,11 +1137,12 @@ export default function Dashboard() {
   });
   const globalDrainMode = runtimeState?.drainMode === true;
 
-  const { data: issues = [], isLoading: isLoadingIssues } = useQuery<Issue[]>({
+  const { data: issuesPage, isLoading: isLoadingIssues } = useQuery<IssueListPage>({
     queryKey: ["/api/issues"],
     enabled: runtimeState !== undefined && !globalDrainMode,
     refetchInterval: 30000,
   });
+  const issues = issuesPage?.items ?? [];
 
   const { data: config } = useQuery<Config>({
     queryKey: ["/api/config"],
@@ -1179,10 +1176,22 @@ export default function Dashboard() {
     : viewMode === "issues"
       ? issueLinkedPRs
       : prs
-  ).filter((pr) => matchesNumberSearch(pr.number, prNumberSearch));
+  )
+    .filter((pr) => matchesNumberSearch(pr.number, prNumberSearch))
+    .sort((a, b) => b.number - a.number);
   const isArchived = viewMode === "archived";
   const normalizedPrNumberSearch = normalizeNumberSearch(prNumberSearch);
   const isLoadingCurrentView = isArchived ? isLoadingArchived : viewMode === "issues" ? isLoading || isLoadingIssues : isLoading;
+  const selectedPRSummary = displayedPRs.find((pr) => pr.id === selectedPRId) ?? null;
+  const { data: selectedPRDetail } = useQuery<PR | null>({
+    queryKey: ["/api/prs", selectedPRId],
+    enabled: selectedPRId !== null,
+    queryFn: async () => {
+      if (!selectedPRId) return null;
+      return fetchJson<PR>(`/api/prs/${selectedPRId}`);
+    },
+    refetchInterval: 3000,
+  });
 
   useEffect(() => {
     if (displayedPRs.length === 0) {
@@ -1197,11 +1206,11 @@ export default function Dashboard() {
     }
   }, [displayedPRs, selectedPRId]);
 
-  const selectedPR = displayedPRs.find((pr) => pr.id === selectedPRId) ?? null;
-  const selectedPRWatchEnabled = selectedPR ? isPRWatchEnabled(selectedPR) : true;
-  const selectedFailedActivity = selectedPR ? latestActivityForTarget(activities.failed, selectedPR.id) : undefined;
-  const selectedPRQueueStatus = selectedPR ? queueStatusById.get(selectedPR.id) ?? null : null;
-  const selectedPRErrorMessage = selectedPR?.status === "error"
+  const selectedPR = selectedPRDetail ?? null;
+  const selectedPRWatchEnabled = selectedPRSummary ? isPRWatchEnabled(selectedPRSummary) : true;
+  const selectedFailedActivity = selectedPRSummary ? latestActivityForTarget(activities.failed, selectedPRSummary.id) : undefined;
+  const selectedPRQueueStatus = selectedPRSummary ? queueStatusById.get(selectedPRSummary.id) ?? null : null;
+  const selectedPRErrorMessage = selectedPRSummary?.status === "error"
     ? selectedFailedActivity?.lastError ?? getPRFeedbackFailureReason(selectedPR) ?? "Automation stopped on this PR. Check the activity log for the full failure context."
     : null;
   const activeErrorCount = activities.failed.length + activities.warnings.length;
@@ -1433,7 +1442,11 @@ export default function Dashboard() {
           </div>
           <div className="flex-1">
             {isLoadingCurrentView ? (
-              <div className="p-4 text-[12px] text-muted-foreground">Loading...</div>
+              <div data-testid="pr-list-loading" aria-label="Loading pull requests">
+                {Array.from({ length: 6 }).map((_, idx) => (
+                  <PRRowSkeleton key={idx} />
+                ))}
+              </div>
             ) : displayedPRs.length === 0 ? (
               <div className="p-4 text-[12px] text-muted-foreground">
                 {normalizedPrNumberSearch

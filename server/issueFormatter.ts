@@ -1,3 +1,5 @@
+import type { IssueSubtask } from "@shared/schema";
+
 function normalizeSectionLines(text: string | null | undefined, fallback: string): string[] {
   const trimmed = text?.trim();
   if (!trimmed) {
@@ -38,7 +40,22 @@ type IssueReplyBodyInput = IssueWorkBodyInput & {
 
 type PullRequestBodyInput = IssueWorkBodyInput & {
   branch: string;
+  subtasks?: IssueSubtask[];
 };
+
+function formatBugsAddressedSection(subtasks: IssueSubtask[]): string[] {
+  if (subtasks.length < 2) return [];
+  const lines = ["## Bugs Addressed"];
+  for (const task of subtasks) {
+    const marker = task.status === "done" ? "x" : " ";
+    const suffix = task.status === "done"
+      ? ""
+      : ` _(${task.status}${task.statusReason ? `: ${task.statusReason}` : ""})_`;
+    lines.push(`- [${marker}] **${task.title}**${suffix}`);
+  }
+  lines.push("");
+  return lines;
+}
 
 type IssueWorkStatusStage = "started" | "verifying" | "failed";
 
@@ -75,11 +92,13 @@ export function buildIssueReplyBody(input: IssueReplyBodyInput): string {
 
 export function buildPullRequestBody(input: PullRequestBodyInput): string {
   const summaryLines = bulletLines(normalizeSectionLines(input.summary, "No summary provided."));
+  const bugsSection = input.subtasks ? formatBugsAddressedSection(input.subtasks) : [];
 
   return [
     "## Summary",
     ...summaryLines,
     "",
+    ...bugsSection,
     "## Verification",
     "- Completed in the repository worktree before push.",
     "",
@@ -92,6 +111,47 @@ export function buildPullRequestBody(input: PullRequestBodyInput): string {
     "",
     "## Branch",
     `- \`${input.branch}\``,
+  ].join("\n");
+}
+
+type IssueVerifyCommentInput = {
+  repoFullName: string;
+  issueNumber: number;
+  issueTitle: string;
+  issueUrl: string;
+  prNumber: number;
+  prUrl: string;
+  subtasks: IssueSubtask[];
+  doneCount: number;
+  totalCount: number;
+};
+
+export function buildIssueVerifyComment(input: IssueVerifyCommentInput): string {
+  const issueLink = `[#${input.issueNumber} ${input.issueTitle}](${input.issueUrl})`;
+  const allDone = input.totalCount > 0 && input.doneCount === input.totalCount;
+  const header = allDone
+    ? `✅ **Verification — all ${input.totalCount} ${input.totalCount === 1 ? "task is" : "tasks are"} addressed**`
+    : `🔎 **Verification — ${input.doneCount} of ${input.totalCount} addressed**`;
+
+  const checklist = input.subtasks.length === 0
+    ? ["- _No subtasks recorded for this issue._"]
+    : input.subtasks.map((task) => {
+      const marker = task.status === "done" ? "x" : " ";
+      const suffix = task.status === "done"
+        ? ""
+        : ` _(${task.status}${task.statusReason ? `: ${task.statusReason}` : ""})_`;
+      return `- [${marker}] **${task.title}**${suffix}`;
+    });
+
+  return [
+    header,
+    "",
+    `Re-checked PR #${input.prNumber} against ${issueLink}.`,
+    "",
+    "## Subtasks",
+    ...checklist,
+    "",
+    `_Re-run from Patchdeck to refresh._`,
   ].join("\n");
 }
 

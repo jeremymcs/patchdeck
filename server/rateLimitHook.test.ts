@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import type { Config } from "@shared/schema";
 import { buildOctokit } from "./github";
-import { clearRateLimited, getRateLimitState } from "./rateLimitState";
+import { clearRateLimitStateForTests, clearRateLimited, getRateLimitState } from "./rateLimitState";
 
 const config: Config = {
   githubTokens: [],
@@ -31,7 +31,7 @@ const config: Config = {
   ignoredBots: [],
 };
 
-test.beforeEach(() => clearRateLimited());
+test.beforeEach(() => clearRateLimitStateForTests());
 
 test("octokit hook spaces concurrent REST requests under GitHub secondary limits", async () => {
   const requestStartedAt: number[] = [];

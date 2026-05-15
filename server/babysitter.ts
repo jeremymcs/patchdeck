@@ -78,6 +78,7 @@ const CODE_OWNER_FALLBACK_TIMEOUT_MS = 30 * 60 * 1000;
 const AGENT_STREAM_LOG_LINE_LIMIT = 120;
 const MAX_FEEDBACK_SYNCS_PER_TICK = 20;
 const FEEDBACK_SYNC_RATE_LIMIT_COOLDOWN_MS = 5 * 60 * 1000;
+const REPO_SYNC_FAILURE_BACKOFF_MS = 60_000;
 const APP_NAME = "patchdeck";
 const APP_REPOSITORY_URL = "https://github.com/jeremymcs/patchdeck";
 export const APP_COMMENT_FOOTER = formatAppCommentFooter(APP_NAME, true);
@@ -1319,6 +1320,8 @@ export class PRBabysitter {
   private readonly clock: () => Date;
   private readonly agentHealthCache = new Map<CodingAgent, { checkedAtMs: number; result: AgentHealthResult }>();
   private readonly feedbackSyncCooldownUntilMs = new Map<string, number>();
+  private readonly repoSyncBackoffUntilMs = new Map<string, number>();
+  private repoSyncCursor = 0;
 
   constructor(
     storage: IStorage,
@@ -1804,7 +1807,9 @@ export class PRBabysitter {
     return updated;
   }
 
-  async syncAndBabysitTrackedRepos(): Promise<void> {
+  async syncAndBabysitTrackedRepos(options?: { includeAllOpenPrs?: boolean; fullSweep?: boolean }): Promise<void> {
+    const includeAllOpenPrs = options?.includeAllOpenPrs === true;
+    const fullSweep = options?.fullSweep === true;
     const [runtimeState, configEarly] = await Promise.all([
       this.storage.getRuntimeState(),
       this.storage.getConfig(),
@@ -1884,14 +1889,36 @@ export class PRBabysitter {
     const repos = Array.from(repoCandidates)
       .map((repo) => parseRepoSlug(repo))
       .filter((repo): repo is NonNullable<typeof repo> => Boolean(repo));
+    if (repos.length === 0) {
+      return;
+    }
 
-    for (const repo of repos) {
+    const nowMs = this.now().getTime();
+    const selectedRepos = fullSweep
+      ? repos
+      : Array.from({ length: repos.length })
+          .map((_, i) => repos[(this.repoSyncCursor + i) % repos.length])
+          .filter((repo): repo is NonNullable<typeof repo> => Boolean(repo))
+          .filter((repo) => {
+            const repoSlug = formatRepoSlug(repo);
+            const backoffUntilMs = this.repoSyncBackoffUntilMs.get(repoSlug) ?? 0;
+            return backoffUntilMs <= nowMs;
+          })
+          .slice(0, 1);
+
+    for (const repo of selectedRepos) {
       const repoSlug = formatRepoSlug(repo);
 
       let openPulls;
       try {
         openPulls = await this.github.listOpenPullsForRepo(octokit, repo);
+        this.repoSyncBackoffUntilMs.delete(repoSlug);
+        const repoIndex = repos.findIndex((entry) => formatRepoSlug(entry) === repoSlug);
+        if (repoIndex >= 0) {
+          this.repoSyncCursor = (repoIndex + 1) % repos.length;
+        }
       } catch (error) {
+        this.repoSyncBackoffUntilMs.set(repoSlug, this.now().getTime() + REPO_SYNC_FAILURE_BACKOFF_MS);
         log.warn(
           { err: error instanceof Error ? error.message : String(error), repo: repoSlug },
           "Failed to list open PRs",
@@ -2048,7 +2075,7 @@ export class PRBabysitter {
       for (const pull of openPulls) {
         let local = await this.storage.getPRByRepoAndNumber(repoSlug, pull.number);
         if (!local) {
-          if (!automationScopeNumbers.has(pull.number)) {
+          if (!automationScopeNumbers.has(pull.number) && !includeAllOpenPrs) {
             continue;
           }
 

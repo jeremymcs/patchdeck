@@ -1,19 +1,20 @@
-import { useEffect, useMemo, useState } from "react";
+import { Component, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { ExternalLink, Loader2, Plus, RefreshCw, ShieldCheck, Trash2, Wrench, X } from "lucide-react";
+import { CheckCircle2, CircleDashed, CircleSlash, ExternalLink, Loader2, Plus, RefreshCw, ShieldCheck, Trash2, Wrench, X } from "lucide-react";
 import { apiRequest, fetchJson, queryClient } from "@/lib/queryClient";
 import { AppHeader } from "@/components/AppHeader";
 import { UpdateBanner } from "@/components/UpdateBanner";
 import { toast } from "@/hooks/use-toast";
-import type { ActivitySnapshot, Config, Issue, IssueListPage, LogEntry, RuntimeState } from "@shared/schema";
+import { issueListPageSchema, issueSchema, type ActivitySnapshot, type Config, type Issue, type IssueListPage, type IssueSubtask, type LogEntry, type RuntimeState } from "@shared/schema";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Skeleton } from "@/components/ui/skeleton";
 import { buildQueueStatusIndex, type QueueStatusView } from "@/lib/activityQueue";
 import { QueueStatusBadge } from "@/components/QueueStatusBadge";
 import { ActivityMenu, EMPTY_ACTIVITY_SNAPSHOT } from "@/components/ActivityMenu";
 
-const ISSUES_CACHE_KEY = "patchdeck:issues-cache:v1";
+const ISSUES_CACHE_KEY = "patchdeck:issues-cache:v2";
 const ISSUES_CACHE_MAX_AGE_MS = 5 * 60 * 1000;
-const ISSUES_PAGE_SIZE = 20;
+const ISSUES_PAGE_SIZE = 100;
 
 function readCachedIssues(): { data: IssueListPage; updatedAt: number } | null {
   if (typeof window === "undefined") return null;
@@ -27,7 +28,15 @@ function readCachedIssues(): { data: IssueListPage; updatedAt: number } | null {
     if (Date.now() - parsed.updatedAt > ISSUES_CACHE_MAX_AGE_MS) {
       return null;
     }
-    return { data: parsed.data as IssueListPage, updatedAt: parsed.updatedAt };
+    const normalized = issueListPageSchema.safeParse(parsed.data);
+    if (!normalized.success) {
+      window.localStorage.removeItem(ISSUES_CACHE_KEY);
+      return null;
+    }
+    if (normalized.data.limit !== ISSUES_PAGE_SIZE) {
+      return null;
+    }
+    return { data: normalized.data, updatedAt: parsed.updatedAt };
   } catch {
     return null;
   }
@@ -43,6 +52,22 @@ function writeCachedIssues(data: IssueListPage): void {
   } catch {
     // Best-effort cache only.
   }
+}
+
+function parseIssueListPageOrThrow(value: unknown): IssueListPage {
+  const parsed = issueListPageSchema.safeParse(value);
+  if (!parsed.success) {
+    throw new Error("Invalid issue list response");
+  }
+  return parsed.data;
+}
+
+function parseIssueOrNull(value: unknown): Issue | null {
+  const parsed = issueSchema.safeParse(value);
+  if (!parsed.success) {
+    return null;
+  }
+  return parsed.data;
 }
 
 function formatDateTime(value: string | null | undefined): string {
@@ -269,11 +294,13 @@ function IssueRow({
   selected,
   onSelect,
   queueStatus,
+  verifyState,
 }: {
   issue: Issue;
   selected: boolean;
   onSelect: (issueId: string) => void;
   queueStatus: QueueStatusView | null;
+  verifyState: VerifyState | null;
 }) {
   const showInlineStatusBadge = issue.workStatus !== "queued" && issue.workStatus !== "in_progress";
   const rowAction =
@@ -350,6 +377,16 @@ function IssueRow({
               {formatEvaluationState(issue)}
             </span>
             <QueueStatusBadge status={queueStatus} />
+            {verifyState && <VerifyStateBadge state={verifyState} />}
+            {issue.subtasks && issue.subtasks.length >= 2 && (
+              <span
+                data-testid="issue-multi-bug-badge"
+                title={issue.subtasks.map((task) => `• ${task.title}`).join("\n")}
+                className="border border-primary/60 bg-primary/10 px-1.5 py-0 text-[10px] uppercase tracking-wider text-primary"
+              >
+                {issue.subtasks.length} bugs
+              </span>
+            )}
             {issue.labels.slice(0, 3).map((label) => (
               <span key={label} className="border border-border px-1.5 py-0 text-[10px] uppercase tracking-wider text-muted-foreground">
                 {label}
@@ -367,6 +404,110 @@ function IssueRow({
         </span>
       </button>
       {rowAction}
+    </div>
+  );
+}
+
+type VerifyState = "verifying" | "verified";
+
+function VerifyStateBadge({ state }: { state: VerifyState }) {
+  const isPending = state === "verifying";
+  return (
+    <span
+      data-testid="issue-verify-state-badge"
+      data-verify-state={state}
+      className={`inline-flex items-center gap-1 border px-1.5 py-0 text-[10px] uppercase tracking-wider ${
+        isPending
+          ? "border-primary/60 bg-primary/10 text-primary animate-pulse"
+          : "border-success-border bg-success-muted text-success-foreground"
+      }`}
+    >
+      {isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <CheckCircle2 className="h-3 w-3" />}
+      {isPending ? "re-verifying" : "re-verified"}
+    </span>
+  );
+}
+
+function IssueRowSkeleton() {
+  return (
+    <div className="border-b border-l-2 border-l-transparent border-border px-4 py-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1 space-y-2">
+          <Skeleton className="h-4 w-3/4" />
+          <Skeleton className="h-3 w-32" />
+          <Skeleton className="h-3 w-24" />
+          <Skeleton className="h-3 w-full" />
+          <Skeleton className="h-3 w-5/6" />
+          <div className="flex gap-1.5 pt-1">
+            <Skeleton className="h-3 w-14" />
+            <Skeleton className="h-3 w-12" />
+            <Skeleton className="h-3 w-10" />
+          </div>
+        </div>
+        <Skeleton className="h-3 w-20 shrink-0" />
+      </div>
+    </div>
+  );
+}
+
+function SubtaskStatusIcon({ status }: { status: IssueSubtask["status"] }) {
+  if (status === "done") {
+    return <CheckCircle2 className="h-3.5 w-3.5 text-success-foreground" aria-label="done" />;
+  }
+  if (status === "deferred" || status === "skipped") {
+    return <CircleSlash className="h-3.5 w-3.5 text-muted-foreground" aria-label={status} />;
+  }
+  return <CircleDashed className="h-3.5 w-3.5 text-warning-foreground" aria-label="pending" />;
+}
+
+function SubtaskListPanel({ subtasks }: { subtasks: IssueSubtask[] }) {
+  const doneCount = subtasks.reduce((sum, task) => sum + (task.status === "done" ? 1 : 0), 0);
+
+  return (
+    <div
+      data-testid="issue-subtasks"
+      className="mt-3 border border-border/60 bg-muted/10"
+    >
+      <div className="flex items-center justify-between gap-2 border-b border-border/60 px-3 py-2">
+        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+          Subtasks
+        </div>
+        <span className="font-mono text-[10px] text-muted-foreground">
+          {doneCount} / {subtasks.length} done
+        </span>
+      </div>
+      <ul className="divide-y divide-border/60">
+        {subtasks.map((task) => (
+          <li
+            key={task.id}
+            data-testid="issue-subtask-row"
+            data-subtask-status={task.status}
+            className="flex items-start gap-2 px-3 py-2"
+          >
+            <span className="mt-0.5 shrink-0">
+              <SubtaskStatusIcon status={task.status} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="truncate text-[12px] font-medium text-foreground">{task.title}</span>
+                <span className="border border-border/60 px-1.5 py-0 text-[10px] uppercase tracking-wider text-muted-foreground">
+                  {task.status}
+                </span>
+              </div>
+              {task.summary && (
+                <div className="mt-0.5 text-[11px] leading-5 text-muted-foreground">
+                  {task.summary}
+                </div>
+              )}
+              {task.statusReason && (
+                <div className="mt-1 text-[11px] italic leading-5 text-foreground/70">
+                  {task.statusReason}
+                </div>
+              )}
+            </div>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -416,7 +557,41 @@ function IssueLogRow({ entry }: { entry: LogEntry }) {
   );
 }
 
-export default function Issues() {
+type IssuesErrorBoundaryState = {
+  hasError: boolean;
+  message: string;
+};
+
+class IssuesErrorBoundary extends Component<{ children: ReactNode }, IssuesErrorBoundaryState> {
+  state: IssuesErrorBoundaryState = {
+    hasError: false,
+    message: "",
+  };
+
+  static getDerivedStateFromError(error: unknown): IssuesErrorBoundaryState {
+    return {
+      hasError: true,
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex min-h-screen items-center justify-center bg-background p-6">
+          <div className="max-w-2xl border border-destructive/40 bg-destructive/10 p-4 text-[12px] text-destructive">
+            <div className="text-[11px] uppercase tracking-wider text-destructive/80">Issues UI runtime error</div>
+            <pre className="mt-2 whitespace-pre-wrap break-words">{this.state.message || "Unknown render error"}</pre>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
+function IssuesPage() {
   const { data: runtime } = useQuery<RuntimeState>({
     queryKey: ["/api/runtime"],
   });
@@ -447,7 +622,7 @@ export default function Issues() {
 
   const issuesQuery = useQuery<IssueListPage>({
     queryKey: ["/api/issues", ISSUES_PAGE_SIZE, 0],
-    queryFn: async () => fetchJson<IssueListPage>(issueListUrl(ISSUES_PAGE_SIZE, 0)),
+    queryFn: async () => parseIssueListPageOrThrow(await fetchJson<unknown>(issueListUrl(ISSUES_PAGE_SIZE, 0))),
     enabled: runtime !== undefined && !globalDrainMode,
     initialData: cachedIssues?.data,
     initialDataUpdatedAt: cachedIssues?.updatedAt,
@@ -463,9 +638,10 @@ export default function Issues() {
         : false;
     },
   });
-  const { data: issuesPage, isLoading, refetch, isFetching } = issuesQuery;
+  const { data: issuesPage, isLoading, isFetching } = issuesQuery;
   const [extraPages, setExtraPages] = useState<IssueListPage[]>([]);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [isSyncingRepos, setIsSyncingRepos] = useState(false);
   useEffect(() => {
     if (issuesQuery.status === "success") {
       writeCachedIssues(issuesQuery.data);
@@ -479,17 +655,19 @@ export default function Issues() {
     const all = [issuesPage, ...extraPages].flatMap((page) => page?.items ?? []);
     const deduped = new Map<string, Issue>();
     for (const issue of all) deduped.set(issue.id, issue);
-    return Array.from(deduped.values()).sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+    return Array.from(deduped.values()).sort((a, b) => b.number - a.number);
   }, [issuesPage, extraPages]);
   const latestPage = extraPages[extraPages.length - 1] ?? issuesPage ?? null;
   const canLoadMore = Boolean(latestPage?.hasMore);
   const nextOffset = latestPage?.nextOffset ?? null;
+  const loadMoreSentinelRef = useRef<HTMLDivElement | null>(null);
+  const issueListScrollRef = useRef<HTMLDivElement | null>(null);
 
   const loadMoreIssues = async (): Promise<void> => {
     if (!canLoadMore || nextOffset === null || globalDrainMode || isLoadingMore) return;
     setIsLoadingMore(true);
     try {
-      const nextPage = await fetchJson<IssueListPage>(issueListUrl(ISSUES_PAGE_SIZE, nextOffset));
+      const nextPage = parseIssueListPageOrThrow(await fetchJson<unknown>(issueListUrl(ISSUES_PAGE_SIZE, nextOffset)));
       setExtraPages((current) => [...current, nextPage]);
     } catch (error) {
       toast({
@@ -500,6 +678,41 @@ export default function Issues() {
       setIsLoadingMore(false);
     }
   };
+
+  const handleSyncIssues = async (): Promise<void> => {
+    setIsSyncingRepos(true);
+    try {
+      await apiRequest("POST", "/api/repos/sync");
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["/api/issues"] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/issues/detail"] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/activities"] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/runtime"] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/repos/settings"] }),
+      ]);
+      setExtraPages([]);
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        description: `Could not sync repositories: ${error instanceof Error ? error.message : String(error)}`,
+      });
+    } finally {
+      setIsSyncingRepos(false);
+    }
+  };
+
+  useEffect(() => {
+    const sentinel = loadMoreSentinelRef.current;
+    const scrollRoot = issueListScrollRef.current;
+    if (!sentinel || !scrollRoot || !canLoadMore || globalDrainMode) return;
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        void loadMoreIssues();
+      }
+    }, { root: scrollRoot, rootMargin: "200px 0px" });
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [canLoadMore, globalDrainMode, isLoadingMore, nextOffset]);
 
   const [selectedIssueId, setSelectedIssueId] = useState<string | null>(null);
   const [selectedRepo, setSelectedRepo] = useState<string>("all");
@@ -551,14 +764,18 @@ export default function Issues() {
     },
     [filteredIssues, issueNumberSearch, issues, selectedIssueId, selectedRepo, selectedWorkFilter],
   );
-  const { data: selectedIssueDetail, refetch: refetchSelectedIssueDetail } = useQuery<Issue>({
+  const { data: selectedIssueDetail } = useQuery<Issue>({
     queryKey: ["/api/issues/detail", selectedIssueFromList?.repo ?? "", selectedIssueFromList?.number ?? 0],
     queryFn: async () => {
       if (!selectedIssueFromList) {
         throw new Error("No issue selected");
       }
 
-      return fetchJson<Issue>(issueDetailUrl(selectedIssueFromList));
+      const parsed = parseIssueOrNull(await fetchJson<unknown>(issueDetailUrl(selectedIssueFromList)));
+      if (!parsed) {
+        throw new Error("Invalid issue detail response");
+      }
+      return parsed;
     },
     enabled: Boolean(selectedIssueFromList) && !globalDrainMode,
     refetchInterval: selectedIssueFromList && isActiveWorkStatus(selectedIssueFromList.workStatus) && !globalDrainMode ? 5000 : false,
@@ -579,13 +796,11 @@ export default function Issues() {
       issues: repoIssues,
     }));
   }, [filteredIssues]);
-  const repoCounts = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const issue of issues) {
-      counts.set(issue.repo, (counts.get(issue.repo) ?? 0) + 1);
-    }
-    return Array.from(counts.entries()).sort(([left], [right]) => left.localeCompare(right));
-  }, [issues]);
+  const repoCounts = useMemo(
+    () => Object.entries(issuesPage?.repoTotals ?? {}).sort(([left], [right]) => left.localeCompare(right)),
+    [issuesPage?.repoTotals],
+  );
+  const totalIssueCount = issuesPage?.totalCount ?? issues.length;
 
   const { data: issueLogs = [] } = useQuery<LogEntry[]>({
     queryKey: ["/api/logs", selectedIssueKey ?? "issue"],
@@ -664,6 +879,70 @@ export default function Issues() {
       toast({ variant: "destructive", description: `Could not queue issue evaluation: ${error.message}` });
     },
   });
+  const verifyingIssueIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const activity of activities.queued) {
+      if (activity.kind === "verify_issue") ids.add(activity.targetId);
+    }
+    for (const activity of activities.inProgress) {
+      if (activity.kind === "verify_issue") ids.add(activity.targetId);
+    }
+    return ids;
+  }, [activities.queued, activities.inProgress]);
+
+  const previousVerifyingRef = useRef<Set<string>>(new Set());
+  const [recentlyVerifiedIds, setRecentlyVerifiedIds] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    const prior = previousVerifyingRef.current;
+    const justFinished: string[] = [];
+    prior.forEach((id) => {
+      if (!verifyingIssueIds.has(id)) justFinished.push(id);
+    });
+    previousVerifyingRef.current = verifyingIssueIds;
+
+    if (justFinished.length === 0) return;
+
+    setRecentlyVerifiedIds((prev) => {
+      const next = new Set(prev);
+      justFinished.forEach((id) => next.add(id));
+      return next;
+    });
+    const timers = justFinished.map((id) =>
+      window.setTimeout(() => {
+        setRecentlyVerifiedIds((prev) => {
+          if (!prev.has(id)) return prev;
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+      }, 8000),
+    );
+    return () => { timers.forEach((t) => window.clearTimeout(t)); };
+  }, [verifyingIssueIds]);
+
+  const verifyMutation = useMutation({
+    mutationFn: async (issue: Issue) => {
+      const res = await apiRequest("POST", "/api/issues/verify", {
+        repo: issue.repo,
+        number: issue.number,
+      });
+      return res.json() as Promise<Issue>;
+    },
+    onSuccess: async (issue) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["/api/issues"] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/issues/detail", issue.repo, issue.number] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/activities"] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/logs", issue.id] }),
+      ]);
+      toast({ description: `Queued verification for #${issue.number}.` });
+    },
+    onError: (error) => {
+      toast({ variant: "destructive", description: `Could not queue verification: ${error.message}` });
+    },
+  });
+
   const syncIssueMutation = useMutation({
     mutationFn: async (issue: Issue) => {
       const res = await apiRequest("POST", "/api/issues/sync", {
@@ -751,17 +1030,12 @@ export default function Issues() {
           <>
             <button
               type="button"
-              onClick={() => {
-                void Promise.all([
-                  refetch().then(() => setExtraPages([])),
-                  selectedIssueFromList ? refetchSelectedIssueDetail() : Promise.resolve(),
-                ]);
-              }}
-              disabled={isFetching || globalDrainMode}
+              onClick={() => { void handleSyncIssues(); }}
+              disabled={isSyncingRepos || globalDrainMode}
               data-testid="button-sync-issues"
               className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-0.5 text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
             >
-              {globalDrainMode ? <span className="h-3.5 w-3.5" /> : isFetching ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+              {globalDrainMode ? <span className="h-3.5 w-3.5" /> : (isSyncingRepos || isFetching) ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
               {globalDrainMode ? "paused" : "sync"}
             </button>
             <ActivityMenu
@@ -810,7 +1084,7 @@ export default function Issues() {
                       : "border-border text-muted-foreground hover:border-primary/40 hover:text-primary"
                   }`}
                 >
-                  all ({issues.length})
+                  all ({totalIssueCount})
                 </button>
                 {repoCounts.map(([repo, count]) => (
                   <button
@@ -918,10 +1192,14 @@ export default function Issues() {
               </div>
             </div>
           </div>
-          <div className="flex-1 overflow-y-auto">
+          <div ref={issueListScrollRef} className="flex-1 overflow-y-auto">
             <div data-testid="issue-list">
               {isLoading ? (
-                <div className="p-4 text-[12px] text-muted-foreground">Loading...</div>
+                <div data-testid="issue-list-loading" aria-label="Loading issues">
+                  {Array.from({ length: 6 }).map((_, idx) => (
+                    <IssueRowSkeleton key={idx} />
+                  ))}
+                </div>
               ) : visibleIssues.length === 0 ? (
                 <div className="p-4 text-[12px] text-muted-foreground">
                   {normalizedIssueNumberSearch
@@ -942,23 +1220,18 @@ export default function Issues() {
                           selected={issue.id === selectedIssueId}
                           onSelect={setSelectedIssueId}
                           queueStatus={queueStatusById.get(issue.id) ?? null}
+                          verifyState={
+                            verifyingIssueIds.has(issue.id)
+                              ? "verifying"
+                              : recentlyVerifiedIds.has(issue.id)
+                                ? "verified"
+                                : null
+                          }
                         />
                       ))}
                     </div>
                   ))}
-                  {canLoadMore && (
-                    <div className="border-t border-border/60 px-4 py-2">
-                      <button
-                        type="button"
-                        onClick={() => void loadMoreIssues()}
-                        disabled={isLoadingMore || globalDrainMode}
-                        className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground disabled:opacity-50"
-                      >
-                        {isLoadingMore ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
-                        load more
-                      </button>
-                    </div>
-                  )}
+                  {canLoadMore && <div ref={loadMoreSentinelRef} className="h-8 w-full" data-testid="issues-load-more-sentinel" />}
                 </>
               )}
             </div>
@@ -1083,6 +1356,41 @@ export default function Issues() {
                         </>
                       )}
                     </button>
+                    {(() => {
+                      const isVerifying = verifyingIssueIds.has(selectedIssue.id) || verifyMutation.isPending;
+                      return (
+                    <button
+                      type="button"
+                      onClick={() => verifyMutation.mutate(selectedIssue)}
+                      disabled={
+                        isVerifying
+                        || Boolean(runtime?.drainMode)
+                        || !selectedIssue.workPrUrl
+                      }
+                      title={
+                        runtime?.drainMode
+                          ? "Verification is paused by drain mode"
+                          : !selectedIssue.workPrUrl
+                            ? "Verification requires an open work PR"
+                            : "Check the work PR diff against this issue's subtasks"
+                      }
+                      data-testid="button-verify-issue"
+                      className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-border bg-transparent px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground transition-colors hover:border-foreground/30 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      {isVerifying ? (
+                        <>
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          Verifying
+                        </>
+                      ) : (
+                        <>
+                          <CheckCircle2 className="h-3.5 w-3.5" />
+                          Verify work
+                        </>
+                      )}
+                    </button>
+                      );
+                    })()}
                     <button
                       type="button"
                       onClick={() => workMutation.mutate(selectedIssue)}
@@ -1240,6 +1548,9 @@ export default function Issues() {
                     </div>
                   </div>
                 )}
+                {selectedIssue.subtasks && selectedIssue.subtasks.length > 0 && (
+                  <SubtaskListPanel subtasks={selectedIssue.subtasks} />
+                )}
                 <div
                   data-testid="issue-evaluation-detail"
                   className="mt-3 border border-border/60 bg-muted/10 px-3 py-2"
@@ -1323,5 +1634,13 @@ export default function Issues() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function Issues() {
+  return (
+    <IssuesErrorBoundary>
+      <IssuesPage />
+    </IssuesErrorBoundary>
   );
 }

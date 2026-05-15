@@ -13,6 +13,8 @@ type AppHeaderSection = "prs" | "issues" | "releases" | "logs" | "settings";
 type GitHubRateLimitState = {
   limited: boolean;
   resetAt: string | null;
+  recentlyLimited: boolean;
+  lastLimitedAt: string | null;
 };
 
 const PRIMARY_NAV_ITEMS: Array<{ section: AppHeaderSection; label: string; href: string }> = [
@@ -286,6 +288,7 @@ function GitHubRateLimitNotice() {
     refetchInterval: 30000,
   });
   const explicitlyLimited = githubRateLimit?.limited === true;
+  const recentlyLimited = githubRateLimit?.recentlyLimited === true;
   const { data: activities } = useQuery<ActivitySnapshot>({
     queryKey: ["/api/activities"],
     refetchInterval: 30000,
@@ -298,7 +301,7 @@ function GitHubRateLimitNotice() {
       .find((message) => message.toLowerCase().includes("rate limit")) ?? null
     : null;
 
-  if (!explicitlyLimited && !activityRateLimitMessage) {
+  if (!explicitlyLimited && !recentlyLimited && !activityRateLimitMessage) {
     return null;
   }
 
@@ -310,6 +313,8 @@ function GitHubRateLimitNotice() {
     ? resetTime
       ? `GitHub rate limited until ${resetTime}`
       : "GitHub rate limited"
+    : recentlyLimited
+      ? "GitHub rate limit hit recently"
     : "GitHub rate limit hit in recent activity";
 
   const tooltip = explicitlyLimited

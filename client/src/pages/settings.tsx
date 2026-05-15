@@ -67,6 +67,8 @@ const DRAIN_PAUSED_TITLE = "Paused by drain mode";
 type GitHubRateLimitState = {
   limited: boolean;
   resetAt: string | null;
+  recentlyLimited: boolean;
+  lastLimitedAt: string | null;
 };
 
 type GitHubTokenTestResult = {
@@ -1572,12 +1574,14 @@ export default function Settings() {
               <SettingsGroup id="system" title="System" description="Runtime and process-level controls.">
                 <SettingsSubsection id="system-runtime" title="Runtime">
             <div className="flex flex-col gap-4 rounded-md border border-border p-4">
-              {githubRateLimit?.limited && githubRateLimit.resetAt ? (
+              {(githubRateLimit?.limited || githubRateLimit?.recentlyLimited) ? (
                 <div
                   className="border-l-2 border-warning bg-warning-muted/40 px-3 py-2 text-[11px] text-warning-foreground"
                   data-testid="runtime-github-rate-limit"
                 >
-                  GitHub rate limit active until {new Date(githubRateLimit.resetAt).toLocaleTimeString("en-US")}
+                  {githubRateLimit?.limited && githubRateLimit.resetAt
+                    ? `GitHub rate limit active until ${new Date(githubRateLimit.resetAt).toLocaleTimeString("en-US")}`
+                    : "GitHub rate limit was hit recently. Sync may be delayed."}
                 </div>
               ) : null}
               <div className="flex items-start justify-between gap-3">

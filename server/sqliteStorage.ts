@@ -13,6 +13,8 @@ import type {
   DeploymentHealingSession,
   DeploymentHealingState,
   IssueEvaluation,
+  IssueSubtask,
+  IssueSubtaskSet,
   DeploymentPlatform,
   FeedbackItem,
   FailureFingerprint,
@@ -21,6 +23,7 @@ import type {
   HealingAttemptStatus,
   NewPR,
   PR,
+  PRSummary,
   PRQuestion,
   HealingSession,
   HealingSessionState,
@@ -37,6 +40,7 @@ import {
   applyHealingAttemptUpdate,
   applyHealingSessionUpdate,
   applyIssueEvaluationUpdate,
+  applyIssueSubtaskSetUpdate,
   applyPRQuestionUpdate,
   applyPRUpdate,
   applyReleaseRunUpdate,
@@ -50,12 +54,13 @@ import {
   createHealingAttempt,
   createHealingSession,
   createIssueEvaluation,
+  createIssueSubtaskSet,
   createPR,
   createPRQuestion,
   createReleaseRun,
   createSocialChangelog,
 } from "@shared/models";
-import type { IStorage } from "./storage";
+import type { IStorage, StoredIssueRecord } from "./storage";
 import { getCodeFactoryPaths } from "./paths";
 import { DEFAULT_CONFIG } from "./defaultConfig";
 import { appendLogFile } from "./logFiles";
@@ -273,6 +278,26 @@ type IssueEvaluationRow = {
   marker_comment_id: number | null;
   created_at: string;
   updated_at: string;
+};
+
+type IssueSubtaskSetRow = {
+  target_id: string;
+  repo: string;
+  issue_number: number;
+  subtasks_json: string;
+  analyzed_body_hash: string;
+  analyzed_at: string;
+  updated_at: string;
+};
+
+type SyncedIssueRow = {
+  repo: string;
+  issue_number: number;
+  payload_json: string;
+  is_open: number;
+  is_worked: number;
+  first_seen_at: string;
+  last_seen_at: string;
 };
 
 type SocialChangelogRow = {
@@ -693,6 +718,27 @@ export class SqliteStorage implements IStorage {
         updated_at TEXT NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS synced_issues (
+        repo TEXT NOT NULL,
+        issue_number INTEGER NOT NULL,
+        payload_json TEXT NOT NULL,
+        is_open INTEGER NOT NULL DEFAULT 1,
+        is_worked INTEGER NOT NULL DEFAULT 0,
+        first_seen_at TEXT NOT NULL,
+        last_seen_at TEXT NOT NULL,
+        PRIMARY KEY(repo, issue_number)
+      );
+
+      CREATE TABLE IF NOT EXISTS issue_subtasks (
+        target_id TEXT PRIMARY KEY,
+        repo TEXT NOT NULL,
+        issue_number INTEGER NOT NULL,
+        subtasks_json TEXT NOT NULL,
+        analyzed_body_hash TEXT NOT NULL,
+        analyzed_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
       CREATE TABLE IF NOT EXISTS pr_questions (
         id TEXT PRIMARY KEY,
         pr_id TEXT NOT NULL,
@@ -841,6 +887,7 @@ export class SqliteStorage implements IStorage {
       CREATE INDEX IF NOT EXISTS idx_background_jobs_kind_status ON background_jobs(kind, status);
       CREATE UNIQUE INDEX IF NOT EXISTS idx_background_jobs_dedupe_active ON background_jobs(dedupe_key) WHERE status IN ('queued', 'leased');
       CREATE INDEX IF NOT EXISTS idx_issue_evaluations_repo_issue ON issue_evaluations(repo, issue_number);
+      CREATE INDEX IF NOT EXISTS idx_synced_issues_open_repo_updated ON synced_issues(is_open, repo, last_seen_at);
       CREATE INDEX IF NOT EXISTS idx_pr_questions_pr_id ON pr_questions(pr_id);
       CREATE INDEX IF NOT EXISTS idx_social_changelogs_date ON social_changelogs(date);
       CREATE INDEX IF NOT EXISTS idx_healing_sessions_pr_id ON healing_sessions(pr_id);
@@ -904,6 +951,7 @@ export class SqliteStorage implements IStorage {
     this.ensureColumn("config", "max_concurrent_issue_evaluations", "INTEGER NOT NULL DEFAULT 2");
     this.ensureColumn("config", "max_concurrent_issue_work", "INTEGER NOT NULL DEFAULT 1");
     this.ensureColumn("config", "priority_issue_authors_json", "TEXT NOT NULL DEFAULT '[]'");
+    this.ensureColumn("synced_issues", "is_worked", "INTEGER NOT NULL DEFAULT 0");
     this.ensureColumn("release_runs", "source", "TEXT NOT NULL DEFAULT 'automatic'");
     this.ensureColumn("prs", "watch_enabled", "INTEGER NOT NULL DEFAULT 1");
     this.ensureColumn("prs", "docs_assessment_json", "TEXT");
@@ -1228,6 +1276,31 @@ export class SqliteStorage implements IStorage {
     };
   }
 
+  private parsePRSummaryRow(row: PRRow): PRSummary {
+    return {
+      id: row.id,
+      number: row.number,
+      title: row.title,
+      repo: row.repo,
+      branch: row.branch,
+      author: row.author,
+      url: row.url,
+      status: row.status,
+      accepted: row.accepted,
+      rejected: row.rejected,
+      flagged: row.flagged,
+      testsPassed: row.tests_passed === null ? null : Boolean(row.tests_passed),
+      lintPassed: row.lint_passed === null ? null : Boolean(row.lint_passed),
+      lastChecked: row.last_checked,
+      lastSyncAttemptedAt: row.last_sync_attempted_at ?? null,
+      lastSyncSucceededAt: row.last_sync_succeeded_at ?? null,
+      lastSyncError: row.last_sync_error ?? null,
+      watchEnabled: Boolean(row.watch_enabled),
+      docsAssessment: this.parseDocsAssessment(row.docs_assessment_json),
+      addedAt: row.added_at,
+    };
+  }
+
   private parseDocsAssessment(raw: string | null): PR["docsAssessment"] {
     if (!raw) {
       return null;
@@ -1306,6 +1379,39 @@ export class SqliteStorage implements IStorage {
       markerCommentId: row.marker_comment_id,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
+    };
+  }
+
+  private parseIssueSubtaskSetRow(row: IssueSubtaskSetRow): IssueSubtaskSet {
+    let subtasks: IssueSubtask[] = [];
+    try {
+      const parsed = JSON.parse(row.subtasks_json);
+      if (Array.isArray(parsed)) {
+        subtasks = parsed as IssueSubtask[];
+      }
+    } catch {
+      subtasks = [];
+    }
+    return {
+      targetId: row.target_id,
+      repo: row.repo,
+      issueNumber: row.issue_number,
+      subtasks,
+      analyzedBodyHash: row.analyzed_body_hash,
+      analyzedAt: row.analyzed_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  private parseSyncedIssueRow(row: SyncedIssueRow): StoredIssueRecord {
+    return {
+      repo: row.repo,
+      number: row.issue_number,
+      payload: JSON.parse(row.payload_json) as StoredIssueRecord["payload"],
+      isOpen: row.is_open === 1,
+      isWorked: row.is_worked === 1,
+      firstSeenAt: row.first_seen_at,
+      lastSeenAt: row.last_seen_at,
     };
   }
 
@@ -1515,7 +1621,7 @@ export class SqliteStorage implements IStorage {
              tests_passed, lint_passed, last_checked, last_sync_attempted_at, last_sync_succeeded_at, last_sync_error, watch_enabled, docs_assessment_json, added_at
       FROM prs
       WHERE status != 'archived'
-      ORDER BY datetime(added_at) DESC
+      ORDER BY number DESC
     `);
 
     const itemsByPrId = this.getFeedbackItemsForPRIds(rows.map((row) => row.id));
@@ -1529,12 +1635,36 @@ export class SqliteStorage implements IStorage {
              tests_passed, lint_passed, last_checked, last_sync_attempted_at, last_sync_succeeded_at, last_sync_error, watch_enabled, docs_assessment_json, added_at
       FROM prs
       WHERE status = 'archived'
-      ORDER BY datetime(added_at) DESC
+      ORDER BY number DESC
     `);
 
     const itemsByPrId = this.getFeedbackItemsForPRIds(rows.map((row) => row.id));
 
     return rows.map((row) => this.parsePRRow(row, itemsByPrId.get(row.id) || []));
+  }
+
+  async getPRSummaries(): Promise<PRSummary[]> {
+    const rows = this.all<PRRow>(`
+      SELECT id, number, title, repo, branch, author, url, status, accepted, rejected, flagged,
+             tests_passed, lint_passed, last_checked, last_sync_attempted_at, last_sync_succeeded_at, last_sync_error, watch_enabled, docs_assessment_json, added_at
+      FROM prs
+      WHERE status != 'archived'
+      ORDER BY number DESC
+    `);
+
+    return rows.map((row) => this.parsePRSummaryRow(row));
+  }
+
+  async getArchivedPRSummaries(): Promise<PRSummary[]> {
+    const rows = this.all<PRRow>(`
+      SELECT id, number, title, repo, branch, author, url, status, accepted, rejected, flagged,
+             tests_passed, lint_passed, last_checked, last_sync_attempted_at, last_sync_succeeded_at, last_sync_error, watch_enabled, docs_assessment_json, added_at
+      FROM prs
+      WHERE status = 'archived'
+      ORDER BY number DESC
+    `);
+
+    return rows.map((row) => this.parsePRSummaryRow(row));
   }
 
   async getPR(id: string): Promise<PR | undefined> {
@@ -1970,6 +2100,152 @@ export class SqliteStorage implements IStorage {
     });
 
     return next;
+  }
+
+  async getIssueSubtasks(targetId: string): Promise<IssueSubtaskSet | undefined> {
+    const row = this.get<IssueSubtaskSetRow>(`
+      SELECT target_id, repo, issue_number, subtasks_json,
+             analyzed_body_hash, analyzed_at, updated_at
+      FROM issue_subtasks
+      WHERE target_id = ?
+    `, targetId);
+
+    return row ? this.parseIssueSubtaskSetRow(row) : undefined;
+  }
+
+  async upsertIssueSubtasks(
+    input: Omit<IssueSubtaskSet, "analyzedAt" | "updatedAt"> & { analyzedAt?: string },
+  ): Promise<IssueSubtaskSet> {
+    const existing = await this.getIssueSubtasks(input.targetId);
+    const next = existing
+      ? applyIssueSubtaskSetUpdate(existing, { ...input, analyzedAt: input.analyzedAt ?? existing.analyzedAt })
+      : createIssueSubtaskSet(input);
+
+    this.withWriteTransaction(() => {
+      this.run(
+        `
+          INSERT INTO issue_subtasks (
+            target_id, repo, issue_number, subtasks_json,
+            analyzed_body_hash, analyzed_at, updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(target_id) DO UPDATE SET
+            repo = excluded.repo,
+            issue_number = excluded.issue_number,
+            subtasks_json = excluded.subtasks_json,
+            analyzed_body_hash = excluded.analyzed_body_hash,
+            analyzed_at = excluded.analyzed_at,
+            updated_at = excluded.updated_at
+        `,
+        next.targetId,
+        next.repo,
+        next.issueNumber,
+        JSON.stringify(next.subtasks),
+        next.analyzedBodyHash,
+        next.analyzedAt,
+        next.updatedAt,
+      );
+    });
+
+    return next;
+  }
+
+  async markRepoIssuesStale(repo: string): Promise<void> {
+    this.withWriteTransaction(() => {
+      this.run("UPDATE synced_issues SET is_open = 0 WHERE repo = ?", repo);
+    });
+  }
+
+  async upsertSyncedIssues(repo: string, issues: StoredIssueRecord["payload"][], seenAt: string): Promise<void> {
+    this.withWriteTransaction(() => {
+      for (const issue of issues) {
+        this.run(
+          `
+            INSERT INTO synced_issues (repo, issue_number, payload_json, is_open, is_worked, first_seen_at, last_seen_at)
+            VALUES (?, ?, ?, 1, 0, ?, ?)
+            ON CONFLICT(repo, issue_number) DO UPDATE SET
+              payload_json = excluded.payload_json,
+              is_open = 1,
+              last_seen_at = excluded.last_seen_at
+            WHERE synced_issues.is_worked = 0
+          `,
+          repo,
+          issue.number,
+          JSON.stringify(issue),
+          seenAt,
+          seenAt,
+        );
+      }
+    });
+  }
+
+  async listSyncedIssues(input: { repos: string[]; limit: number; offset: number; includeWorked?: boolean }): Promise<{ items: StoredIssueRecord[]; hasMore: boolean }> {
+    if (input.repos.length === 0) {
+      return { items: [], hasMore: false };
+    }
+    const placeholders = input.repos.map(() => "?").join(", ");
+    const includeWorked = input.includeWorked ?? false;
+    const rows = this.all<SyncedIssueRow>(
+      `
+        SELECT repo, issue_number, payload_json, is_open, is_worked, first_seen_at, last_seen_at
+        FROM synced_issues
+        WHERE is_open = 1 AND repo IN (${placeholders}) AND (? = 1 OR is_worked = 0)
+        ORDER BY issue_number DESC
+        LIMIT ? OFFSET ?
+      `,
+      ...input.repos,
+      includeWorked ? 1 : 0,
+      input.limit + 1,
+      input.offset,
+    );
+    const hasMore = rows.length > input.limit;
+    const items = rows.slice(0, input.limit).map((row) => this.parseSyncedIssueRow(row));
+    return { items, hasMore };
+  }
+
+  async listSyncedIssueCounts(input: { repos: string[]; includeWorked?: boolean }): Promise<{ totalCount: number; repoTotals: Record<string, number> }> {
+    if (input.repos.length === 0) {
+      return { totalCount: 0, repoTotals: {} };
+    }
+    const placeholders = input.repos.map(() => "?").join(", ");
+    const includeWorked = input.includeWorked ?? false;
+    const rows = this.all<{ repo: string; count: number }>(
+      `
+        SELECT repo, COUNT(*) as count
+        FROM synced_issues
+        WHERE is_open = 1 AND repo IN (${placeholders}) AND (? = 1 OR is_worked = 0)
+        GROUP BY repo
+      `,
+      ...input.repos,
+      includeWorked ? 1 : 0,
+    );
+    const repoTotals: Record<string, number> = {};
+    let totalCount = 0;
+    for (const row of rows) {
+      const count = Number(row.count) || 0;
+      repoTotals[row.repo] = count;
+      totalCount += count;
+    }
+    return { totalCount, repoTotals };
+  }
+
+  async getSyncedIssue(repo: string, number: number): Promise<StoredIssueRecord | undefined> {
+    const row = this.get<SyncedIssueRow>(
+      `
+        SELECT repo, issue_number, payload_json, is_open, is_worked, first_seen_at, last_seen_at
+        FROM synced_issues
+        WHERE repo = ? AND issue_number = ? AND is_open = 1
+      `,
+      repo,
+      number,
+    );
+    return row ? this.parseSyncedIssueRow(row) : undefined;
+  }
+
+  async markSyncedIssueWorked(repo: string, number: number): Promise<void> {
+    this.withWriteTransaction(() => {
+      this.run("UPDATE synced_issues SET is_worked = 1 WHERE repo = ? AND issue_number = ?", repo, number);
+    });
   }
 
   async getHealingSession(id: string): Promise<HealingSession | undefined> {

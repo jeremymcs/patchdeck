@@ -12,6 +12,7 @@ const DEFAULT_JOB_DURATION_MS: Record<BackgroundJobKind, number> = {
   process_release_run: 2 * 60_000,
   answer_pr_question: 90_000,
   evaluate_issue: 90_000,
+  verify_issue: 90_000,
   work_issue: 4 * 60_000,
   generate_social_changelog: 3 * 60_000,
   heal_deployment: 4 * 60_000,

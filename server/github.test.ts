@@ -819,6 +819,72 @@ test("listOpenIssuesForRepo filters pull requests and normalizes issue metadata"
   assert.match(page.items[0]?.bodyHtml ?? "", /<p>The toggle is stuck<\/p>/);
 });
 
+test("listOpenIssuesForRepo continues pagination when a page contains pull requests", async () => {
+  let calls = 0;
+  const octokit = {
+    issues: {
+      listForRepo: async () => {
+        calls += 1;
+        if (calls === 1) {
+          const firstPage = Array.from({ length: 100 }, (_, index) => {
+            const number = index + 1;
+            if (index < 50) {
+              return {
+                number,
+                title: `PR ${number}`,
+                pull_request: { url: `https://api.github.com/repos/owner/repo/pulls/${number}` },
+              };
+            }
+            return {
+              number,
+              title: `Issue ${number}`,
+              body: `Body ${number}`,
+              html_url: `https://github.com/owner/repo/issues/${number}`,
+              user: { login: "alice" },
+              labels: [],
+              assignees: [],
+              comments: 0,
+              created_at: "2026-05-03T17:00:00.000Z",
+              updated_at: "2026-05-03T18:00:00.000Z",
+            };
+          });
+          return { data: firstPage };
+        }
+        if (calls === 2) {
+          return {
+            data: [
+              {
+                number: 101,
+                title: "Issue 101",
+                body: "Body 101",
+                html_url: "https://github.com/owner/repo/issues/101",
+                user: { login: "alice" },
+                labels: [],
+                assignees: [],
+                comments: 0,
+                created_at: "2026-05-03T17:00:00.000Z",
+                updated_at: "2026-05-03T18:00:00.000Z",
+              },
+            ],
+          };
+        }
+        return { data: [] };
+      },
+    },
+  };
+
+  const page = await listOpenIssuesForRepo(
+    octokit as never,
+    { owner: "owner", repo: "repo" },
+    { offset: 0, limit: 100 },
+  );
+
+  assert.equal(calls, 2);
+  assert.equal(page.items.length, 51);
+  assert.equal(page.items[0]?.number, 51);
+  assert.equal(page.items[50]?.number, 101);
+});
+
 test("listOpenLinkedPullRequestsForIssue returns unique open cross-referenced PRs", async () => {
   const octokit = {
     paginate: async () => [

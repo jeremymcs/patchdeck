@@ -5,6 +5,7 @@ import {
   backgroundJobSchema,
   issueSchema,
   issueEvaluationSchema,
+  issueSubtaskSetSchema,
   configSchema,
   deploymentHealingSessionSchema,
   feedbackItemSchema,
@@ -23,6 +24,7 @@ import type {
   BackgroundJob,
   Issue,
   IssueEvaluation,
+  IssueSubtaskSet,
   Config,
   CheckSnapshot,
   DeploymentHealingSession,
@@ -198,6 +200,29 @@ export function applyIssueEvaluationUpdate(
     ...updates,
     targetId: existing.targetId,
     createdAt: existing.createdAt,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+export function createIssueSubtaskSet(
+  data: Omit<IssueSubtaskSet, "analyzedAt" | "updatedAt"> & { analyzedAt?: string },
+): IssueSubtaskSet {
+  const now = new Date().toISOString();
+  return issueSubtaskSetSchema.parse({
+    ...data,
+    analyzedAt: data.analyzedAt ?? now,
+    updatedAt: now,
+  });
+}
+
+export function applyIssueSubtaskSetUpdate(
+  existing: IssueSubtaskSet,
+  updates: Partial<IssueSubtaskSet>,
+): IssueSubtaskSet {
+  return issueSubtaskSetSchema.parse({
+    ...existing,
+    ...updates,
+    targetId: existing.targetId,
     updatedAt: new Date().toISOString(),
   });
 }
