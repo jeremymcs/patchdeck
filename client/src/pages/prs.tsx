@@ -727,10 +727,14 @@ function LogPanel({ prId }: { prId: string | null }) {
   const { data: logs = [] } = useQuery<LogEntry[]>({
     queryKey: ["/api/logs", prId ?? "all"],
     queryFn: async () => {
-      const url = prId ? `/api/logs?prId=${encodeURIComponent(prId)}` : "/api/logs";
+      if (!prId) {
+        return [];
+      }
+      const url = `/api/logs?prId=${encodeURIComponent(prId)}`;
       const res = await apiRequest("GET", url);
       return res.json();
     },
+    enabled: Boolean(prId),
     refetchInterval: 1500,
   });
   const visibleLogs = useMemo(
@@ -738,7 +742,6 @@ function LogPanel({ prId }: { prId: string | null }) {
     [logs],
   );
   const hiddenLogCount = logs.length - visibleLogs.length;
-
   useEffect(() => {
     const scroller = scrollerRef.current;
     if (!scroller) {
@@ -751,7 +754,9 @@ function LogPanel({ prId }: { prId: string | null }) {
   return (
     <div className="flex h-full flex-col">
       <div ref={scrollerRef} className="flex-1 overflow-y-auto p-4 font-mono text-[11px] leading-relaxed">
-        {logs.length === 0 ? (
+        {!prId ? (
+          <span className="text-muted-foreground">Select a PR to view activity.</span>
+        ) : logs.length === 0 ? (
           <span className="text-muted-foreground">No log entries.</span>
         ) : (
           <>
@@ -932,61 +937,14 @@ function PRDescriptionPanel({ pr }: { pr: PR }) {
   );
 }
 
-function RightPanel({
-  prId,
-  prStatus,
-  globalDrainMode,
-}: {
-  prId: string | null;
-  prStatus?: PR["status"] | null;
-  globalDrainMode: boolean;
-}) {
-  const [tab, setTab] = useState<"activity" | "ask">("ask");
-
-  useEffect(() => {
-    if (prStatus === "error") {
-      setTab("activity");
-    }
-  }, [prId, prStatus]);
-
+function RightPanel({ prId }: { prId: string | null }) {
   return (
     <div className="flex min-h-[24rem] w-full shrink-0 flex-col border-t border-border lg:min-h-0 lg:w-80 lg:border-l lg:border-t-0">
-      <div className="flex border-b border-border">
-        <button
-          type="button"
-          onClick={() => setTab("ask")}
-          data-testid="tab-ask"
-          className={`flex-1 px-3 py-2 text-[11px] uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset ${
-            tab === "ask"
-              ? "bg-muted text-foreground shadow-[inset_0_-2px_0_0_hsl(var(--primary))]"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          Ask Agent
-        </button>
-        <button
-          type="button"
-          onClick={() => setTab("activity")}
-          data-testid="tab-activity"
-          className={`flex-1 px-3 py-2 text-[11px] uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset ${
-            tab === "activity"
-              ? "bg-muted text-foreground shadow-[inset_0_-2px_0_0_hsl(var(--primary))]"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          Activity
-        </button>
+      <div className="border-b border-border px-3 py-2 text-[11px] uppercase tracking-wider text-muted-foreground">
+        <span data-testid="tab-activity">Activity</span>
       </div>
       <div className="flex-1 overflow-hidden">
-        {tab === "activity" ? (
-          <LogPanel prId={prId} />
-        ) : prId ? (
-          <QAPanel prId={prId} globalDrainMode={globalDrainMode} />
-        ) : (
-          <div className="flex h-full items-center justify-center text-[12px] text-muted-foreground">
-            Select a PR to ask questions.
-          </div>
-        )}
+        <LogPanel prId={prId} />
       </div>
     </div>
   );
@@ -1135,6 +1093,7 @@ export default function Dashboard() {
   const [prNumberSearch, setPrNumberSearch] = useState("");
   const [areErrorsRolledUp, setAreErrorsRolledUp] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isAskOpen, setIsAskOpen] = useState(false);
 
   const handleSyncDashboard = async () => {
     setIsRefreshing(true);
@@ -1671,9 +1630,30 @@ export default function Dashboard() {
 
         <RightPanel
           prId={selectedPRId}
-          prStatus={selectedPR?.status ?? null}
-          globalDrainMode={globalDrainMode}
         />
+      </div>
+      <div className="fixed bottom-4 right-4 z-50">
+        {isAskOpen && (
+          <div className="mb-2 h-[32rem] w-[22rem] max-w-[calc(100vw-2rem)] overflow-hidden rounded-md border border-border bg-background shadow-2xl">
+            {selectedPRId ? (
+              <QAPanel prId={selectedPRId} globalDrainMode={globalDrainMode} />
+            ) : (
+              <div className="flex h-full items-center justify-center p-4 text-[12px] text-muted-foreground">
+                Select a PR to ask questions.
+              </div>
+            )}
+          </div>
+        )}
+        <span data-testid="tab-ask" className="sr-only">Ask Agent</span>
+        <button
+          type="button"
+          onClick={() => setIsAskOpen((current) => !current)}
+          data-testid="button-ask-agent-fab"
+          title={isAskOpen ? "Close Ask Agent" : "Open Ask Agent"}
+          className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-primary bg-primary text-primary-foreground shadow-lg transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+        >
+          <Bot className="h-5 w-5" />
+        </button>
       </div>
     </div>
   );

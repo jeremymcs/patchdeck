@@ -193,7 +193,7 @@ function formatEvaluationConfidence(confidence: number): string {
   return `${grade} (${Math.round(confidence * 100)}%)`;
 }
 
-type IssueWorkFilter = "all" | "ready" | "auto" | "needs_eval" | "review" | "failed" | "stale";
+type IssueWorkFilter = "all" | "ready" | "worked" | "auto" | "needs_eval" | "review" | "failed" | "stale";
 
 function isStaleIssue(issue: Issue): boolean {
   const updatedAt = Date.parse(issue.updatedAt);
@@ -205,13 +205,30 @@ function isStaleIssue(issue: Issue): boolean {
 }
 
 function matchesIssueWorkFilter(issue: Issue, filter: IssueWorkFilter): boolean {
-  if (filter === "ready") return Boolean(issue.workPrUrl);
+  if (filter === "ready") return issue.workPrMergeable === true;
+  if (filter === "worked") return Boolean(issue.isWorked);
   if (filter === "auto") return Boolean(issue.autoWorkEligible);
   if (filter === "needs_eval") return !issue.evaluationStatus;
   if (filter === "review") return issue.evaluationStatus === "blocked" || issue.evaluationStatus === "needs_review";
   if (filter === "failed") return issue.workStatus === "failed";
   if (filter === "stale") return isStaleIssue(issue);
   return true;
+}
+
+function issueLifecycleLabel(issue: Issue): string | null {
+  if (!issue.isWorked) {
+    return null;
+  }
+
+  if (issue.workPrUrl && issue.workPrMergeable === false) {
+    return "re-opened after divergence";
+  }
+
+  if (issue.workPrUrl) {
+    return "worked, awaiting merge";
+  }
+
+  return "worked";
 }
 
 const LOG_METADATA_ORDER = ["repo", "issueNumber", "prNumber", "prUrl", "jobId", "stage", "status", "safetyFlags"] as const;
@@ -289,20 +306,33 @@ function IssueRow({
   verifyState: VerifyState | null;
 }) {
   const showInlineStatusBadge = issue.workStatus !== "queued" && issue.workStatus !== "in_progress";
+  const lifecycle = issueLifecycleLabel(issue);
   const rowAction =
     issue.workPrUrl && issue.workPrNumber !== undefined && issue.workPrNumber !== null
       ? (
+        (() => {
+          const readiness = getWorkPrReadiness(issue);
+          const toneClass = readiness.tone === "success"
+            ? "border-success-border text-success-foreground"
+            : readiness.tone === "warning"
+              ? "border-warning-border text-warning-foreground"
+              : "border-border text-muted-foreground";
+          return (
         <a
           href={issue.workPrUrl}
           target="_blank"
           rel="noreferrer noopener"
           data-testid="issue-ready-to-merge-list"
-          className="mt-2 inline-flex items-center gap-1 rounded-md border border-success-border px-2 py-0.5 text-[10px] uppercase tracking-wider text-success-foreground transition-colors hover:border-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+          className={`mt-2 inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[10px] uppercase tracking-wider transition-colors hover:border-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background ${toneClass}`}
         >
           <ExternalLink className="h-3 w-3" />
           PR <span className="font-mono">#{issue.workPrNumber}</span>
-          <span className="text-success-foreground/70">ready to merge</span>
+          <span className={readiness.tone === "success" ? "text-success-foreground/70" : readiness.tone === "warning" ? "text-warning-foreground/70" : "text-muted-foreground/70"}>
+            {readiness.label.toLowerCase()}
+          </span>
         </a>
+          );
+        })()
       )
       : hasExternalIssuePr(issue)
         ? (
@@ -367,6 +397,13 @@ function IssueRow({
             />
             <QueueStatusBadge status={queueStatus} />
             {verifyState && <VerifyStateBadge state={verifyState} />}
+            {lifecycle && (
+              <StatusChip
+                tone={lifecycle === "re-opened after divergence" ? "warning" : "success"}
+                label={lifecycle}
+                testId="issue-lifecycle-badge"
+              />
+            )}
             {issue.isWorked && (
               <StatusChip tone="success" label="worked" testId="issue-worked-badge" />
             )}
@@ -1007,7 +1044,10 @@ function IssuesPage() {
   const activeIssueCount = issues.filter((issue) => isActiveWorkStatus(issue.workStatus)).length;
   const visibleIssues = filteredIssues;
   const readyIssueCount = issues.filter((issue) =>
-    (selectedRepo === "all" || issue.repo === selectedRepo) && Boolean(issue.workPrUrl)
+    (selectedRepo === "all" || issue.repo === selectedRepo) && issue.workPrMergeable === true
+  ).length;
+  const workedIssueCount = issues.filter((issue) =>
+    (selectedRepo === "all" || issue.repo === selectedRepo) && Boolean(issue.isWorked)
   ).length;
   const autoEligibleIssueCount = issues.filter((issue) =>
     (selectedRepo === "all" || issue.repo === selectedRepo) && Boolean(issue.autoWorkEligible)
@@ -1123,9 +1163,9 @@ function IssuesPage() {
                 Status
               </span>
               <div className="flex min-w-0 flex-1 flex-wrap gap-1">
-                <button
-                  type="button"
-                  onClick={() => setSelectedWorkFilter("ready")}
+            <button
+              type="button"
+              onClick={() => setSelectedWorkFilter("ready")}
               className={`rounded-md border px-2 py-0.5 text-[10px] uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background ${
                 selectedWorkFilter === "ready"
                   ? "border-primary bg-primary/10 text-primary"
@@ -1133,6 +1173,18 @@ function IssuesPage() {
               }`}
             >
               ready to merge ({readyIssueCount})
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelectedWorkFilter("worked")}
+              data-testid="issue-worked-filter"
+              className={`rounded-md border px-2 py-0.5 text-[10px] uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background ${
+                selectedWorkFilter === "worked"
+                  ? "border-primary bg-primary/10 text-primary"
+                  : "border-border text-muted-foreground hover:border-primary/40 hover:text-primary"
+              }`}
+            >
+              worked ({workedIssueCount})
             </button>
             <button
               type="button"

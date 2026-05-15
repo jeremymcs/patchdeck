@@ -147,6 +147,14 @@ function repoTestId(repo: string): string {
   return repo.replace("/", "-");
 }
 
+function isRepoFullyAuto(repo: WatchedRepo): boolean {
+  return repo.prAutoMonitor !== false && repo.issueAutoEvaluate && repo.issueAutoWork;
+}
+
+function isRepoPartiallyAuto(repo: WatchedRepo): boolean {
+  return repo.prAutoMonitor !== false || repo.issueAutoEvaluate || repo.issueAutoWork;
+}
+
 function SegmentControl<T extends string>({
   options,
   value,
@@ -716,6 +724,11 @@ export default function Settings() {
                   const id = repoTestId(repo.repo);
                   const manualReleasePending = manualReleaseMutation.isPending
                     && manualReleaseMutation.variables === repo.repo;
+                  const repoFullyAuto = isRepoFullyAuto(repo);
+                  const repoPartiallyAuto = isRepoPartiallyAuto(repo);
+                  const shouldShowRepoAutoAlert = config?.autoPrs !== false
+                    && config?.autoIssues !== false
+                    && !repoFullyAuto;
 
                   return (
                     <div
@@ -735,6 +748,35 @@ export default function Settings() {
                           </a>
                           <div className="mt-1 text-[11px] text-muted-foreground">
                             {repo.ownPrsOnly === false ? "Tracking team PRs" : "Tracking your PRs"} · PR monitoring {repo.prAutoMonitor === false ? "manual" : "auto"} · issue evaluate {repo.issueAutoEvaluate ? "auto" : "manual"} · issue work {repo.issueAutoWork ? "auto" : "manual"}
+                          </div>
+                          <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-wider">
+                            <span
+                              className={`inline-flex items-center border px-2 py-0.5 ${
+                                repoFullyAuto
+                                  ? "border-success-border bg-success-muted text-success-foreground"
+                                  : repoPartiallyAuto
+                                    ? "border-warning-border bg-warning-muted text-warning-foreground"
+                                    : "border-border bg-muted text-muted-foreground"
+                              }`}
+                              data-testid={`tracked-repo-automation-mode-${repo.repo.replace("/", "-")}`}
+                            >
+                              {repoFullyAuto ? "Auto mode" : repoPartiallyAuto ? "Mixed mode" : "Manual mode"}
+                            </span>
+                            {repo.prAutoMonitor === false && (
+                              <span className="inline-flex items-center border border-border px-2 py-0.5 text-muted-foreground">
+                                PR: manual
+                              </span>
+                            )}
+                            {!repo.issueAutoEvaluate && (
+                              <span className="inline-flex items-center border border-border px-2 py-0.5 text-muted-foreground">
+                                Issue evaluate: manual
+                              </span>
+                            )}
+                            {!repo.issueAutoWork && (
+                              <span className="inline-flex items-center border border-border px-2 py-0.5 text-muted-foreground">
+                                Issue work: manual
+                              </span>
+                            )}
                           </div>
                         </div>
                         <button
@@ -776,6 +818,32 @@ export default function Settings() {
                           Remove data
                         </button>
                       </div>
+                      {shouldShowRepoAutoAlert && (
+                        <div
+                          data-testid={`tracked-repo-auto-alert-${repo.repo.replace("/", "-")}`}
+                          className="mt-3 flex flex-wrap items-center justify-between gap-2 border border-warning-border bg-warning-muted px-3 py-2 text-[11px] text-warning-foreground"
+                        >
+                          <span>
+                            Global auto is on, but this repo is not fully automated yet.
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              updateRepoSettingsMutation.mutate({
+                                repo: repo.repo,
+                                prAutoMonitor: true,
+                                issueAutoEvaluate: true,
+                                issueAutoWork: true,
+                              })
+                            }
+                            disabled={updateRepoSettingsMutation.isPending}
+                            data-testid={`tracked-repo-enable-auto-${repo.repo.replace("/", "-")}`}
+                            className="shrink-0 border border-warning-border bg-background px-2 py-1 text-[10px] uppercase tracking-wider text-warning-foreground transition-colors hover:bg-warning-muted/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-40"
+                          >
+                            Enable auto for repo
+                          </button>
+                        </div>
+                      )}
                       {config?.autoIssues === false && (
                         <div
                           data-testid={`tracked-repo-global-issues-off-${repo.repo.replace("/", "-")}`}
