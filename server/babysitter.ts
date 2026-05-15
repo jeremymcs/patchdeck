@@ -1329,7 +1329,6 @@ export class PRBabysitter {
   private readonly clock: () => Date;
   private readonly agentHealthCache = new Map<CodingAgent, { checkedAtMs: number; result: AgentHealthResult }>();
   private readonly feedbackSyncCooldownUntilMs = new Map<string, number>();
-  private readonly repoSyncBackoffUntilMs = new Map<string, number>();
   private repoSyncCursor = 0;
 
   constructor(
@@ -1923,6 +1922,14 @@ export class PRBabysitter {
     }
 
     const nowMs = this.now().getTime();
+    // Backoff state is persisted, so a restart does not re-hammer a repo that
+    // was failing before the process went down.
+    const prSyncBackoffUntilMs = new Map<string, number>();
+    for (const syncState of await this.storage.getRepoSyncStates("prs")) {
+      if (syncState.nextEligibleAt) {
+        prSyncBackoffUntilMs.set(syncState.repo, new Date(syncState.nextEligibleAt).getTime());
+      }
+    }
     const selectedRepos = fullSweep
       ? repos
       : Array.from({ length: repos.length })
@@ -1930,7 +1937,7 @@ export class PRBabysitter {
           .filter((repo): repo is NonNullable<typeof repo> => Boolean(repo))
           .filter((repo) => {
             const repoSlug = formatRepoSlug(repo);
-            const backoffUntilMs = this.repoSyncBackoffUntilMs.get(repoSlug) ?? 0;
+            const backoffUntilMs = prSyncBackoffUntilMs.get(repoSlug) ?? 0;
             return backoffUntilMs <= nowMs;
           })
           .slice(0, 1);
@@ -1941,13 +1948,18 @@ export class PRBabysitter {
       let openPulls;
       try {
         openPulls = await this.github.listOpenPullsForRepo(octokit, repo);
-        this.repoSyncBackoffUntilMs.delete(repoSlug);
+        await this.storage.upsertRepoSyncState(repoSlug, "prs", {
+          lastSyncedAt: this.now().toISOString(),
+          nextEligibleAt: null,
+        });
         const repoIndex = repos.findIndex((entry) => formatRepoSlug(entry) === repoSlug);
         if (repoIndex >= 0) {
           this.repoSyncCursor = (repoIndex + 1) % repos.length;
         }
       } catch (error) {
-        this.repoSyncBackoffUntilMs.set(repoSlug, this.now().getTime() + REPO_SYNC_FAILURE_BACKOFF_MS);
+        await this.storage.upsertRepoSyncState(repoSlug, "prs", {
+          nextEligibleAt: new Date(this.now().getTime() + REPO_SYNC_FAILURE_BACKOFF_MS).toISOString(),
+        });
         log.warn(
           { err: error instanceof Error ? error.message : String(error), repo: repoSlug },
           "Failed to list open PRs",

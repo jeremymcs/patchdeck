@@ -356,6 +356,52 @@ test("syncFeedbackForPR logs completion even when no new feedback items arrive",
   assert.equal(logs.at(-1)?.message, "GitHub sync complete: 1 feedback item (0 new)");
 });
 
+test("syncAndBabysitTrackedRepos persists a backoff when listing open PRs fails", async () => {
+  const storage = new MemStorage();
+  await storage.addPR({
+    number: 7,
+    title: "Tracked PR",
+    repo: "octo/example",
+    branch: "feature/x",
+    author: "octocat",
+    url: "https://github.com/octo/example/pull/7",
+    status: "watching",
+    feedbackItems: [],
+    accepted: 0,
+    rejected: 0,
+    flagged: 0,
+    testsPassed: null,
+    lintPassed: null,
+    lastChecked: null,
+    watchEnabled: false,
+  });
+
+  const babysitter = new PRBabysitter(
+    storage,
+    makeWatcherGitHubService({
+      listOpenPullsForRepo: async () => {
+        throw new Error("list open PRs failed");
+      },
+    }),
+    {
+      resolveAgent: async () => "codex",
+      ciPollIntervalMs: 0,
+      evaluateFixNecessityWithAgent: async () => ({ needsFix: false, reason: "unused" }),
+      applyFixesWithAgent: async () => ({ code: 0, stdout: "", stderr: "" }),
+      runCommand: async () => ({ code: 0, stdout: "", stderr: "" }),
+    },
+  );
+
+  await babysitter.syncAndBabysitTrackedRepos();
+
+  const state = (await storage.getRepoSyncStates("prs")).find((s) => s.repo === "octo/example");
+  assert.ok(state?.nextEligibleAt, "a failed PR sweep must persist a backoff");
+  assert.ok(
+    new Date(state!.nextEligibleAt!).getTime() > Date.now(),
+    "the persisted backoff must be in the future",
+  );
+});
+
 test("syncAndBabysitTrackedRepos queues release evaluation for merged archived PRs", async () => {
   const storage = new MemStorage();
   const queued: Array<Record<string, string | number>> = [];

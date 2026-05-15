@@ -53,6 +53,15 @@ export type StoredIssueRecord = {
   lastSeenAt: string;
 };
 
+export type RepoSyncKind = "prs" | "issues";
+
+export type RepoSyncState = {
+  repo: string;
+  kind: RepoSyncKind;
+  lastSyncedAt: string | null;
+  nextEligibleAt: string | null;
+};
+
 export interface IStorage {
   // PRs
   getPRs(): Promise<PR[]>;
@@ -116,6 +125,15 @@ export interface IStorage {
   getGithubEtag(url: string): Promise<string | undefined>;
   setGithubEtag(url: string, etag: string): Promise<void>;
   clearGithubEtag(url: string): Promise<void>;
+
+  // Per-repo sync state (backoff + last-synced), persisted so a restart does
+  // not re-hammer a backing-off repo. `kind` separates PR and issue sweeps.
+  getRepoSyncStates(kind: RepoSyncKind): Promise<RepoSyncState[]>;
+  upsertRepoSyncState(
+    repo: string,
+    kind: RepoSyncKind,
+    updates: { lastSyncedAt?: string | null; nextEligibleAt?: string | null },
+  ): Promise<void>;
 
   // CI healing
   getHealingSession(id: string): Promise<HealingSession | undefined>;

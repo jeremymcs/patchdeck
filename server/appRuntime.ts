@@ -880,7 +880,6 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
     lastSyncError: string | null;
   }>();
   const issueRepoSyncOffsets = new Map<string, number>();
-  const issueRepoBackoffUntilMs = new Map<string, number>();
   let issueRepoCursor = 0;
 
   function markIssueSyncAttempt(targetId: string): string {
@@ -1230,9 +1229,18 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       ? config.watchedRepos
       : Array.from({ length: repoCount }).map((_, i) => config.watchedRepos[(issueRepoCursor + i) % repoCount]).filter(Boolean) as string[];
 
+    // Backoff state is persisted, so a restart does not re-hammer a repo whose
+    // issue sweep was failing before the process went down.
+    const issueBackoffUntilMs = new Map<string, number>();
+    for (const syncState of await storage.getRepoSyncStates("issues")) {
+      if (syncState.nextEligibleAt) {
+        issueBackoffUntilMs.set(syncState.repo, new Date(syncState.nextEligibleAt).getTime());
+      }
+    }
+
     for (const repoSlug of candidates) {
       try {
-        const backoffUntilMs = issueRepoBackoffUntilMs.get(repoSlug) ?? 0;
+        const backoffUntilMs = issueBackoffUntilMs.get(repoSlug) ?? 0;
         if (backoffUntilMs > nowMs) continue;
         const parsed = parseRepoSlug(repoSlug);
         if (!parsed) continue;
@@ -1249,7 +1257,12 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
           const cachedEtag = (await storage.getGithubEtag(etagKey)) ?? null;
           const probe = await probeRepoIssuesChanged(octokit, parsed, cachedEtag);
           if (probe.notModified) {
-            issueRepoBackoffUntilMs.delete(repoSlug);
+            // A 304 confirms the repo's issue list is current — clear backoff
+            // and record the freshness check as a successful sync.
+            await storage.upsertRepoSyncState(repoSlug, "issues", {
+              lastSyncedAt: new Date().toISOString(),
+              nextEligibleAt: null,
+            });
             const index = config.watchedRepos.indexOf(repoSlug);
             issueRepoCursor = index === -1 ? issueRepoCursor : (index + 1) % repoCount;
             continue;
@@ -1271,7 +1284,10 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
           if (!page.hasMore || !options?.fullSweep) break;
         }
         if (didWork) {
-          issueRepoBackoffUntilMs.delete(repoSlug);
+          await storage.upsertRepoSyncState(repoSlug, "issues", {
+            lastSyncedAt: new Date().toISOString(),
+            nextEligibleAt: null,
+          });
           // Persist the etag only after a successful sync so a failure mid-sweep
           // re-probes and re-syncs next tick instead of 304-skipping stale data.
           if (pendingEtag) {
@@ -1282,7 +1298,9 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
           if (!options?.fullSweep) return;
         }
       } catch (error) {
-        issueRepoBackoffUntilMs.set(repoSlug, Date.now() + 60_000);
+        await storage.upsertRepoSyncState(repoSlug, "issues", {
+          nextEligibleAt: new Date(Date.now() + 60_000).toISOString(),
+        });
         log.warn(
           { err: error instanceof Error ? error.message : String(error), repo: repoSlug },
           "Issue sync step failed; backing off",

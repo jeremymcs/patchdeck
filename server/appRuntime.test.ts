@@ -667,3 +667,65 @@ test("start() defers the first watcher tick instead of firing it during start", 
   assert.equal(watcherRuns, 0, "the first watcher tick must be deferred, not run during start()");
   runtime.stop();
 });
+
+test("syncRepos persists an issue-sweep backoff when the probe fails", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig({ watchedRepos: ["owner/repo"] });
+
+  const fakeOctokit = {
+    issues: {
+      listForRepo: async () => {
+        const error = new Error("not found") as Error & { status: number };
+        error.status = 404;
+        throw error;
+      },
+    },
+  };
+
+  const runtime = createAppRuntime({
+    storage,
+    startBackgroundServices: false,
+    startWatcher: false,
+    babysitter: { syncAndBabysitTrackedRepos: async () => {} } as never,
+    buildOctokitFn: async () => fakeOctokit as never,
+  });
+
+  await runtime.syncRepos();
+
+  const state = (await storage.getRepoSyncStates("issues")).find((s) => s.repo === "owner/repo");
+  assert.ok(state?.nextEligibleAt, "a failed issue sweep must persist a backoff");
+  assert.ok(
+    new Date(state!.nextEligibleAt!).getTime() > Date.now(),
+    "the persisted backoff must be in the future",
+  );
+});
+
+test("syncRepos skips an issue sweep for a repo whose persisted backoff is active", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig({ watchedRepos: ["owner/repo"] });
+  await storage.upsertRepoSyncState("owner/repo", "issues", {
+    nextEligibleAt: new Date(Date.now() + 600_000).toISOString(),
+  });
+
+  let listForRepoCalls = 0;
+  const fakeOctokit = {
+    issues: {
+      listForRepo: async () => {
+        listForRepoCalls += 1;
+        return { data: [], headers: {} };
+      },
+    },
+  };
+
+  const runtime = createAppRuntime({
+    storage,
+    startBackgroundServices: false,
+    startWatcher: false,
+    babysitter: { syncAndBabysitTrackedRepos: async () => {} } as never,
+    buildOctokitFn: async () => fakeOctokit as never,
+  });
+
+  await runtime.syncRepos();
+
+  assert.equal(listForRepoCalls, 0, "a backed-off repo must not be probed or synced");
+});
