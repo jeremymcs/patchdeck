@@ -51,6 +51,7 @@ import { isFailingCheckSnapshot } from "./ciCheckIngestor";
 import { runCIHealingRepairAttempt } from "./ciHealingAgent";
 import { childLogger } from "./logger";
 import { getCodeFactoryPaths } from "./paths";
+import { isResourceBudgetBelowReserve } from "./rateLimitState";
 
 const log = childLogger("babysitter");
 import { ensureRepoCache, preparePrWorktree, removePrWorktree } from "./repoWorkspace";
@@ -83,6 +84,10 @@ const REPO_SYNC_FAILURE_BACKOFF_MS = 60_000;
 // After a repo's PR list comes back unchanged, defer its next sweep by this
 // long so quiet repos yield watcher slots and rate-limit budget to active ones.
 const QUIET_REPO_COOLDOWN_MS = 10 * 60_000;
+// Most new babysit_pr jobs one sweep will enqueue for a single repo. Caps the
+// cold-start burst on a repo with hundreds of open PRs; the rest backfill on
+// later sweeps (babysit_pr jobs are dedupe-keyed, so nothing is lost).
+const MAX_BABYSIT_ENQUEUES_PER_SWEEP = 10;
 const APP_NAME = "patchdeck";
 const APP_REPOSITORY_URL = "https://github.com/jeremymcs/patchdeck";
 export const APP_COMMENT_FOOTER = formatAppCommentFooter(APP_NAME, true);
@@ -2148,6 +2153,14 @@ export class PRBabysitter {
           }
         }
       }
+      // Pace babysit_pr enqueueing: cap how many new jobs one sweep adds for a
+      // repo, and add none at all while the core budget sits in the reserve
+      // band. On a repo with hundreds of open PRs this turns a single
+      // budget-draining burst into a gradual backfill across sweeps. babysit_pr
+      // jobs are dedupe-keyed, so deferred PRs are simply picked up next sweep.
+      const babysitBudgetTight = isResourceBudgetBelowReserve("core");
+      let babysitEnqueues = 0;
+      let babysitDeferred = 0;
       for (const pull of openPulls) {
         let local = await this.storage.getPRByRepoAndNumber(repoSlug, pull.number);
         if (!local) {
@@ -2298,11 +2311,18 @@ export class PRBabysitter {
           continue;
         }
 
-        await this.storage.addLog(local.id, "info", "Watcher queued autonomous babysitter run", {
-          phase: "watcher",
-          metadata: { repo: repoSlug },
-        });
         if (this.scheduleBackgroundJob) {
+          // Defer this PR's babysit run when the budget is tight or this
+          // sweep already enqueued its quota for the repo.
+          if (babysitBudgetTight || babysitEnqueues >= MAX_BABYSIT_ENQUEUES_PER_SWEEP) {
+            babysitDeferred += 1;
+            continue;
+          }
+          babysitEnqueues += 1;
+          await this.storage.addLog(local.id, "info", "Watcher queued autonomous babysitter run", {
+            phase: "watcher",
+            metadata: { repo: repoSlug },
+          });
           await this.scheduleBackgroundJob(
             "babysit_pr",
             local.id,
@@ -2317,8 +2337,23 @@ export class PRBabysitter {
             },
           );
         } else {
+          await this.storage.addLog(local.id, "info", "Watcher queued autonomous babysitter run", {
+            phase: "watcher",
+            metadata: { repo: repoSlug },
+          });
           await this.babysitPR(local.id, currentConfig.codingAgent as CodingAgent);
         }
+      }
+      if (babysitDeferred > 0) {
+        log.info(
+          {
+            repo: repoSlug,
+            deferred: babysitDeferred,
+            enqueued: babysitEnqueues,
+            reason: babysitBudgetTight ? "core budget reserve" : "per-sweep cap",
+          },
+          "Deferred babysit runs to a later sweep to pace GitHub usage",
+        );
       }
     }
   }

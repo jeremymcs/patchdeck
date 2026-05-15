@@ -6,6 +6,7 @@ import {
   deriveRateLimitResource,
   getRateLimitState,
   getResourceBudget,
+  isResourceBudgetBelowFloor,
   isResourceBudgetBelowReserve,
   markRateLimited,
   recordResourceBudget,
@@ -148,4 +149,14 @@ test("isResourceBudgetBelowReserve gates only inside the 30% reserve band", () =
   assert.equal(isResourceBudgetBelowReserve("core"), true);
   recordResourceBudget("core", 200, 5000); // 4%
   assert.equal(isResourceBudgetBelowReserve("core"), true);
+});
+
+test("isResourceBudgetBelowFloor gates only below the 5% hard floor", () => {
+  assert.equal(isResourceBudgetBelowFloor("core"), false, "an unknown budget never gates");
+  recordResourceBudget("core", 1500, 5000); // 30% — reserve band, but above the floor
+  assert.equal(isResourceBudgetBelowFloor("core"), false);
+  recordResourceBudget("core", 250, 5000); // exactly 5% — at the floor edge
+  assert.equal(isResourceBudgetBelowFloor("core"), true);
+  recordResourceBudget("core", 40, 5000); // 0.8%
+  assert.equal(isResourceBudgetBelowFloor("core"), true);
 });

@@ -9,6 +9,7 @@ import {
   clearRateLimited,
   deriveRateLimitResource,
   getRateLimitState,
+  isResourceBudgetBelowFloor,
   isResourceBudgetBelowReserve,
   markRateLimited,
   recordResourceBudget,
@@ -1013,14 +1014,19 @@ function attachRateLimitHook(
       throw new RateLimitGateError(resourceState.resetAt, requestResource);
     }
 
-    // Hold a reserve of the core REST and GraphQL budgets for high-priority
-    // work. Search has its own concurrency cap and is not budget-reserved.
-    if (
-      (requestResource === "core" || requestResource === "graphql")
-      && getRequestPriority() === "low"
-      && isResourceBudgetBelowReserve(requestResource)
-    ) {
-      throw new BudgetReserveError(requestResource);
+    // Budget gating for the core REST and GraphQL budgets. Search has its own
+    // concurrency cap and is not budget-reserved.
+    if (requestResource === "core" || requestResource === "graphql") {
+      // Hard floor: below it, gate every request regardless of priority so a
+      // burst of high-priority automation cannot drain the budget to zero.
+      if (isResourceBudgetBelowFloor(requestResource)) {
+        throw new BudgetReserveError(requestResource);
+      }
+      // Reserve band: hold budget for high-priority work by gating the
+      // low-priority background sweep.
+      if (getRequestPriority() === "low" && isResourceBudgetBelowReserve(requestResource)) {
+        throw new BudgetReserveError(requestResource);
+      }
     }
 
     const dispatch = async (): Promise<ReturnType<typeof request>> => {

@@ -126,7 +126,7 @@ test("low-priority requests are gated while the core budget sits in the reserve 
     },
   );
 
-  recordResourceBudget("core", 100, 5000); // 2% remaining — well inside the reserve
+  recordResourceBudget("core", 500, 5000); // 10% remaining — reserve band, above the 5% floor
 
   await assert.rejects(
     () => runWithRequestPriority("low", () => octokit.request("GET /user")),
@@ -134,10 +134,39 @@ test("low-priority requests are gated while the core budget sits in the reserve 
   );
   assert.equal(fetchCalls, 0, "a gated low-priority request must not reach GitHub");
 
-  // High-priority work still goes through with the budget in the reserve band.
+  // High-priority work still goes through while the budget is in the reserve band.
   const ok = await runWithRequestPriority("high", () => octokit.request("GET /user"));
   assert.equal(ok.data.login, "octo");
   assert.equal(fetchCalls, 1);
+});
+
+test("the hard floor gates even high-priority requests when the budget is critically low", async () => {
+  let fetchCalls = 0;
+  const octokit = await buildOctokit(
+    { ...config, githubToken: "ghp_fake" },
+    {
+      ignoreCache: true,
+      requestFetch: async () => {
+        fetchCalls += 1;
+        return new Response(JSON.stringify({ login: "octo" }), {
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+            "x-ratelimit-remaining": "4999",
+            "x-ratelimit-limit": "5000",
+          },
+        });
+      },
+    },
+  );
+
+  recordResourceBudget("core", 100, 5000); // 2% remaining — below the 5% hard floor
+
+  await assert.rejects(
+    () => runWithRequestPriority("high", () => octokit.request("GET /user")),
+    /budget/i,
+  );
+  assert.equal(fetchCalls, 0, "below the floor, even high-priority work must not reach GitHub");
 });
 
 test("a low core budget does not gate low-priority GraphQL requests", async () => {
@@ -189,7 +218,7 @@ test("low-priority GraphQL requests are gated while the GraphQL budget is in the
     },
   );
 
-  recordResourceBudget("graphql", 100, 5000); // GraphQL budget in the reserve
+  recordResourceBudget("graphql", 1000, 5000); // 20% — reserve band, above the 5% floor
 
   await assert.rejects(
     () => runWithRequestPriority("low", () => octokit.graphql("query { viewer { login } }")),
