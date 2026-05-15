@@ -21,10 +21,10 @@ type ResourceState = { resetAt: Date | null; lastLimitedAt: Date | null };
 
 const RECENT_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 
-// Fraction of the core REST budget held in reserve for high-priority work
+// Fraction of a resource's budget held in reserve for high-priority work
 // (interactive routes, active babysitter sessions). Low-priority requests are
-// gated once core `remaining` falls to or below this fraction of the limit.
-const CORE_BUDGET_RESERVE_FRACTION = 0.3;
+// gated once `remaining` falls to or below this fraction of the limit.
+const BUDGET_RESERVE_FRACTION = 0.3;
 
 const state: Record<RateLimitResource, ResourceState> = {
   core: { resetAt: null, lastLimitedAt: null },
@@ -32,8 +32,13 @@ const state: Record<RateLimitResource, ResourceState> = {
   search: { resetAt: null, lastLimitedAt: null },
 };
 
-type CoreBudget = { remaining: number; limit: number };
-let coreBudget: CoreBudget | null = null;
+export type ResourceBudget = { remaining: number; limit: number };
+
+const budgets: Record<RateLimitResource, ResourceBudget | null> = {
+  core: null,
+  graphql: null,
+  search: null,
+};
 
 export function deriveRateLimitResource(
   urlOrHeader: string | null | undefined,
@@ -138,35 +143,42 @@ export function clearRateLimited(resource: RateLimitResource = "core"): void {
 }
 
 /**
- * Records the latest observed core REST budget from `x-ratelimit-*` response
- * headers. Used to decide whether low-priority requests should be gated.
+ * Records the latest observed budget for a resource from `x-ratelimit-*`
+ * response headers. Used to decide whether low-priority requests should be
+ * gated. The core REST and GraphQL APIs have independent budgets.
  */
-export function recordCoreBudget(remaining: number, limit: number): void {
+export function recordResourceBudget(
+  resource: RateLimitResource,
+  remaining: number,
+  limit: number,
+): void {
   if (!Number.isFinite(remaining) || !Number.isFinite(limit) || limit <= 0) {
     return;
   }
-  coreBudget = { remaining: Math.max(0, remaining), limit };
+  budgets[resource] = { remaining: Math.max(0, remaining), limit };
 }
 
-export function getCoreBudget(): CoreBudget | null {
-  return coreBudget ? { ...coreBudget } : null;
+export function getResourceBudget(resource: RateLimitResource): ResourceBudget | null {
+  const budget = budgets[resource];
+  return budget ? { ...budget } : null;
 }
 
 /**
- * True when the core REST budget has fallen into the reserve band. While true,
- * low-priority (background sweep) requests are gated so the remaining budget is
- * kept for high-priority work. Returns false when the budget is unknown — an
- * unobserved budget must not block work.
+ * True when a resource's budget has fallen into the reserve band. While true,
+ * low-priority (background sweep) requests against that resource are gated so
+ * the remaining budget is kept for high-priority work. Returns false when the
+ * budget is unknown — an unobserved budget must not block work.
  */
-export function isCoreBudgetBelowReserve(): boolean {
-  if (!coreBudget) return false;
-  return coreBudget.remaining <= coreBudget.limit * CORE_BUDGET_RESERVE_FRACTION;
+export function isResourceBudgetBelowReserve(resource: RateLimitResource): boolean {
+  const budget = budgets[resource];
+  if (!budget) return false;
+  return budget.remaining <= budget.limit * BUDGET_RESERVE_FRACTION;
 }
 
 export function clearRateLimitStateForTests(): void {
   for (const resource of RESOURCES) {
     state[resource].resetAt = null;
     state[resource].lastLimitedAt = null;
+    budgets[resource] = null;
   }
-  coreBudget = null;
 }

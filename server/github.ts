@@ -9,9 +9,9 @@ import {
   clearRateLimited,
   deriveRateLimitResource,
   getRateLimitState,
-  isCoreBudgetBelowReserve,
+  isResourceBudgetBelowReserve,
   markRateLimited,
-  recordCoreBudget,
+  recordResourceBudget,
   type RateLimitResource,
 } from "./rateLimitState";
 import { getRequestPriority } from "./requestPriority";
@@ -777,13 +777,15 @@ async function withGitHubErrorHandling<T>(
  */
 class BudgetReserveError extends Error {
   readonly status = 403;
+  readonly resource: RateLimitResource;
   // `x-ratelimit-remaining: "0"` keeps shouldFallbackToGhAuth from retrying
   // this deliberate gate via the gh-auth fallback token (same marker the
   // RateLimitGateError uses).
   readonly response: { headers: Record<string, string> };
-  constructor() {
-    super("GitHub core REST budget is in the reserve band; deferring low-priority request");
+  constructor(resource: RateLimitResource) {
+    super(`GitHub ${resource} budget is in the reserve band; deferring low-priority request`);
     this.name = "BudgetReserveError";
+    this.resource = resource;
     this.response = { headers: { "x-ratelimit-remaining": "0" } };
   }
 }
@@ -1011,13 +1013,14 @@ function attachRateLimitHook(
       throw new RateLimitGateError(resourceState.resetAt, requestResource);
     }
 
-    // Hold a reserve of the core budget for high-priority work.
+    // Hold a reserve of the core REST and GraphQL budgets for high-priority
+    // work. Search has its own concurrency cap and is not budget-reserved.
     if (
-      requestResource === "core"
+      (requestResource === "core" || requestResource === "graphql")
       && getRequestPriority() === "low"
-      && isCoreBudgetBelowReserve()
+      && isResourceBudgetBelowReserve(requestResource)
     ) {
-      throw new BudgetReserveError();
+      throw new BudgetReserveError(requestResource);
     }
 
     const dispatch = async (): Promise<ReturnType<typeof request>> => {
@@ -1030,11 +1033,11 @@ function attachRateLimitHook(
         : requestResource;
       const remainingRaw = response.headers?.["x-ratelimit-remaining"];
       const remaining = typeof remainingRaw === "string" ? Number.parseInt(remainingRaw, 10) : Number.NaN;
-      if (responseResource === "core") {
+      if (responseResource === "core" || responseResource === "graphql") {
         const limitRaw = response.headers?.["x-ratelimit-limit"];
         const limit = typeof limitRaw === "string" ? Number.parseInt(limitRaw, 10) : Number.NaN;
         if (Number.isFinite(remaining) && Number.isFinite(limit)) {
-          recordCoreBudget(remaining, limit);
+          recordResourceBudget(responseResource, remaining, limit);
         }
       }
       if (Number.isFinite(remaining) && remaining > 0) {

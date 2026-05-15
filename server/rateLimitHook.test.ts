@@ -5,9 +5,9 @@ import { buildOctokit } from "./github";
 import {
   clearRateLimitStateForTests,
   clearRateLimited,
-  getCoreBudget,
   getRateLimitState,
-  recordCoreBudget,
+  getResourceBudget,
+  recordResourceBudget,
 } from "./rateLimitState";
 import { runWithRequestPriority } from "./requestPriority";
 
@@ -126,7 +126,7 @@ test("low-priority requests are gated while the core budget sits in the reserve 
     },
   );
 
-  recordCoreBudget(100, 5000); // 2% remaining — well inside the reserve
+  recordResourceBudget("core", 100, 5000); // 2% remaining — well inside the reserve
 
   await assert.rejects(
     () => runWithRequestPriority("low", () => octokit.request("GET /user")),
@@ -140,27 +140,94 @@ test("low-priority requests are gated while the core budget sits in the reserve 
   assert.equal(fetchCalls, 1);
 });
 
-test("the hook records the core budget from response headers", async () => {
+test("a low core budget does not gate low-priority GraphQL requests", async () => {
+  let graphqlCalls = 0;
   const octokit = await buildOctokit(
     { ...config, githubToken: "ghp_fake" },
     {
       ignoreCache: true,
-      requestFetch: async () =>
-        new Response(JSON.stringify({ login: "octo" }), {
+      requestFetch: async (input) => {
+        const url = typeof input === "string"
+          ? input
+          : input instanceof URL ? input.toString() : input.url;
+        if (url.includes("/graphql")) {
+          graphqlCalls += 1;
+        }
+        return new Response(JSON.stringify({ data: { viewer: { login: "octo" } } }), {
           status: 200,
           headers: {
             "content-type": "application/json",
-            "x-ratelimit-remaining": "1234",
+            "x-ratelimit-remaining": "4999",
             "x-ratelimit-limit": "5000",
-            "x-ratelimit-resource": "core",
+            "x-ratelimit-resource": "graphql",
           },
-        }),
+        });
+      },
     },
   );
 
-  assert.equal(getCoreBudget(), null);
+  // Core budget is exhausted, but the GraphQL budget is healthy.
+  recordResourceBudget("core", 100, 5000);
+
+  await runWithRequestPriority("low", () => octokit.graphql("query { viewer { login } }"));
+  assert.equal(graphqlCalls, 1, "GraphQL has its own budget — a low core budget must not gate it");
+});
+
+test("low-priority GraphQL requests are gated while the GraphQL budget is in the reserve", async () => {
+  let graphqlCalls = 0;
+  const octokit = await buildOctokit(
+    { ...config, githubToken: "ghp_fake" },
+    {
+      ignoreCache: true,
+      requestFetch: async () => {
+        graphqlCalls += 1;
+        return new Response(JSON.stringify({ data: {} }), {
+          status: 200,
+          headers: { "content-type": "application/json", "x-ratelimit-resource": "graphql" },
+        });
+      },
+    },
+  );
+
+  recordResourceBudget("graphql", 100, 5000); // GraphQL budget in the reserve
+
+  await assert.rejects(
+    () => runWithRequestPriority("low", () => octokit.graphql("query { viewer { login } }")),
+    /graphql budget/i,
+  );
+  assert.equal(graphqlCalls, 0, "a gated low-priority GraphQL request must not reach GitHub");
+});
+
+test("the hook records core and GraphQL budgets from response headers", async () => {
+  const octokit = await buildOctokit(
+    { ...config, githubToken: "ghp_fake" },
+    {
+      ignoreCache: true,
+      requestFetch: async (input) => {
+        const url = typeof input === "string"
+          ? input
+          : input instanceof URL ? input.toString() : input.url;
+        const resource = url.includes("/graphql") ? "graphql" : "core";
+        const remaining = resource === "graphql" ? "4321" : "1234";
+        return new Response(JSON.stringify({ data: {}, login: "octo" }), {
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+            "x-ratelimit-remaining": remaining,
+            "x-ratelimit-limit": "5000",
+            "x-ratelimit-resource": resource,
+          },
+        });
+      },
+    },
+  );
+
+  assert.equal(getResourceBudget("core"), null);
+  assert.equal(getResourceBudget("graphql"), null);
   await octokit.request("GET /user");
-  assert.deepEqual(getCoreBudget(), { remaining: 1234, limit: 5000 });
+  await octokit.graphql("query { viewer { login } }");
+  assert.deepEqual(getResourceBudget("core"), { remaining: 1234, limit: 5000 });
+  assert.deepEqual(getResourceBudget("graphql"), { remaining: 4321, limit: 5000 });
 });
 
 test("octokit hook records rate-limit reset from 403 response headers", async () => {
