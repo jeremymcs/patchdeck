@@ -63,6 +63,11 @@ export type GitHubIssueSummary = {
   updatedAt: string;
 };
 
+export type GitHubIssuePage = {
+  items: GitHubIssueSummary[];
+  hasMore: boolean;
+};
+
 export type GitHubLinkedPullRequest = {
   number: number;
   url: string;
@@ -2008,19 +2013,66 @@ export async function listOpenPullsForRepo(
 export async function listOpenIssuesForRepo(
   octokit: Octokit,
   repo: ParsedRepoSlug,
-): Promise<GitHubIssueSummary[]> {
-  const issues = await withGitHubErrorHandling("open issues", repo, () => octokit.paginate(octokit.issues.listForRepo, {
-    owner: repo.owner,
-    repo: repo.repo,
-    state: "open",
-    sort: "updated",
-    direction: "desc",
-    per_page: 100,
-  }));
+  options: { offset: number; limit: number } = { offset: 0, limit: 100 },
+): Promise<GitHubIssuePage> {
+  if (typeof octokit.issues?.listForRepo !== "function") {
+    const issues = await withGitHubErrorHandling("open issues", repo, () => octokit.paginate(octokit.issues.listForRepo, {
+      owner: repo.owner,
+      repo: repo.repo,
+      state: "open",
+      sort: "updated",
+      direction: "desc",
+      per_page: 100,
+    }));
+    const normalized = issues
+      .filter((issue) => !issue.pull_request)
+      .map((issue) => ({
+        number: issue.number,
+        title: issue.title || `Issue #${issue.number}`,
+        body: typeof issue.body === "string" ? issue.body : null,
+        bodyHtml: typeof issue.body === "string" ? renderGitHubMarkdown(issue.body) : null,
+        url: issue.html_url || `https://github.com/${repo.owner}/${repo.repo}/issues/${issue.number}`,
+        repoFullName: `${repo.owner}/${repo.repo}`,
+        repoCloneUrl: `https://github.com/${repo.owner}/${repo.repo}.git`,
+        author: issue.user?.login || "",
+        labels: Array.isArray(issue.labels)
+          ? issue.labels
+              .map((label) => (typeof label === "string" ? label : label?.name ?? ""))
+              .filter((label): label is string => Boolean(label))
+          : [],
+        assignees: Array.isArray(issue.assignees)
+          ? issue.assignees
+              .map((assignee) => assignee?.login || "")
+              .filter((assignee): assignee is string => Boolean(assignee))
+          : [],
+        comments: typeof issue.comments === "number" ? issue.comments : 0,
+        createdAt: issue.created_at || new Date().toISOString(),
+        updatedAt: issue.updated_at || issue.created_at || new Date().toISOString(),
+      }));
+    const items = normalized.slice(options.offset, options.offset + options.limit);
+    const hasMore = normalized.length > options.offset + options.limit;
+    return { items, hasMore };
+  }
 
-  return issues
-    .filter((issue) => !issue.pull_request)
-    .map((issue) => ({
+  const desired = options.offset + options.limit + 1;
+  const collected: GitHubIssueSummary[] = [];
+  const perPage = 100;
+  let page = 1;
+  let hasMore = false;
+
+  while (collected.length < desired) {
+    const issues = await withGitHubErrorHandling("open issues", repo, () => octokit.issues.listForRepo({
+      owner: repo.owner,
+      repo: repo.repo,
+      state: "open",
+      sort: "updated",
+      direction: "desc",
+      per_page: perPage,
+      page,
+    }));
+    const pageItems = issues.data
+      .filter((issue) => !issue.pull_request)
+      .map((issue) => ({
       number: issue.number,
       title: issue.title || `Issue #${issue.number}`,
       body: typeof issue.body === "string" ? issue.body : null,
@@ -2043,6 +2095,20 @@ export async function listOpenIssuesForRepo(
       createdAt: issue.created_at || new Date().toISOString(),
       updatedAt: issue.updated_at || issue.created_at || new Date().toISOString(),
     }));
+
+    collected.push(...pageItems);
+    if (pageItems.length < perPage) {
+      break;
+    }
+
+    page += 1;
+  }
+
+  if (collected.length > options.offset + options.limit) {
+    hasMore = true;
+  }
+  const items = collected.slice(options.offset, options.offset + options.limit);
+  return { items, hasMore };
 }
 
 export async function listOpenLinkedPullRequestsForIssue(

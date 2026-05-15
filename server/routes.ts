@@ -551,9 +551,13 @@ export async function registerRoutes(
     }
   });
 
-  app.get("/api/issues", async (_req, res) => {
+  app.get("/api/issues", async (req, res) => {
     try {
-      res.json(await runtime.listIssues());
+      const query = z.object({
+        limit: z.coerce.number().int().positive().max(100).optional(),
+        offset: z.coerce.number().int().nonnegative().optional(),
+      }).parse(req.query);
+      res.json(await runtime.listIssues(query));
     } catch (error: unknown) {
       sendAppAwareError(res, error);
     }

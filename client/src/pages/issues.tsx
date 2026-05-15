@@ -5,7 +5,7 @@ import { apiRequest, fetchJson, queryClient } from "@/lib/queryClient";
 import { AppHeader } from "@/components/AppHeader";
 import { UpdateBanner } from "@/components/UpdateBanner";
 import { toast } from "@/hooks/use-toast";
-import type { ActivitySnapshot, Config, Issue, LogEntry, RuntimeState } from "@shared/schema";
+import type { ActivitySnapshot, Config, Issue, IssueListPage, LogEntry, RuntimeState } from "@shared/schema";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { buildQueueStatusIndex, type QueueStatusView } from "@/lib/activityQueue";
 import { QueueStatusBadge } from "@/components/QueueStatusBadge";
@@ -13,26 +13,27 @@ import { ActivityMenu, EMPTY_ACTIVITY_SNAPSHOT } from "@/components/ActivityMenu
 
 const ISSUES_CACHE_KEY = "patchdeck:issues-cache:v1";
 const ISSUES_CACHE_MAX_AGE_MS = 5 * 60 * 1000;
+const ISSUES_PAGE_SIZE = 20;
 
-function readCachedIssues(): { data: Issue[]; updatedAt: number } | null {
+function readCachedIssues(): { data: IssueListPage; updatedAt: number } | null {
   if (typeof window === "undefined") return null;
   try {
     const raw = window.localStorage.getItem(ISSUES_CACHE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as { data?: unknown; updatedAt?: unknown };
-    if (!Array.isArray(parsed.data) || typeof parsed.updatedAt !== "number" || !Number.isFinite(parsed.updatedAt)) {
+    if (!parsed.data || typeof parsed.updatedAt !== "number" || !Number.isFinite(parsed.updatedAt)) {
       return null;
     }
     if (Date.now() - parsed.updatedAt > ISSUES_CACHE_MAX_AGE_MS) {
       return null;
     }
-    return { data: parsed.data as Issue[], updatedAt: parsed.updatedAt };
+    return { data: parsed.data as IssueListPage, updatedAt: parsed.updatedAt };
   } catch {
     return null;
   }
 }
 
-function writeCachedIssues(data: Issue[]): void {
+function writeCachedIssues(data: IssueListPage): void {
   if (typeof window === "undefined") return;
   try {
     window.localStorage.setItem(ISSUES_CACHE_KEY, JSON.stringify({
@@ -70,6 +71,10 @@ function issueKey(issue: Issue): string {
 function issueDetailUrl(issue: Issue): string {
   const [owner, repo] = issue.repo.split("/");
   return `/api/issues/${encodeURIComponent(owner ?? "")}/${encodeURIComponent(repo ?? "")}/${issue.number}`;
+}
+
+function issueListUrl(limit: number, offset: number): string {
+  return `/api/issues?limit=${limit}&offset=${offset}`;
 }
 
 function isActiveWorkStatus(status: Issue["workStatus"]): boolean {
@@ -440,8 +445,9 @@ export default function Issues() {
     },
   });
 
-  const issuesQuery = useQuery<Issue[]>({
-    queryKey: ["/api/issues"],
+  const issuesQuery = useQuery<IssueListPage>({
+    queryKey: ["/api/issues", ISSUES_PAGE_SIZE, 0],
+    queryFn: async () => fetchJson<IssueListPage>(issueListUrl(ISSUES_PAGE_SIZE, 0)),
     enabled: runtime !== undefined && !globalDrainMode,
     initialData: cachedIssues?.data,
     initialDataUpdatedAt: cachedIssues?.updatedAt,
@@ -451,18 +457,49 @@ export default function Issues() {
       if (globalDrainMode) {
         return false;
       }
-      const data = query.state.data;
+      const data = query.state.data?.items;
       return Array.isArray(data) && data.some((issue) => isActiveWorkStatus(issue.workStatus))
         ? 5000
         : false;
     },
   });
-  const { data: issues = [], isLoading, refetch, isFetching } = issuesQuery;
+  const { data: issuesPage, isLoading, refetch, isFetching } = issuesQuery;
+  const [extraPages, setExtraPages] = useState<IssueListPage[]>([]);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
   useEffect(() => {
     if (issuesQuery.status === "success") {
       writeCachedIssues(issuesQuery.data);
     }
   }, [issuesQuery.status, issuesQuery.data]);
+  useEffect(() => {
+    setExtraPages([]);
+  }, [issuesPage?.fetchedAt]);
+
+  const issues = useMemo(() => {
+    const all = [issuesPage, ...extraPages].flatMap((page) => page?.items ?? []);
+    const deduped = new Map<string, Issue>();
+    for (const issue of all) deduped.set(issue.id, issue);
+    return Array.from(deduped.values()).sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+  }, [issuesPage, extraPages]);
+  const latestPage = extraPages[extraPages.length - 1] ?? issuesPage ?? null;
+  const canLoadMore = Boolean(latestPage?.hasMore);
+  const nextOffset = latestPage?.nextOffset ?? null;
+
+  const loadMoreIssues = async (): Promise<void> => {
+    if (!canLoadMore || nextOffset === null || globalDrainMode || isLoadingMore) return;
+    setIsLoadingMore(true);
+    try {
+      const nextPage = await fetchJson<IssueListPage>(issueListUrl(ISSUES_PAGE_SIZE, nextOffset));
+      setExtraPages((current) => [...current, nextPage]);
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        description: `Could not load more issues: ${error instanceof Error ? error.message : String(error)}`,
+      });
+    } finally {
+      setIsLoadingMore(false);
+    }
+  };
 
   const [selectedIssueId, setSelectedIssueId] = useState<string | null>(null);
   const [selectedRepo, setSelectedRepo] = useState<string>("all");
@@ -716,7 +753,7 @@ export default function Issues() {
               type="button"
               onClick={() => {
                 void Promise.all([
-                  refetch(),
+                  refetch().then(() => setExtraPages([])),
                   selectedIssueFromList ? refetchSelectedIssueDetail() : Promise.resolve(),
                 ]);
               }}
@@ -892,22 +929,37 @@ export default function Issues() {
                     : "No open issues found in watched repositories."}
                 </div>
               ) : (
-                repoGroups.map((group) => (
-                  <div key={group.repo} className="border-b border-border/60 last:border-b-0">
-                    <div className="sticky top-0 z-10 border-b border-border bg-background px-4 py-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-                      {group.repo} <span className="font-mono text-foreground/70">({group.issues.length})</span>
+                <>
+                  {repoGroups.map((group) => (
+                    <div key={group.repo} className="border-b border-border/60 last:border-b-0">
+                      <div className="sticky top-0 z-10 border-b border-border bg-background px-4 py-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                        {group.repo} <span className="font-mono text-foreground/70">({group.issues.length})</span>
+                      </div>
+                      {group.issues.map((issue) => (
+                        <IssueRow
+                          key={issue.id}
+                          issue={issue}
+                          selected={issue.id === selectedIssueId}
+                          onSelect={setSelectedIssueId}
+                          queueStatus={queueStatusById.get(issue.id) ?? null}
+                        />
+                      ))}
                     </div>
-                    {group.issues.map((issue) => (
-                      <IssueRow
-                        key={issue.id}
-                        issue={issue}
-                        selected={issue.id === selectedIssueId}
-                        onSelect={setSelectedIssueId}
-                        queueStatus={queueStatusById.get(issue.id) ?? null}
-                      />
-                    ))}
-                  </div>
-                ))
+                  ))}
+                  {canLoadMore && (
+                    <div className="border-t border-border/60 px-4 py-2">
+                      <button
+                        type="button"
+                        onClick={() => void loadMoreIssues()}
+                        disabled={isLoadingMore || globalDrainMode}
+                        className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground disabled:opacity-50"
+                      >
+                        {isLoadingMore ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+                        load more
+                      </button>
+                    </div>
+                  )}
+                </>
               )}
             </div>
           </div>

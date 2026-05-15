@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import test from "node:test";
 import express from "express";
 import type { Octokit } from "@octokit/rest";
-import type { AppUpdateStatus, FeedbackItem, Issue, NewPR } from "@shared/schema";
+import type { AppUpdateStatus, FeedbackItem, Issue, IssueListPage, NewPR } from "@shared/schema";
 import type { AppRuntime } from "./appRuntime";
 import { clearRateLimited, markRateLimited } from "./rateLimitState";
 import type { ReleaseAgentPullSummary, ReleaseEvaluationDecision } from "./releaseAgent";
@@ -1605,7 +1605,15 @@ test("GET and POST /api/issues proxy the runtime issue monitor and work action",
   const fakeRuntime = {
     start: async () => undefined,
     stop: () => undefined,
-    listIssues: async () => issues,
+    listIssues: async () => ({
+      items: issues,
+      limit: 20,
+      offset: 0,
+      nextOffset: null,
+      hasMore: false,
+      fetchedAt: "2026-05-03T18:00:00.000Z",
+      staleAt: "2026-05-03T18:05:00.000Z",
+    }),
     getIssue: async (repo: string, number: number) => ({
       ...issues[0],
       repo,
@@ -1729,8 +1737,8 @@ test("GET and POST /api/issues proxy the runtime issue monitor and work action",
   try {
     const listResponse = await fetch(`${harness.baseUrl}/api/issues`);
     assert.equal(listResponse.status, 200);
-    const list = await listResponse.json() as Issue[];
-    assert.equal(list[0]?.title, "Fix the toggle");
+    const list = await listResponse.json() as IssueListPage;
+    assert.equal(list.items[0]?.title, "Fix the toggle");
 
     const detailResponse = await fetch(`${harness.baseUrl}/api/issues/acme/widgets/17`);
     assert.equal(detailResponse.status, 200);
