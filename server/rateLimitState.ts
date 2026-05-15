@@ -21,10 +21,23 @@ type ResourceState = { resetAt: Date | null; lastLimitedAt: Date | null };
 
 const RECENT_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 
+// Fraction of a resource's budget held in reserve for high-priority work
+// (interactive routes, active babysitter sessions). Low-priority requests are
+// gated once `remaining` falls to or below this fraction of the limit.
+const BUDGET_RESERVE_FRACTION = 0.3;
+
 const state: Record<RateLimitResource, ResourceState> = {
   core: { resetAt: null, lastLimitedAt: null },
   graphql: { resetAt: null, lastLimitedAt: null },
   search: { resetAt: null, lastLimitedAt: null },
+};
+
+export type ResourceBudget = { remaining: number; limit: number };
+
+const budgets: Record<RateLimitResource, ResourceBudget | null> = {
+  core: null,
+  graphql: null,
+  search: null,
 };
 
 export function deriveRateLimitResource(
@@ -129,9 +142,43 @@ export function clearRateLimited(resource: RateLimitResource = "core"): void {
   }
 }
 
+/**
+ * Records the latest observed budget for a resource from `x-ratelimit-*`
+ * response headers. Used to decide whether low-priority requests should be
+ * gated. The core REST and GraphQL APIs have independent budgets.
+ */
+export function recordResourceBudget(
+  resource: RateLimitResource,
+  remaining: number,
+  limit: number,
+): void {
+  if (!Number.isFinite(remaining) || !Number.isFinite(limit) || limit <= 0) {
+    return;
+  }
+  budgets[resource] = { remaining: Math.max(0, remaining), limit };
+}
+
+export function getResourceBudget(resource: RateLimitResource): ResourceBudget | null {
+  const budget = budgets[resource];
+  return budget ? { ...budget } : null;
+}
+
+/**
+ * True when a resource's budget has fallen into the reserve band. While true,
+ * low-priority (background sweep) requests against that resource are gated so
+ * the remaining budget is kept for high-priority work. Returns false when the
+ * budget is unknown — an unobserved budget must not block work.
+ */
+export function isResourceBudgetBelowReserve(resource: RateLimitResource): boolean {
+  const budget = budgets[resource];
+  if (!budget) return false;
+  return budget.remaining <= budget.limit * BUDGET_RESERVE_FRACTION;
+}
+
 export function clearRateLimitStateForTests(): void {
   for (const resource of RESOURCES) {
     state[resource].resetAt = null;
     state[resource].lastLimitedAt = null;
+    budgets[resource] = null;
   }
 }

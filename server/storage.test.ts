@@ -9,6 +9,7 @@ import { DatabaseSync } from "node:sqlite";
 import { DEFAULT_CONFIG } from "./defaultConfig";
 import { getCodeFactoryPaths } from "./paths";
 import { SQLITE_LOCK_TIMEOUT_MS, SqliteStorage } from "./sqliteStorage";
+import { MemStorage } from "./memoryStorage";
 
 function createRawDatabase(root: string): DatabaseSync {
   const db = new DatabaseSync(getCodeFactoryPaths(root).stateDbPath, {
@@ -1162,4 +1163,90 @@ try {
   } finally {
     storage.close();
   }
+});
+
+test("SqliteStorage stores, overwrites, and clears GitHub etags across reopen", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "codefactory-storage-"));
+  const first = new SqliteStorage(root);
+  try {
+    assert.equal(await first.getGithubEtag("issues:open:owner/repo"), undefined);
+
+    await first.setGithubEtag("issues:open:owner/repo", 'W/"abc"');
+    assert.equal(await first.getGithubEtag("issues:open:owner/repo"), 'W/"abc"');
+
+    // Overwrite keeps a single row per url.
+    await first.setGithubEtag("issues:open:owner/repo", 'W/"def"');
+    assert.equal(await first.getGithubEtag("issues:open:owner/repo"), 'W/"def"');
+  } finally {
+    first.close();
+  }
+
+  const second = new SqliteStorage(root);
+  try {
+    assert.equal(await second.getGithubEtag("issues:open:owner/repo"), 'W/"def"');
+    await second.clearGithubEtag("issues:open:owner/repo");
+    assert.equal(await second.getGithubEtag("issues:open:owner/repo"), undefined);
+  } finally {
+    second.close();
+  }
+});
+
+test("MemStorage GitHub etag round-trip matches the SqliteStorage contract", async () => {
+  const storage = new MemStorage();
+  assert.equal(await storage.getGithubEtag("issues:open:owner/repo"), undefined);
+  await storage.setGithubEtag("issues:open:owner/repo", 'W/"abc"');
+  assert.equal(await storage.getGithubEtag("issues:open:owner/repo"), 'W/"abc"');
+  await storage.setGithubEtag("issues:open:owner/repo", 'W/"def"');
+  assert.equal(await storage.getGithubEtag("issues:open:owner/repo"), 'W/"def"');
+  await storage.clearGithubEtag("issues:open:owner/repo");
+  assert.equal(await storage.getGithubEtag("issues:open:owner/repo"), undefined);
+});
+
+test("SqliteStorage persists repo sync state with partial updates across reopen", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "codefactory-storage-"));
+  const first = new SqliteStorage(root);
+  try {
+    assert.deepEqual(await first.getRepoSyncStates("prs"), []);
+
+    await first.upsertRepoSyncState("o/r", "prs", {
+      lastSyncedAt: "2026-05-15T10:00:00.000Z",
+      nextEligibleAt: null,
+    });
+    await first.upsertRepoSyncState("o/r", "issues", {
+      nextEligibleAt: "2026-05-15T11:00:00.000Z",
+    });
+
+    // A partial update touches only nextEligibleAt; lastSyncedAt is preserved.
+    await first.upsertRepoSyncState("o/r", "prs", { nextEligibleAt: "2026-05-15T12:00:00.000Z" });
+
+    assert.deepEqual(await first.getRepoSyncStates("prs"), [{
+      repo: "o/r",
+      kind: "prs",
+      lastSyncedAt: "2026-05-15T10:00:00.000Z",
+      nextEligibleAt: "2026-05-15T12:00:00.000Z",
+    }]);
+    // `kind` partitions the rows.
+    assert.equal((await first.getRepoSyncStates("issues")).length, 1);
+  } finally {
+    first.close();
+  }
+
+  const second = new SqliteStorage(root);
+  try {
+    const prs = await second.getRepoSyncStates("prs");
+    assert.equal(prs[0]?.lastSyncedAt, "2026-05-15T10:00:00.000Z");
+    assert.equal(prs[0]?.nextEligibleAt, "2026-05-15T12:00:00.000Z");
+  } finally {
+    second.close();
+  }
+});
+
+test("MemStorage repo sync state matches the SqliteStorage contract", async () => {
+  const storage = new MemStorage();
+  assert.deepEqual(await storage.getRepoSyncStates("prs"), []);
+  await storage.upsertRepoSyncState("o/r", "prs", { lastSyncedAt: "t1", nextEligibleAt: "t2" });
+  await storage.upsertRepoSyncState("o/r", "prs", { nextEligibleAt: null });
+  assert.deepEqual(await storage.getRepoSyncStates("prs"), [
+    { repo: "o/r", kind: "prs", lastSyncedAt: "t1", nextEligibleAt: null },
+  ]);
 });

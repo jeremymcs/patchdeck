@@ -7,6 +7,7 @@ import {
   issueWorkAttemptCountFromJobs,
   issueWorkPrFromLogs,
   mapMergedPullsToReleaseSummaries,
+  pickWatcherColdStartDelayMs,
   planAutomaticIssueQueueActions,
   type PlanAutomaticIssueQueueInput,
 } from "./appRuntime";
@@ -562,4 +563,205 @@ test("planAutomaticIssueQueueActions counts active work jobs against the work ca
     maxConcurrentIssueWork: 1,
   });
   assert.equal(plan.work.length, 0, "work cap already saturated");
+});
+
+test("syncRepos skips the issue sweep for a repo whose issue list responds 304", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig({ watchedRepos: ["owner/repo"] });
+  await storage.setGithubEtag("issues:open:owner/repo", 'W/"stale"');
+
+  let listForRepoCalls = 0;
+  const fakeOctokit = {
+    issues: {
+      listForRepo: async () => {
+        listForRepoCalls += 1;
+        const error = new Error("Not modified") as Error & { status: number };
+        error.status = 304;
+        throw error;
+      },
+    },
+  };
+
+  const runtime = createAppRuntime({
+    storage,
+    startBackgroundServices: false,
+    startWatcher: false,
+    babysitter: { syncAndBabysitTrackedRepos: async () => {} } as never,
+    buildOctokitFn: async () => fakeOctokit as never,
+  });
+
+  await runtime.syncRepos();
+
+  assert.equal(listForRepoCalls, 1, "only the conditional probe should reach GitHub");
+  const synced = await storage.listSyncedIssues({ repos: ["owner/repo"], limit: 50, offset: 0 });
+  assert.equal(synced.items.length, 0, "a 304 must not sync any issues");
+});
+
+test("syncRepos syncs issues and persists the new etag when the issue list changed", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig({ watchedRepos: ["owner/repo"] });
+
+  const issuePayload = {
+    number: 7,
+    title: "Issue 7",
+    body: "needs attention",
+    html_url: "https://github.com/owner/repo/issues/7",
+    user: { login: "alice" },
+    labels: [],
+    assignees: [],
+    comments: 0,
+    created_at: "2026-05-03T17:00:00.000Z",
+    updated_at: "2026-05-03T18:00:00.000Z",
+  };
+  const fakeOctokit = {
+    issues: {
+      listForRepo: async () => ({
+        data: [issuePayload],
+        headers: { etag: 'W/"issues-v1"' },
+      }),
+    },
+  };
+
+  const runtime = createAppRuntime({
+    storage,
+    startBackgroundServices: false,
+    startWatcher: false,
+    babysitter: { syncAndBabysitTrackedRepos: async () => {} } as never,
+    buildOctokitFn: async () => fakeOctokit as never,
+  });
+
+  await runtime.syncRepos();
+
+  const synced = await storage.listSyncedIssues({ repos: ["owner/repo"], limit: 50, offset: 0 });
+  assert.equal(synced.items.length, 1);
+  assert.equal(synced.items[0]?.number, 7);
+  assert.equal(
+    await storage.getGithubEtag("issues:open:owner/repo"),
+    'W/"issues-v1"',
+    "a successful sweep should persist the fresh etag for next tick",
+  );
+});
+
+test("pickWatcherColdStartDelayMs stays within the 15-45s cold-start window", () => {
+  assert.equal(pickWatcherColdStartDelayMs(() => 0), 15_000);
+  assert.equal(pickWatcherColdStartDelayMs(() => 0.5), 30_000);
+  assert.equal(pickWatcherColdStartDelayMs(() => 0.999999999), 45_000);
+  for (let i = 0; i < 200; i += 1) {
+    const delay = pickWatcherColdStartDelayMs();
+    assert.ok(delay >= 15_000 && delay <= 45_000, `delay ${delay} out of range`);
+  }
+});
+
+test("start() defers the first watcher tick instead of firing it during start", async () => {
+  let watcherRuns = 0;
+  const runtime = createAppRuntime({
+    storage: new MemStorage(),
+    startBackgroundServices: false,
+    startWatcher: true,
+    babysitter: { resumeInterruptedRuns: async () => {} } as never,
+    watcherScheduler: { run: async () => { watcherRuns += 1; } } as never,
+  });
+
+  await runtime.start();
+
+  assert.equal(watcherRuns, 0, "the first watcher tick must be deferred, not run during start()");
+  runtime.stop();
+});
+
+test("syncRepos persists an issue-sweep backoff when the probe fails", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig({ watchedRepos: ["owner/repo"] });
+
+  const fakeOctokit = {
+    issues: {
+      listForRepo: async () => {
+        const error = new Error("not found") as Error & { status: number };
+        error.status = 404;
+        throw error;
+      },
+    },
+  };
+
+  const runtime = createAppRuntime({
+    storage,
+    startBackgroundServices: false,
+    startWatcher: false,
+    babysitter: { syncAndBabysitTrackedRepos: async () => {} } as never,
+    buildOctokitFn: async () => fakeOctokit as never,
+  });
+
+  await runtime.syncRepos();
+
+  const state = (await storage.getRepoSyncStates("issues")).find((s) => s.repo === "owner/repo");
+  assert.ok(state?.nextEligibleAt, "a failed issue sweep must persist a backoff");
+  assert.ok(
+    new Date(state!.nextEligibleAt!).getTime() > Date.now(),
+    "the persisted backoff must be in the future",
+  );
+});
+
+test("syncRepos skips an issue sweep for a repo whose persisted backoff is active", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig({ watchedRepos: ["owner/repo"] });
+  await storage.upsertRepoSyncState("owner/repo", "issues", {
+    nextEligibleAt: new Date(Date.now() + 600_000).toISOString(),
+  });
+
+  let listForRepoCalls = 0;
+  const fakeOctokit = {
+    issues: {
+      listForRepo: async () => {
+        listForRepoCalls += 1;
+        return { data: [], headers: {} };
+      },
+    },
+  };
+
+  const runtime = createAppRuntime({
+    storage,
+    startBackgroundServices: false,
+    startWatcher: false,
+    babysitter: { syncAndBabysitTrackedRepos: async () => {} } as never,
+    buildOctokitFn: async () => fakeOctokit as never,
+  });
+
+  await runtime.syncRepos();
+
+  assert.equal(listForRepoCalls, 0, "a backed-off repo must not be probed or synced");
+});
+
+test("syncRepos defers the next sweep for a repo whose issue list is unchanged", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig({ watchedRepos: ["owner/repo"] });
+  await storage.setGithubEtag("issues:open:owner/repo", 'W/"cached"');
+
+  const fakeOctokit = {
+    issues: {
+      listForRepo: async () => {
+        const error = new Error("Not modified") as Error & { status: number };
+        error.status = 304;
+        throw error;
+      },
+    },
+  };
+
+  const runtime = createAppRuntime({
+    storage,
+    startBackgroundServices: false,
+    startWatcher: false,
+    babysitter: { syncAndBabysitTrackedRepos: async () => {} } as never,
+    buildOctokitFn: async () => fakeOctokit as never,
+  });
+
+  const before = Date.now();
+  await runtime.syncRepos();
+
+  const state = (await storage.getRepoSyncStates("issues")).find((s) => s.repo === "owner/repo");
+  assert.ok(state?.lastSyncedAt, "a 304 still counts as a freshness check");
+  assert.ok(state?.nextEligibleAt, "an unchanged repo must be deprioritized");
+  const eligibleMs = new Date(state!.nextEligibleAt!).getTime();
+  assert.ok(
+    eligibleMs >= before + 9 * 60_000,
+    `expected a ~10min cooldown, got ${(eligibleMs - before) / 60_000}min`,
+  );
 });

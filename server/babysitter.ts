@@ -30,6 +30,7 @@ import {
   GitHubIntegrationError,
   listFailingStatuses,
   listOpenPullsForRepo,
+  listOpenPullsForRepoConditional,
   parseRepoSlug,
   postFollowUpForFeedbackItem,
   postPRComment,
@@ -79,6 +80,9 @@ const AGENT_STREAM_LOG_LINE_LIMIT = 120;
 const MAX_FEEDBACK_SYNCS_PER_TICK = 20;
 const FEEDBACK_SYNC_RATE_LIMIT_COOLDOWN_MS = 5 * 60 * 1000;
 const REPO_SYNC_FAILURE_BACKOFF_MS = 60_000;
+// After a repo's PR list comes back unchanged, defer its next sweep by this
+// long so quiet repos yield watcher slots and rate-limit budget to active ones.
+const QUIET_REPO_COOLDOWN_MS = 10 * 60_000;
 const APP_NAME = "patchdeck";
 const APP_REPOSITORY_URL = "https://github.com/jeremymcs/patchdeck";
 export const APP_COMMENT_FOOTER = formatAppCommentFooter(APP_NAME, true);
@@ -102,6 +106,7 @@ type GitHubService = {
   getAuthenticatedLogin?: (octokit: Awaited<ReturnType<typeof buildOctokit>>) => Promise<string | null>;
   listFailingStatuses: typeof listFailingStatuses;
   listOpenPullsForRepo: typeof listOpenPullsForRepo;
+  listOpenPullsForRepoConditional: typeof listOpenPullsForRepoConditional;
   postFollowUpForFeedbackItem: typeof postFollowUpForFeedbackItem;
   postPRComment: typeof postPRComment;
   postStatusReplyForFeedbackItem: typeof postStatusReplyForFeedbackItem;
@@ -182,6 +187,7 @@ const defaultGitHubService: GitHubService = {
   },
   listFailingStatuses,
   listOpenPullsForRepo,
+  listOpenPullsForRepoConditional,
   postFollowUpForFeedbackItem,
   postPRComment,
   postStatusReplyForFeedbackItem,
@@ -1329,8 +1335,11 @@ export class PRBabysitter {
   private readonly clock: () => Date;
   private readonly agentHealthCache = new Map<CodingAgent, { checkedAtMs: number; result: AgentHealthResult }>();
   private readonly feedbackSyncCooldownUntilMs = new Map<string, number>();
-  private readonly repoSyncBackoffUntilMs = new Map<string, number>();
   private repoSyncCursor = 0;
+  // Per-repo open-PR list snapshot + its etag, kept together so a conditional
+  // 304 always has a list to reuse. In-memory only — a restart simply
+  // re-fetches once.
+  private readonly prListCache = new Map<string, { etag: string | null; pulls: GitHubPullSummary[] }>();
 
   constructor(
     storage: IStorage,
@@ -1923,6 +1932,14 @@ export class PRBabysitter {
     }
 
     const nowMs = this.now().getTime();
+    // Backoff state is persisted, so a restart does not re-hammer a repo that
+    // was failing before the process went down.
+    const prSyncBackoffUntilMs = new Map<string, number>();
+    for (const syncState of await this.storage.getRepoSyncStates("prs")) {
+      if (syncState.nextEligibleAt) {
+        prSyncBackoffUntilMs.set(syncState.repo, new Date(syncState.nextEligibleAt).getTime());
+      }
+    }
     const selectedRepos = fullSweep
       ? repos
       : Array.from({ length: repos.length })
@@ -1930,7 +1947,7 @@ export class PRBabysitter {
           .filter((repo): repo is NonNullable<typeof repo> => Boolean(repo))
           .filter((repo) => {
             const repoSlug = formatRepoSlug(repo);
-            const backoffUntilMs = this.repoSyncBackoffUntilMs.get(repoSlug) ?? 0;
+            const backoffUntilMs = prSyncBackoffUntilMs.get(repoSlug) ?? 0;
             return backoffUntilMs <= nowMs;
           })
           .slice(0, 1);
@@ -1940,14 +1957,44 @@ export class PRBabysitter {
 
       let openPulls;
       try {
-        openPulls = await this.github.listOpenPullsForRepo(octokit, repo);
-        this.repoSyncBackoffUntilMs.delete(repoSlug);
+        // Conditional GET: a 304 means no PR's `updated_at` changed since the
+        // last sweep, so the cached list is reused and the fetch costs no
+        // primary rate-limit budget. The etag and list are cached together in
+        // memory so they cannot drift out of sync across a restart.
+        const cachedPrList = this.prListCache.get(repoSlug);
+        const conditional = await this.github.listOpenPullsForRepoConditional(
+          octokit,
+          repo,
+          cachedPrList?.etag ?? null,
+        );
+        let prListUnchanged = false;
+        if (conditional.notModified && cachedPrList) {
+          openPulls = cachedPrList.pulls;
+          prListUnchanged = true;
+        } else if (conditional.notModified) {
+          // Etag hit without a cached list (should not happen, since both are
+          // stored together) — fall back to a full fetch.
+          openPulls = await this.github.listOpenPullsForRepo(octokit, repo);
+        } else {
+          openPulls = conditional.pulls;
+          this.prListCache.set(repoSlug, { etag: conditional.etag, pulls: conditional.pulls });
+        }
+        // When the PR list is unchanged, defer the next sweep — a quiet repo
+        // does not need an every-tick slot. Any change returns it to every-tick.
+        await this.storage.upsertRepoSyncState(repoSlug, "prs", {
+          lastSyncedAt: this.now().toISOString(),
+          nextEligibleAt: prListUnchanged
+            ? new Date(this.now().getTime() + QUIET_REPO_COOLDOWN_MS).toISOString()
+            : null,
+        });
         const repoIndex = repos.findIndex((entry) => formatRepoSlug(entry) === repoSlug);
         if (repoIndex >= 0) {
           this.repoSyncCursor = (repoIndex + 1) % repos.length;
         }
       } catch (error) {
-        this.repoSyncBackoffUntilMs.set(repoSlug, this.now().getTime() + REPO_SYNC_FAILURE_BACKOFF_MS);
+        await this.storage.upsertRepoSyncState(repoSlug, "prs", {
+          nextEligibleAt: new Date(this.now().getTime() + REPO_SYNC_FAILURE_BACKOFF_MS).toISOString(),
+        });
         log.warn(
           { err: error instanceof Error ? error.message : String(error), repo: repoSlug },
           "Failed to list open PRs",

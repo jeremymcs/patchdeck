@@ -5,7 +5,10 @@ import {
   clearRateLimited,
   deriveRateLimitResource,
   getRateLimitState,
+  getResourceBudget,
+  isResourceBudgetBelowReserve,
   markRateLimited,
+  recordResourceBudget,
 } from "./rateLimitState";
 
 test.beforeEach(() => clearRateLimitStateForTests());
@@ -110,4 +113,39 @@ test("aggregate resetAt is the latest among limited resources", () => {
 
   const aggregate = getRateLimitState();
   assert.equal(aggregate.resetAt!.getTime(), later * 1000);
+});
+
+test("recordResourceBudget keeps the latest observation per resource", () => {
+  assert.equal(getResourceBudget("core"), null);
+  recordResourceBudget("core", 4200, 5000);
+  assert.deepEqual(getResourceBudget("core"), { remaining: 4200, limit: 5000 });
+  recordResourceBudget("core", 900, 5000);
+  assert.deepEqual(getResourceBudget("core"), { remaining: 900, limit: 5000 });
+});
+
+test("recordResourceBudget tracks core and graphql budgets independently", () => {
+  recordResourceBudget("core", 4000, 5000);
+  recordResourceBudget("graphql", 200, 5000);
+  assert.deepEqual(getResourceBudget("core"), { remaining: 4000, limit: 5000 });
+  assert.deepEqual(getResourceBudget("graphql"), { remaining: 200, limit: 5000 });
+  // graphql is in the reserve band; core is not.
+  assert.equal(isResourceBudgetBelowReserve("core"), false);
+  assert.equal(isResourceBudgetBelowReserve("graphql"), true);
+});
+
+test("recordResourceBudget ignores non-finite or non-positive values", () => {
+  recordResourceBudget("core", Number.NaN, 5000);
+  assert.equal(getResourceBudget("core"), null);
+  recordResourceBudget("core", 100, 0);
+  assert.equal(getResourceBudget("core"), null);
+});
+
+test("isResourceBudgetBelowReserve gates only inside the 30% reserve band", () => {
+  assert.equal(isResourceBudgetBelowReserve("core"), false, "an unknown budget never gates");
+  recordResourceBudget("core", 2000, 5000); // 40% remaining
+  assert.equal(isResourceBudgetBelowReserve("core"), false);
+  recordResourceBudget("core", 1500, 5000); // exactly 30% — at the reserve edge
+  assert.equal(isResourceBudgetBelowReserve("core"), true);
+  recordResourceBudget("core", 200, 5000); // 4%
+  assert.equal(isResourceBudgetBelowReserve("core"), true);
 });

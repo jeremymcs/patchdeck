@@ -54,7 +54,7 @@ import {
   createSocialChangelog,
   touchAgentRun,
 } from "@shared/models";
-import type { IStorage, StoredIssueRecord } from "./storage";
+import type { IStorage, RepoSyncKind, RepoSyncState, StoredIssueRecord } from "./storage";
 import { DEFAULT_CONFIG } from "./defaultConfig";
 
 export class MemStorage implements IStorage {
@@ -80,6 +80,8 @@ export class MemStorage implements IStorage {
   private issueEvaluations: Map<string, IssueEvaluation> = new Map();
   private issueSubtaskSets: Map<string, IssueSubtaskSet> = new Map();
   private syncedIssues: Map<string, StoredIssueRecord> = new Map();
+  private githubEtags: Map<string, string> = new Map();
+  private repoSyncStates: Map<string, RepoSyncState> = new Map();
 
   private cloneConfig(config: Config): Config {
     return structuredClone(config);
@@ -398,6 +400,43 @@ export class MemStorage implements IStorage {
     const existing = this.syncedIssues.get(key);
     if (!existing) return;
     this.syncedIssues.set(key, { ...existing, isWorked: true });
+  }
+
+  async getGithubEtag(url: string): Promise<string | undefined> {
+    return this.githubEtags.get(url);
+  }
+
+  async setGithubEtag(url: string, etag: string): Promise<void> {
+    this.githubEtags.set(url, etag);
+  }
+
+  async clearGithubEtag(url: string): Promise<void> {
+    this.githubEtags.delete(url);
+  }
+
+  async getRepoSyncStates(kind: RepoSyncKind): Promise<RepoSyncState[]> {
+    return Array.from(this.repoSyncStates.values())
+      .filter((state) => state.kind === kind)
+      .map((state) => ({ ...state }));
+  }
+
+  async upsertRepoSyncState(
+    repo: string,
+    kind: RepoSyncKind,
+    updates: { lastSyncedAt?: string | null; nextEligibleAt?: string | null },
+  ): Promise<void> {
+    const key = `${repo}#${kind}`;
+    const existing = this.repoSyncStates.get(key);
+    this.repoSyncStates.set(key, {
+      repo,
+      kind,
+      lastSyncedAt: "lastSyncedAt" in updates
+        ? updates.lastSyncedAt ?? null
+        : existing?.lastSyncedAt ?? null,
+      nextEligibleAt: "nextEligibleAt" in updates
+        ? updates.nextEligibleAt ?? null
+        : existing?.nextEligibleAt ?? null,
+    });
   }
 
   private syncRepoSettings(): void {

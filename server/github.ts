@@ -9,9 +9,12 @@ import {
   clearRateLimited,
   deriveRateLimitResource,
   getRateLimitState,
+  isResourceBudgetBelowReserve,
   markRateLimited,
+  recordResourceBudget,
   type RateLimitResource,
 } from "./rateLimitState";
+import { getRequestPriority } from "./requestPriority";
 
 const octokitLog = childLogger("octokit");
 
@@ -173,6 +176,12 @@ const GH_AUTH_CACHE_TTL_MS = 15000;
 const GITHUB_MAX_CONCURRENT_REQUESTS = 20;
 const GITHUB_REST_POINT_INTERVAL_MS = 67;
 const GITHUB_CONTENT_REQUEST_INTERVAL_MS = 750;
+
+// Per-endpoint-class concurrency caps. The global cap above protects against
+// connection-count secondary limits; these tighter caps keep the burst-prone
+// endpoints (search, content-creating writes) under their own abuse limits.
+const GITHUB_SEARCH_MAX_CONCURRENT = 2;
+const GITHUB_WRITE_MAX_CONCURRENT = 4;
 const REVIEW_THREADS_QUERY = `
   query CodeFactoryReviewThreads($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
     repository(owner: $owner, name: $repo) {
@@ -760,6 +769,27 @@ async function withGitHubErrorHandling<T>(
   throw toGitHubIntegrationError(lastError, context, resource);
 }
 
+/**
+ * Thrown before dispatch when a low-priority (background sweep) request would
+ * eat into the core REST budget reserved for high-priority work. Callers in the
+ * sweep paths already treat thrown errors as a transient failure and back off,
+ * so the sweep simply retries on a later tick once the budget recovers.
+ */
+class BudgetReserveError extends Error {
+  readonly status = 403;
+  readonly resource: RateLimitResource;
+  // `x-ratelimit-remaining: "0"` keeps shouldFallbackToGhAuth from retrying
+  // this deliberate gate via the gh-auth fallback token (same marker the
+  // RateLimitGateError uses).
+  readonly response: { headers: Record<string, string> };
+  constructor(resource: RateLimitResource) {
+    super(`GitHub ${resource} budget is in the reserve band; deferring low-priority request`);
+    this.name = "BudgetReserveError";
+    this.resource = resource;
+    this.response = { headers: { "x-ratelimit-remaining": "0" } };
+  }
+}
+
 class RateLimitGateError extends Error {
   readonly status = 403;
   readonly response: { headers: Record<string, string> };
@@ -782,6 +812,32 @@ const RATE_LIMIT_AUTO_RETRY_MAX_WAIT_MS = 15_000;
 
 type GitHubRequestOptions = {
   method?: string;
+  url?: string;
+};
+
+export type GitHubConcurrencyClass = "search" | "write" | "default";
+
+/**
+ * Buckets a request for per-endpoint concurrency limiting. Search has a strict
+ * secondary limit; content-creating writes have their own abuse limit.
+ */
+export function classifyGitHubConcurrency(
+  options: { method?: string; url?: string },
+): GitHubConcurrencyClass {
+  if ((options.url ?? "").toLowerCase().includes("/search/")) {
+    return "search";
+  }
+  const method = options.method?.toUpperCase() ?? "GET";
+  if (method === "POST" || method === "PATCH" || method === "PUT" || method === "DELETE") {
+    return "write";
+  }
+  return "default";
+}
+
+const GITHUB_CONCURRENCY_CAPS: Record<GitHubConcurrencyClass, number> = {
+  search: GITHUB_SEARCH_MAX_CONCURRENT,
+  write: GITHUB_WRITE_MAX_CONCURRENT,
+  default: GITHUB_MAX_CONCURRENT_REQUESTS,
 };
 
 type GitHubRateLimitResourceSnapshot = {
@@ -807,6 +863,11 @@ class GitHubRequestThrottle {
   private active = 0;
   private pointReadyAt = 0;
   private contentReadyAt = 0;
+  private readonly activeByClass: Record<GitHubConcurrencyClass, number> = {
+    search: 0,
+    write: 0,
+    default: 0,
+  };
   private readonly queue: Array<QueuedGitHubRequest<unknown>> = [];
 
   schedule<T>(options: GitHubRequestOptions, run: () => Promise<T>): Promise<T> {
@@ -822,11 +883,20 @@ class GitHubRequestThrottle {
   }
 
   private drain(): void {
-    while (this.active < GITHUB_MAX_CONCURRENT_REQUESTS && this.queue.length > 0) {
-      const item = this.queue.shift();
-      if (!item) return;
+    while (this.active < GITHUB_MAX_CONCURRENT_REQUESTS) {
+      // Pick the first queued request whose endpoint class is below its cap.
+      // Skipping a capped class keeps a search burst from blocking the queue.
+      const index = this.queue.findIndex((item) => {
+        const cls = classifyGitHubConcurrency(item.options);
+        return this.activeByClass[cls] < GITHUB_CONCURRENCY_CAPS[cls];
+      });
+      if (index === -1) break;
+
+      const [item] = this.queue.splice(index, 1);
+      const cls = classifyGitHubConcurrency(item.options);
 
       this.active += 1;
+      this.activeByClass[cls] += 1;
       const delayMs = this.reserveDelay(item.options);
       setTimeout(() => {
         item.run()
@@ -834,6 +904,7 @@ class GitHubRequestThrottle {
           .catch(item.reject)
           .finally(() => {
             this.active -= 1;
+            this.activeByClass[cls] -= 1;
             this.drain();
           });
       }, delayMs);
@@ -942,6 +1013,16 @@ function attachRateLimitHook(
       throw new RateLimitGateError(resourceState.resetAt, requestResource);
     }
 
+    // Hold a reserve of the core REST and GraphQL budgets for high-priority
+    // work. Search has its own concurrency cap and is not budget-reserved.
+    if (
+      (requestResource === "core" || requestResource === "graphql")
+      && getRequestPriority() === "low"
+      && isResourceBudgetBelowReserve(requestResource)
+    ) {
+      throw new BudgetReserveError(requestResource);
+    }
+
     const dispatch = async (): Promise<ReturnType<typeof request>> => {
       const response = await request(options);
       const headerResourceRaw = typeof response.headers?.["x-ratelimit-resource"] === "string"
@@ -952,6 +1033,13 @@ function attachRateLimitHook(
         : requestResource;
       const remainingRaw = response.headers?.["x-ratelimit-remaining"];
       const remaining = typeof remainingRaw === "string" ? Number.parseInt(remainingRaw, 10) : Number.NaN;
+      if (responseResource === "core" || responseResource === "graphql") {
+        const limitRaw = response.headers?.["x-ratelimit-limit"];
+        const limit = typeof limitRaw === "string" ? Number.parseInt(limitRaw, 10) : Number.NaN;
+        if (Number.isFinite(remaining) && Number.isFinite(limit)) {
+          recordResourceBudget(responseResource, remaining, limit);
+        }
+      }
       if (Number.isFinite(remaining) && remaining > 0) {
         clearRateLimited(responseResource);
       }
@@ -2017,22 +2105,11 @@ export async function fetchFeedbackItemsForPR(
   return combined;
 }
 
-export async function listOpenPullsForRepo(
-  octokit: Octokit,
-  repo: ParsedRepoSlug,
-): Promise<GitHubPullSummary[]> {
-  const pulls = await withGitHubErrorHandling("open pull requests", repo, () => octokit.paginate(octokit.pulls.list, {
-    owner: repo.owner,
-    repo: repo.repo,
-    state: "open",
-    sort: "updated",
-    direction: "desc",
-    per_page: 100,
-  }));
+type GitHubPullListItem = Awaited<ReturnType<Octokit["pulls"]["list"]>>["data"][number];
 
-  return pulls.map((pull) => {
-    const body = typeof pull.body === "string" ? pull.body : null;
-    return {
+function mapPullToSummary(pull: GitHubPullListItem, repo: ParsedRepoSlug): GitHubPullSummary {
+  const body = typeof pull.body === "string" ? pull.body : null;
+  return {
     number: pull.number,
     title: pull.title || `PR #${pull.number}`,
     body,
@@ -2049,6 +2126,78 @@ export async function listOpenPullsForRepo(
     baseRef: pull.base?.ref || pull.base?.repo?.default_branch || "",
     baseSha: pull.base?.sha || "",
     mergeable: null,
+  };
+}
+
+export async function listOpenPullsForRepo(
+  octokit: Octokit,
+  repo: ParsedRepoSlug,
+): Promise<GitHubPullSummary[]> {
+  const pulls = await withGitHubErrorHandling("open pull requests", repo, () => octokit.paginate(octokit.pulls.list, {
+    owner: repo.owner,
+    repo: repo.repo,
+    state: "open",
+    sort: "updated",
+    direction: "desc",
+    per_page: 100,
+  }));
+
+  return pulls.map((pull) => mapPullToSummary(pull, repo));
+}
+
+export type ConditionalPullList =
+  | { notModified: true }
+  | { notModified: false; etag: string | null; pulls: GitHubPullSummary[] };
+
+/**
+ * Conditional GET of a repo's open pull requests. Page 1 carries an
+ * `If-None-Match`; a 304 means no PR's `updated_at` changed since `cachedEtag`
+ * and costs no primary rate-limit budget. Note a 304 does *not* imply CI
+ * check-runs are unchanged — those do not bump `updated_at` — so callers must
+ * still poll CI separately.
+ */
+export async function listOpenPullsForRepoConditional(
+  octokit: Octokit,
+  repo: ParsedRepoSlug,
+  cachedEtag: string | null,
+): Promise<ConditionalPullList> {
+  return withGitHubErrorHandling("open pull requests", repo, async () => {
+    const perPage = 100;
+    const collected: GitHubPullListItem[] = [];
+    let firstPageEtag: string | null = null;
+
+    for (let page = 1; ; page += 1) {
+      let response;
+      try {
+        response = await octokit.pulls.list({
+          owner: repo.owner,
+          repo: repo.repo,
+          state: "open",
+          sort: "updated",
+          direction: "desc",
+          per_page: perPage,
+          page,
+          ...(page === 1 && cachedEtag ? { headers: { "if-none-match": cachedEtag } } : {}),
+        });
+      } catch (error) {
+        if (page === 1 && (error as { status?: number } | undefined)?.status === 304) {
+          return { notModified: true };
+        }
+        throw error;
+      }
+
+      if (page === 1) {
+        const etag = response.headers?.etag;
+        firstPageEtag = typeof etag === "string" ? etag : null;
+      }
+      collected.push(...response.data);
+      if (response.data.length < perPage) break;
+    }
+
+    return {
+      notModified: false,
+      etag: firstPageEtag,
+      pulls: collected.map((pull) => mapPullToSummary(pull, repo)),
     };
   });
 }
@@ -2152,6 +2301,48 @@ export async function listOpenIssuesForRepo(
   }
   const items = collected.slice(options.offset, options.offset + options.limit);
   return { items, hasMore };
+}
+
+export type RepoIssuesProbeResult =
+  | { notModified: true }
+  | { notModified: false; etag: string | null };
+
+/**
+ * Conditional GET of a repo's open-issue list (page 1, sorted by `updated`).
+ * A 304 means no issue has changed since `cachedEtag` was stored, so the
+ * caller can skip the whole sweep. 304 responses do not decrement the
+ * primary REST rate limit.
+ */
+export async function probeRepoIssuesChanged(
+  octokit: Octokit,
+  repo: ParsedRepoSlug,
+  cachedEtag: string | null,
+): Promise<RepoIssuesProbeResult> {
+  if (typeof octokit.issues?.listForRepo !== "function") {
+    // Mocked/partial Octokit (tests) — can't probe, treat as changed.
+    return { notModified: false, etag: null };
+  }
+  return withGitHubErrorHandling("open issues", repo, async () => {
+    try {
+      const response = await octokit.issues.listForRepo({
+        owner: repo.owner,
+        repo: repo.repo,
+        state: "open",
+        sort: "updated",
+        direction: "desc",
+        per_page: 100,
+        page: 1,
+        ...(cachedEtag ? { headers: { "if-none-match": cachedEtag } } : {}),
+      });
+      const etag = response.headers?.etag;
+      return { notModified: false, etag: typeof etag === "string" ? etag : null };
+    } catch (error) {
+      if ((error as { status?: number } | undefined)?.status === 304) {
+        return { notModified: true };
+      }
+      throw error;
+    }
+  });
 }
 
 export async function listOpenLinkedPullRequestsForIssue(

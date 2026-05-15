@@ -46,6 +46,7 @@ import { buildActivityPayload, readActivityPayload } from "./activityPayload";
 import { createWatcherScheduler, type WatcherScheduler } from "./watcherScheduler";
 import { startLogsRetentionJob, type RetentionJobHandle } from "./logsRetention";
 import { getRateLimitState } from "./rateLimitState";
+import { runWithRequestPriority } from "./requestPriority";
 import { ReleaseManager } from "./releaseManager";
 import type { ReleaseAgentPullSummary } from "./releaseAgent";
 import { DeploymentHealingManager } from "./deploymentHealingManager";
@@ -67,6 +68,7 @@ import {
   type MergedPRSummary,
   parsePRUrl,
   parseRepoSlug,
+  probeRepoIssuesChanged,
   addLabelsToIssue,
   removeLabelsFromIssue,
   resolveNextSemverTag,
@@ -82,6 +84,19 @@ export class AppRuntimeError extends Error {
   }
 }
 
+const WATCHER_COLD_START_MIN_DELAY_MS = 15_000;
+const WATCHER_COLD_START_MAX_DELAY_MS = 45_000;
+
+/**
+ * The first watcher tick after boot runs at a random offset so several
+ * instances restarting together (a deploy) don't sync GitHub in lockstep,
+ * and so boot isn't competing with the dashboard's initial data load.
+ */
+export function pickWatcherColdStartDelayMs(random: () => number = Math.random): number {
+  const span = WATCHER_COLD_START_MAX_DELAY_MS - WATCHER_COLD_START_MIN_DELAY_MS;
+  return WATCHER_COLD_START_MIN_DELAY_MS + Math.floor(random() * (span + 1));
+}
+
 export type AppRuntimeDependencies = {
   storage?: IStorage;
   backgroundJobQueue?: BackgroundJobQueue;
@@ -90,6 +105,7 @@ export type AppRuntimeDependencies = {
   deploymentHealingManager?: DeploymentHealingManager;
   babysitter?: PRBabysitter;
   watcherScheduler?: WatcherScheduler;
+  buildOctokitFn?: typeof buildOctokit;
   startBackgroundServices?: boolean;
   startWatcher?: boolean;
 };
@@ -224,6 +240,10 @@ const AUTO_WORK_READY_LABELS = new Set([
 const DEFAULT_ISSUES_PAGE_SIZE = 100;
 const MAX_ISSUES_PAGE_SIZE = 100;
 const MAX_AUTO_ISSUE_SWEEP_PAGES = 50;
+// After a repo's sweep comes back unchanged, defer its next sweep by this long
+// so quiet repos yield watcher slots and rate-limit budget to active ones. Any
+// observed change clears the cooldown and the repo returns to every-tick.
+const QUIET_REPO_COOLDOWN_MS = 10 * 60_000;
 const AUTO_WORK_BLOCKED_LABELS = new Set([
   "blocked",
   "question",
@@ -690,6 +710,7 @@ export function mapMergedPullsToReleaseSummaries(pulls: MergedPRSummary[]): Rele
 
 export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): AppRuntime {
   const storage = dependencies.storage ?? getDefaultStorage();
+  const buildOctokitImpl = dependencies.buildOctokitFn ?? buildOctokit;
   const events = new EventEmitter();
   const socialPostJobs = new Map<string, ReleaseSocialPost>();
   const backgroundJobQueue = dependencies.backgroundJobQueue ?? new BackgroundJobQueue(storage);
@@ -803,6 +824,7 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
   });
 
   let watcherTimer: NodeJS.Timeout | null = null;
+  let watcherColdStartTimer: NodeJS.Timeout | null = null;
   let watcherIntervalMs = 0;
   let logsRetentionJob: RetentionJobHandle | null = null;
   const watcherScheduler = dependencies.watcherScheduler ?? createWatcherScheduler(
@@ -834,7 +856,10 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
         "runtime:1",
         buildBackgroundJobDedupeKey("sync_watched_repos", "runtime:1"),
       );
-      await syncStoredIssuesStep();
+      // The routine issue sweep is low priority — it yields core REST budget
+      // to interactive routes and active babysitter sessions. A manual
+      // syncRepos() stays high priority.
+      await runWithRequestPriority("low", () => syncStoredIssuesStep());
       await queueAutomaticIssueWorkInternal();
     },
     (error) => {
@@ -859,7 +884,6 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
     lastSyncError: string | null;
   }>();
   const issueRepoSyncOffsets = new Map<string, number>();
-  const issueRepoBackoffUntilMs = new Map<string, number>();
   let issueRepoCursor = 0;
 
   function markIssueSyncAttempt(targetId: string): string {
@@ -1202,22 +1226,55 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
   async function syncStoredIssuesStep(options?: { fullSweep?: boolean }): Promise<void> {
     const config = await storage.getConfig();
     if (config.watchedRepos.length === 0) return;
-    const octokit = await buildOctokit(config);
+    const octokit = await buildOctokitImpl(config);
     const nowMs = Date.now();
     const repoCount = config.watchedRepos.length;
     const candidates = options?.fullSweep
       ? config.watchedRepos
       : Array.from({ length: repoCount }).map((_, i) => config.watchedRepos[(issueRepoCursor + i) % repoCount]).filter(Boolean) as string[];
 
+    // Backoff state is persisted, so a restart does not re-hammer a repo whose
+    // issue sweep was failing before the process went down.
+    const issueBackoffUntilMs = new Map<string, number>();
+    for (const syncState of await storage.getRepoSyncStates("issues")) {
+      if (syncState.nextEligibleAt) {
+        issueBackoffUntilMs.set(syncState.repo, new Date(syncState.nextEligibleAt).getTime());
+      }
+    }
+
     for (const repoSlug of candidates) {
       try {
-        const backoffUntilMs = issueRepoBackoffUntilMs.get(repoSlug) ?? 0;
+        const backoffUntilMs = issueBackoffUntilMs.get(repoSlug) ?? 0;
         if (backoffUntilMs > nowMs) continue;
         const parsed = parseRepoSlug(repoSlug);
         if (!parsed) continue;
         const limit = MAX_ISSUES_PAGE_SIZE;
         const loops = options?.fullSweep ? MAX_AUTO_ISSUE_SWEEP_PAGES : 1;
         let nextOffset = options?.fullSweep ? 0 : (issueRepoSyncOffsets.get(repoSlug) ?? 0);
+
+        // At the start of a repo's sweep, a conditional GET tells us whether
+        // anything changed. A 304 costs no primary rate-limit budget, so on an
+        // unchanged repo we skip the whole sweep instead of paginating it.
+        const etagKey = `issues:open:${repoSlug}`;
+        let pendingEtag: string | null = null;
+        if (nextOffset === 0) {
+          const cachedEtag = (await storage.getGithubEtag(etagKey)) ?? null;
+          const probe = await probeRepoIssuesChanged(octokit, parsed, cachedEtag);
+          if (probe.notModified) {
+            // A 304 confirms the repo's issue list is current. Record the
+            // freshness check and defer the next sweep — a quiet repo does not
+            // need an every-tick slot.
+            await storage.upsertRepoSyncState(repoSlug, "issues", {
+              lastSyncedAt: new Date().toISOString(),
+              nextEligibleAt: new Date(Date.now() + QUIET_REPO_COOLDOWN_MS).toISOString(),
+            });
+            const index = config.watchedRepos.indexOf(repoSlug);
+            issueRepoCursor = index === -1 ? issueRepoCursor : (index + 1) % repoCount;
+            continue;
+          }
+          pendingEtag = probe.etag;
+        }
+
         let didWork = false;
         for (let i = 0; i < loops; i += 1) {
           const page = await listOpenIssuesForRepo(octokit, parsed, { limit, offset: nextOffset });
@@ -1232,13 +1289,23 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
           if (!page.hasMore || !options?.fullSweep) break;
         }
         if (didWork) {
-          issueRepoBackoffUntilMs.delete(repoSlug);
+          await storage.upsertRepoSyncState(repoSlug, "issues", {
+            lastSyncedAt: new Date().toISOString(),
+            nextEligibleAt: null,
+          });
+          // Persist the etag only after a successful sync so a failure mid-sweep
+          // re-probes and re-syncs next tick instead of 304-skipping stale data.
+          if (pendingEtag) {
+            await storage.setGithubEtag(etagKey, pendingEtag);
+          }
           const index = config.watchedRepos.indexOf(repoSlug);
           issueRepoCursor = index === -1 ? issueRepoCursor : (index + 1) % repoCount;
           if (!options?.fullSweep) return;
         }
       } catch (error) {
-        issueRepoBackoffUntilMs.set(repoSlug, Date.now() + 60_000);
+        await storage.upsertRepoSyncState(repoSlug, "issues", {
+          nextEligibleAt: new Date(Date.now() + 60_000).toISOString(),
+        });
         log.warn(
           { err: error instanceof Error ? error.message : String(error), repo: repoSlug },
           "Issue sync step failed; backing off",
@@ -1812,7 +1879,10 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       if (startWatcher) {
         await refreshWatcherSchedule();
         void babysitter.resumeInterruptedRuns();
-        void runWatcher();
+        watcherColdStartTimer = setTimeout(() => {
+          watcherColdStartTimer = null;
+          void runWatcher();
+        }, pickWatcherColdStartDelayMs());
       }
     },
 
@@ -1822,6 +1892,10 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       if (logsRetentionJob) {
         logsRetentionJob.stop();
         logsRetentionJob = null;
+      }
+      if (watcherColdStartTimer) {
+        clearTimeout(watcherColdStartTimer);
+        watcherColdStartTimer = null;
       }
       if (watcherTimer) {
         clearInterval(watcherTimer);

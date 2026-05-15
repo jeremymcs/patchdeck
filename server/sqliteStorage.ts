@@ -60,7 +60,7 @@ import {
   createReleaseRun,
   createSocialChangelog,
 } from "@shared/models";
-import type { IStorage, StoredIssueRecord } from "./storage";
+import type { IStorage, RepoSyncKind, RepoSyncState, StoredIssueRecord } from "./storage";
 import { getCodeFactoryPaths } from "./paths";
 import { DEFAULT_CONFIG } from "./defaultConfig";
 import { appendLogFile } from "./logFiles";
@@ -880,6 +880,20 @@ export class SqliteStorage implements IStorage {
         updated_at TEXT NOT NULL,
         completed_at TEXT,
         UNIQUE(repo, merge_sha)
+      );
+
+      CREATE TABLE IF NOT EXISTS github_etags (
+        url TEXT PRIMARY KEY,
+        etag TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS repo_sync_state (
+        repo TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        last_synced_at TEXT,
+        next_eligible_at TEXT,
+        PRIMARY KEY(repo, kind)
       );
 
       CREATE INDEX IF NOT EXISTS idx_feedback_items_pr_id ON feedback_items(pr_id);
@@ -2271,6 +2285,74 @@ export class SqliteStorage implements IStorage {
   async markSyncedIssueWorked(repo: string, number: number): Promise<void> {
     this.withWriteTransaction(() => {
       this.run("UPDATE synced_issues SET is_worked = 1 WHERE repo = ? AND issue_number = ?", repo, number);
+    });
+  }
+
+  async getGithubEtag(url: string): Promise<string | undefined> {
+    const row = this.get<{ etag: string }>("SELECT etag FROM github_etags WHERE url = ?", url);
+    return row?.etag;
+  }
+
+  async setGithubEtag(url: string, etag: string): Promise<void> {
+    this.withWriteTransaction(() => {
+      this.run(
+        `INSERT INTO github_etags (url, etag, updated_at) VALUES (?, ?, ?)
+         ON CONFLICT(url) DO UPDATE SET etag = excluded.etag, updated_at = excluded.updated_at`,
+        url,
+        etag,
+        new Date().toISOString(),
+      );
+    });
+  }
+
+  async clearGithubEtag(url: string): Promise<void> {
+    this.withWriteTransaction(() => {
+      this.run("DELETE FROM github_etags WHERE url = ?", url);
+    });
+  }
+
+  async getRepoSyncStates(kind: RepoSyncKind): Promise<RepoSyncState[]> {
+    const rows = this.all<{
+      repo: string;
+      kind: string;
+      last_synced_at: string | null;
+      next_eligible_at: string | null;
+    }>("SELECT repo, kind, last_synced_at, next_eligible_at FROM repo_sync_state WHERE kind = ?", kind);
+    return rows.map((row) => ({
+      repo: row.repo,
+      kind: row.kind as RepoSyncKind,
+      lastSyncedAt: row.last_synced_at,
+      nextEligibleAt: row.next_eligible_at,
+    }));
+  }
+
+  async upsertRepoSyncState(
+    repo: string,
+    kind: RepoSyncKind,
+    updates: { lastSyncedAt?: string | null; nextEligibleAt?: string | null },
+  ): Promise<void> {
+    this.withWriteTransaction(() => {
+      const existing = this.get<{ last_synced_at: string | null; next_eligible_at: string | null }>(
+        "SELECT last_synced_at, next_eligible_at FROM repo_sync_state WHERE repo = ? AND kind = ?",
+        repo,
+        kind,
+      );
+      const lastSyncedAt = "lastSyncedAt" in updates
+        ? updates.lastSyncedAt ?? null
+        : existing?.last_synced_at ?? null;
+      const nextEligibleAt = "nextEligibleAt" in updates
+        ? updates.nextEligibleAt ?? null
+        : existing?.next_eligible_at ?? null;
+      this.run(
+        `INSERT INTO repo_sync_state (repo, kind, last_synced_at, next_eligible_at) VALUES (?, ?, ?, ?)
+         ON CONFLICT(repo, kind) DO UPDATE SET
+           last_synced_at = excluded.last_synced_at,
+           next_eligible_at = excluded.next_eligible_at`,
+        repo,
+        kind,
+        lastSyncedAt,
+        nextEligibleAt,
+      );
     });
   }
 
