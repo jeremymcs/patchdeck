@@ -69,6 +69,27 @@ type GitHubRateLimitState = {
   resetAt: string | null;
 };
 
+type GitHubTokenTestResult = {
+  index: number;
+  token: string;
+  status: "ok" | "throttled" | "error";
+  login: string | null;
+  remaining: number | null;
+  resetAt: string | null;
+  message: string;
+  repoProbe: string | null;
+};
+
+type GitHubTokenTestResponse = {
+  testedAt: string;
+  results: GitHubTokenTestResult[];
+};
+
+type GitHubTokenTestLog = {
+  timestamp: string;
+  lines: string[];
+};
+
 type WatchScope = (typeof WATCH_SCOPE_OPTIONS)[number]["value"];
 type IssueWorkMode = (typeof ISSUE_WORK_MODE_OPTIONS)[number]["value"];
 type RepoAgentOption = (typeof REPO_AGENT_OPTIONS)[number]["value"];
@@ -322,6 +343,7 @@ export default function Settings() {
   const [addUrl, setAddUrl] = useState("");
   const [addRepo, setAddRepo] = useState("");
   const [watchScope, setWatchScope] = useState<WatchScope>("mine");
+  const [tokenTestLogs, setTokenTestLogs] = useState<GitHubTokenTestLog[]>([]);
   const githubTokens = config?.githubTokens ?? (config?.githubToken ? [config.githubToken] : []);
   const githubCommentAppName = config?.githubCommentAppName ?? "patchdeck";
 
@@ -428,6 +450,45 @@ export default function Settings() {
     },
     onError: (error) => {
       toast({ variant: "destructive", description: `Could not update repository settings: ${error.message}` });
+    },
+  });
+
+  const testGitHubTokensMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/github-tokens/test");
+      return res.json() as Promise<GitHubTokenTestResponse>;
+    },
+    onSuccess: (result) => {
+      const lines = result.results.length === 0
+        ? ["No configured GitHub tokens to test."]
+        : result.results.map((entry) => {
+          const remaining = entry.remaining === null ? "?" : String(entry.remaining);
+          const resetAt = entry.resetAt ? new Date(entry.resetAt).toLocaleTimeString("en-US") : "unknown";
+          const login = entry.login ? `login=${entry.login}` : "login=unknown";
+          const repoProbe = entry.repoProbe ? `probe=${entry.repoProbe}` : "probe=none";
+          return `#${entry.index} ${entry.token} ${entry.status.toUpperCase()} ${login} remaining=${remaining} reset=${resetAt} ${repoProbe} :: ${entry.message}`;
+        });
+
+      setTokenTestLogs((previous) => [
+        {
+          timestamp: result.testedAt,
+          lines,
+        },
+        ...previous,
+      ].slice(0, 12));
+
+      toast({ description: "GitHub key test complete." });
+    },
+    onError: (error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      setTokenTestLogs((previous) => [
+        {
+          timestamp: new Date().toISOString(),
+          lines: [`ERROR ${message}`],
+        },
+        ...previous,
+      ].slice(0, 12));
+      toast({ variant: "destructive", description: `GitHub key test failed: ${message}` });
     },
   });
 
@@ -1303,6 +1364,37 @@ export default function Settings() {
                     </button>
                   </div>
                 ) : null}
+
+                <div className="mt-1 flex flex-col gap-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-[11px] text-muted-foreground">
+                      Run a direct GitHub auth and rate-limit check for each configured token.
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => testGitHubTokensMutation.mutate()}
+                      disabled={testGitHubTokensMutation.isPending}
+                      data-testid="button-test-github-tokens"
+                      className="border border-border px-2 py-1 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
+                    >
+                      {testGitHubTokensMutation.isPending ? "Testing..." : "Test keys"}
+                    </button>
+                  </div>
+                  <div className="max-h-52 overflow-y-auto border border-border/80 bg-background/40 p-2 font-mono text-[11px] leading-relaxed">
+                    {tokenTestLogs.length === 0 ? (
+                      <div className="text-muted-foreground">No key tests run yet.</div>
+                    ) : (
+                      tokenTestLogs.map((entry, index) => (
+                        <div key={`${entry.timestamp}-${index}`} className="mb-2 last:mb-0">
+                          <div className="text-muted-foreground">[{new Date(entry.timestamp).toLocaleString()}]</div>
+                          {entry.lines.map((line, lineIndex) => (
+                            <div key={`${entry.timestamp}-${index}-${lineIndex}`}>{line}</div>
+                          ))}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
               </div>
 
               <div className="flex flex-col gap-2">

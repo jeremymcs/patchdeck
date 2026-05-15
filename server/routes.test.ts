@@ -238,6 +238,62 @@ test("GET /api/github-rate-limit reports the current reset time", async () => {
   }
 });
 
+test("POST /api/github-tokens/test returns per-token diagnostics", async () => {
+  const harness = await createHarness(new MemStorage(), {
+    testGitHubTokensFn: async () => ({
+      testedAt: "2026-05-14T23:55:00.000Z",
+      results: [
+        {
+          index: 1,
+          token: "***1234",
+          status: "ok",
+          login: "octocat",
+          remaining: 4999,
+          resetAt: "2026-05-15T00:55:00.000Z",
+          message: "Authenticated and can access acme/widgets",
+          repoProbe: "acme/widgets",
+        },
+        {
+          index: 2,
+          token: "***9999",
+          status: "throttled",
+          login: null,
+          remaining: 0,
+          resetAt: "2026-05-15T00:01:00.000Z",
+          message: "GitHub returned 403: API rate limit exceeded",
+          repoProbe: "acme/widgets",
+        },
+      ],
+    }),
+  });
+
+  try {
+    await harness.storage.updateConfig({
+      githubTokens: ["ghs_alpha1234", "ghs_beta9999"],
+    });
+    await harness.storage.updateRepoSettings("acme/widgets", { ownPrsOnly: true });
+
+    const response = await fetch(`${harness.baseUrl}/api/github-tokens/test`, {
+      method: "POST",
+    });
+
+    assert.equal(response.status, 200);
+    const body = await response.json() as {
+      testedAt: string;
+      results: Array<{ token: string; status: string; remaining: number | null }>;
+    };
+
+    assert.equal(body.testedAt, "2026-05-14T23:55:00.000Z");
+    assert.equal(body.results.length, 2);
+    assert.equal(body.results[0]?.token, "***1234");
+    assert.equal(body.results[0]?.status, "ok");
+    assert.equal(body.results[1]?.token, "***9999");
+    assert.equal(body.results[1]?.status, "throttled");
+  } finally {
+    await harness.close();
+  }
+});
+
 test("GET/PATCH /api/config masks and preserves remote access password", async () => {
   const harness = await createHarness();
 
