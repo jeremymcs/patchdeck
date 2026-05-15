@@ -7,6 +7,7 @@ import {
   issueWorkAttemptCountFromJobs,
   issueWorkPrFromLogs,
   mapMergedPullsToReleaseSummaries,
+  pickWatcherColdStartDelayMs,
   planAutomaticIssueQueueActions,
   type PlanAutomaticIssueQueueInput,
 } from "./appRuntime";
@@ -639,4 +640,30 @@ test("syncRepos syncs issues and persists the new etag when the issue list chang
     'W/"issues-v1"',
     "a successful sweep should persist the fresh etag for next tick",
   );
+});
+
+test("pickWatcherColdStartDelayMs stays within the 15-45s cold-start window", () => {
+  assert.equal(pickWatcherColdStartDelayMs(() => 0), 15_000);
+  assert.equal(pickWatcherColdStartDelayMs(() => 0.5), 30_000);
+  assert.equal(pickWatcherColdStartDelayMs(() => 0.999999999), 45_000);
+  for (let i = 0; i < 200; i += 1) {
+    const delay = pickWatcherColdStartDelayMs();
+    assert.ok(delay >= 15_000 && delay <= 45_000, `delay ${delay} out of range`);
+  }
+});
+
+test("start() defers the first watcher tick instead of firing it during start", async () => {
+  let watcherRuns = 0;
+  const runtime = createAppRuntime({
+    storage: new MemStorage(),
+    startBackgroundServices: false,
+    startWatcher: true,
+    babysitter: { resumeInterruptedRuns: async () => {} } as never,
+    watcherScheduler: { run: async () => { watcherRuns += 1; } } as never,
+  });
+
+  await runtime.start();
+
+  assert.equal(watcherRuns, 0, "the first watcher tick must be deferred, not run during start()");
+  runtime.stop();
 });

@@ -83,6 +83,19 @@ export class AppRuntimeError extends Error {
   }
 }
 
+const WATCHER_COLD_START_MIN_DELAY_MS = 15_000;
+const WATCHER_COLD_START_MAX_DELAY_MS = 45_000;
+
+/**
+ * The first watcher tick after boot runs at a random offset so several
+ * instances restarting together (a deploy) don't sync GitHub in lockstep,
+ * and so boot isn't competing with the dashboard's initial data load.
+ */
+export function pickWatcherColdStartDelayMs(random: () => number = Math.random): number {
+  const span = WATCHER_COLD_START_MAX_DELAY_MS - WATCHER_COLD_START_MIN_DELAY_MS;
+  return WATCHER_COLD_START_MIN_DELAY_MS + Math.floor(random() * (span + 1));
+}
+
 export type AppRuntimeDependencies = {
   storage?: IStorage;
   backgroundJobQueue?: BackgroundJobQueue;
@@ -806,6 +819,7 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
   });
 
   let watcherTimer: NodeJS.Timeout | null = null;
+  let watcherColdStartTimer: NodeJS.Timeout | null = null;
   let watcherIntervalMs = 0;
   let logsRetentionJob: RetentionJobHandle | null = null;
   const watcherScheduler = dependencies.watcherScheduler ?? createWatcherScheduler(
@@ -1838,7 +1852,10 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       if (startWatcher) {
         await refreshWatcherSchedule();
         void babysitter.resumeInterruptedRuns();
-        void runWatcher();
+        watcherColdStartTimer = setTimeout(() => {
+          watcherColdStartTimer = null;
+          void runWatcher();
+        }, pickWatcherColdStartDelayMs());
       }
     },
 
@@ -1848,6 +1865,10 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       if (logsRetentionJob) {
         logsRetentionJob.stop();
         logsRetentionJob = null;
+      }
+      if (watcherColdStartTimer) {
+        clearTimeout(watcherColdStartTimer);
+        watcherColdStartTimer = null;
       }
       if (watcherTimer) {
         clearInterval(watcherTimer);
