@@ -763,6 +763,11 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
         return;
       }
 
+      const config = await storage.getConfig();
+      if (config.autoPrs === false && config.autoIssues === false) {
+        return;
+      }
+
       const rateLimit = getRateLimitState();
       if (rateLimit.limited && rateLimit.resetAt) {
         log.info(
