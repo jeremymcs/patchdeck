@@ -268,11 +268,22 @@ export async function registerRoutes(
 
   app.get("/api/github-rate-limit", async (_req, res) => {
     const state = getRateLimitState();
+    const serializeResource = (snapshot: typeof state.resources[keyof typeof state.resources]) => ({
+      limited: snapshot.limited,
+      resetAt: snapshot.resetAt ? snapshot.resetAt.toISOString() : null,
+      recentlyLimited: snapshot.recentlyLimited,
+      lastLimitedAt: snapshot.lastLimitedAt ? snapshot.lastLimitedAt.toISOString() : null,
+    });
     res.json({
       limited: state.limited,
       resetAt: state.resetAt ? state.resetAt.toISOString() : null,
       recentlyLimited: state.recentlyLimited,
       lastLimitedAt: state.lastLimitedAt ? state.lastLimitedAt.toISOString() : null,
+      resources: {
+        core: serializeResource(state.resources.core),
+        graphql: serializeResource(state.resources.graphql),
+        search: serializeResource(state.resources.search),
+      },
     });
   });
 

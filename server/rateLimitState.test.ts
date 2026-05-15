@@ -1,6 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { clearRateLimitStateForTests, clearRateLimited, getRateLimitState, markRateLimited } from "./rateLimitState";
+import {
+  clearRateLimitStateForTests,
+  clearRateLimited,
+  deriveRateLimitResource,
+  getRateLimitState,
+  markRateLimited,
+} from "./rateLimitState";
 
 test.beforeEach(() => clearRateLimitStateForTests());
 
@@ -53,4 +59,55 @@ test("clearRateLimited resets the gate", () => {
   clearRateLimited();
   assert.equal(getRateLimitState().limited, false);
   assert.equal(getRateLimitState().recentlyLimited, true);
+});
+
+test("deriveRateLimitResource routes URLs and headers to the right bucket", () => {
+  assert.equal(deriveRateLimitResource("POST /graphql"), "graphql");
+  assert.equal(deriveRateLimitResource("/graphql"), "graphql");
+  assert.equal(deriveRateLimitResource("graphql"), "graphql");
+  assert.equal(deriveRateLimitResource("GET /search/issues"), "search");
+  assert.equal(deriveRateLimitResource("/search/code"), "search");
+  assert.equal(deriveRateLimitResource("search"), "search");
+  assert.equal(deriveRateLimitResource("GET /repos/foo/bar/pulls"), "core");
+  assert.equal(deriveRateLimitResource(undefined), "core");
+  assert.equal(deriveRateLimitResource(""), "core");
+});
+
+test("limiting graphql does not gate core, and vice versa", () => {
+  const reset = Math.floor(Date.now() / 1000) + 600;
+  markRateLimited(reset, "graphql");
+
+  const coreState = getRateLimitState("core");
+  assert.equal(coreState.limited, false, "core should still be open");
+
+  const graphqlState = getRateLimitState("graphql");
+  assert.equal(graphqlState.limited, true);
+  assert.equal(graphqlState.resetAt!.getTime(), reset * 1000);
+
+  const aggregate = getRateLimitState();
+  assert.equal(aggregate.limited, true, "aggregate is limited if any resource is");
+  assert.equal(aggregate.resources.core.limited, false);
+  assert.equal(aggregate.resources.graphql.limited, true);
+  assert.equal(aggregate.resources.search.limited, false);
+});
+
+test("clearing one resource does not clear the others", () => {
+  const reset = Math.floor(Date.now() / 1000) + 600;
+  markRateLimited(reset, "core");
+  markRateLimited(reset, "search");
+
+  clearRateLimited("core");
+
+  assert.equal(getRateLimitState("core").limited, false);
+  assert.equal(getRateLimitState("search").limited, true);
+});
+
+test("aggregate resetAt is the latest among limited resources", () => {
+  const soon = Math.floor(Date.now() / 1000) + 300;
+  const later = Math.floor(Date.now() / 1000) + 900;
+  markRateLimited(soon, "core");
+  markRateLimited(later, "graphql");
+
+  const aggregate = getRateLimitState();
+  assert.equal(aggregate.resetAt!.getTime(), later * 1000);
 });

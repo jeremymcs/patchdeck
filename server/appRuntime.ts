@@ -817,14 +817,14 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
         return;
       }
 
-      const rateLimit = getRateLimitState();
+      const rateLimit = getRateLimitState("core");
       if (rateLimit.limited && rateLimit.resetAt) {
         log.info(
           {
             resetAt: rateLimit.resetAt.toISOString(),
             secondsUntilReset: Math.ceil((rateLimit.resetAt.getTime() - Date.now()) / 1000),
           },
-          "Skipping watcher tick: GitHub rate limit gate active",
+          "Skipping watcher tick: GitHub core rate limit gate active",
         );
         return;
       }

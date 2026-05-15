@@ -227,6 +227,53 @@ test("octokit hook does not auto-retry when the Retry-After wait exceeds the thr
   assert.ok(state.resetAt!.getTime() - Date.now() > 60_000);
 });
 
+test("octokit hook gates only the resource that 403d, leaving others free", async () => {
+  const resetUnixSeconds = Math.floor(Date.now() / 1000) + 600;
+  let graphqlCalls = 0;
+  let restCalls = 0;
+  const octokit = await buildOctokit(
+    { ...config, githubToken: "ghp_fake" },
+    {
+      ignoreCache: true,
+      requestFetch: async (input) => {
+        const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+        if (url.includes("/graphql")) {
+          graphqlCalls += 1;
+          return new Response(JSON.stringify({ message: "API rate limit exceeded" }), {
+            status: 403,
+            headers: {
+              "content-type": "application/json",
+              "x-ratelimit-remaining": "0",
+              "x-ratelimit-reset": String(resetUnixSeconds),
+              "x-ratelimit-resource": "graphql",
+            },
+          });
+        }
+        restCalls += 1;
+        return new Response(JSON.stringify({ login: "octo" }), {
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+            "x-ratelimit-remaining": "4999",
+            "x-ratelimit-resource": "core",
+          },
+        });
+      },
+    },
+  );
+
+  await assert.rejects(() => octokit.graphql("query { viewer { login } }"));
+  assert.ok(graphqlCalls >= 1);
+
+  // graphql is gated...
+  assert.equal(getRateLimitState("graphql").limited, true);
+  // ...but core is not, so a REST call still reaches the fake fetch.
+  const ok = await octokit.request("GET /user");
+  assert.equal(ok.data.login, "octo");
+  assert.ok(restCalls >= 1);
+  assert.equal(getRateLimitState("core").limited, false);
+});
+
 test("octokit hook clears the gate on a successful response with remaining > 0", async () => {
   let callIndex = 0;
   const resetUnixSeconds = Math.floor(Date.now() / 1000) + 600;

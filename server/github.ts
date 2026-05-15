@@ -5,7 +5,13 @@ import { runCommand } from "./agentRunner";
 import { normalizeCheckSnapshotsFromRef } from "./ciCheckIngestor";
 import { childLogger } from "./logger";
 import { renderGitHubMarkdown } from "./markdown";
-import { clearRateLimited, getRateLimitState, markRateLimited } from "./rateLimitState";
+import {
+  clearRateLimited,
+  deriveRateLimitResource,
+  getRateLimitState,
+  markRateLimited,
+  type RateLimitResource,
+} from "./rateLimitState";
 
 const octokitLog = childLogger("octokit");
 
@@ -757,13 +763,16 @@ async function withGitHubErrorHandling<T>(
 class RateLimitGateError extends Error {
   readonly status = 403;
   readonly response: { headers: Record<string, string> };
-  constructor(resetAt: Date) {
-    super(`GitHub rate limit gate active until ${resetAt.toISOString()}`);
+  readonly resource: RateLimitResource;
+  constructor(resetAt: Date, resource: RateLimitResource) {
+    super(`GitHub rate limit gate active for ${resource} until ${resetAt.toISOString()}`);
     this.name = "RateLimitGateError";
+    this.resource = resource;
     this.response = {
       headers: {
         "x-ratelimit-remaining": "0",
         "x-ratelimit-reset": String(Math.ceil(resetAt.getTime() / 1000)),
+        "x-ratelimit-resource": resource,
       },
     };
   }
@@ -927,17 +936,24 @@ function attachRateLimitHook(
   resolveRateLimitResetAt?: (resourceHint: string | null) => Promise<Date | null>,
 ): void {
   client.hook.wrap("request", async (request, options) => {
-    const state = getRateLimitState();
-    if (state.limited && state.resetAt) {
-      throw new RateLimitGateError(state.resetAt);
+    const requestResource = deriveRateLimitResource(options.url);
+    const resourceState = getRateLimitState(requestResource);
+    if (resourceState.limited && resourceState.resetAt) {
+      throw new RateLimitGateError(resourceState.resetAt, requestResource);
     }
 
     const dispatch = async (): Promise<ReturnType<typeof request>> => {
       const response = await request(options);
+      const headerResourceRaw = typeof response.headers?.["x-ratelimit-resource"] === "string"
+        ? response.headers["x-ratelimit-resource"]
+        : null;
+      const responseResource = headerResourceRaw
+        ? deriveRateLimitResource(headerResourceRaw)
+        : requestResource;
       const remainingRaw = response.headers?.["x-ratelimit-remaining"];
       const remaining = typeof remainingRaw === "string" ? Number.parseInt(remainingRaw, 10) : Number.NaN;
       if (Number.isFinite(remaining) && remaining > 0) {
-        clearRateLimited();
+        clearRateLimited(responseResource);
       }
       return response;
     };
@@ -955,8 +971,9 @@ function attachRateLimitHook(
           throw error;
         }
 
+        const limitedResource = deriveRateLimitResource(resource ?? options.url);
         const exactResetAt = resolveRateLimitResetAt ? await resolveRateLimitResetAt(resource) : null;
-        const gateAt = markRateLimited(exactResetAt ?? gateUntil ?? undefined);
+        const gateAt = markRateLimited(exactResetAt ?? gateUntil ?? undefined, limitedResource);
         const waitMs = gateAt.getTime() - Date.now();
         if (attempt === 0 && waitMs > 0 && waitMs <= RATE_LIMIT_AUTO_RETRY_MAX_WAIT_MS) {
           attempt += 1;
