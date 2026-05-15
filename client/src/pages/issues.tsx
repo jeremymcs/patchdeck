@@ -1404,6 +1404,32 @@ function IssuesPage() {
                         </>
                       )}
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => workMutation.mutate(selectedIssue)}
+                      disabled={workMutation.isPending || isActiveWorkStatus(selectedIssue.workStatus) || Boolean(runtime?.drainMode) || selectedIssueHasExternalPr}
+                      title={
+                        runtime?.drainMode
+                          ? "Manual issue work is paused by drain mode"
+                          : selectedIssueHasExternalPr
+                            ? "Manual issue work is blocked because this issue already has a linked external PR"
+                            : "Work this issue"
+                      }
+                      data-testid="button-work-issue"
+                      className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-primary bg-primary px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      {workMutation.isPending ? (
+                        <>
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          Working
+                        </>
+                      ) : (
+                        <>
+                          <Wrench className="h-3.5 w-3.5" />
+                          Work issue
+                        </>
+                      )}
+                    </button>
                     {(() => {
                       const isVerifying = verifyingIssueIds.has(selectedIssue.id) || verifyMutation.isPending;
                       return (
@@ -1439,32 +1465,6 @@ function IssuesPage() {
                     </button>
                       );
                     })()}
-                    <button
-                      type="button"
-                      onClick={() => workMutation.mutate(selectedIssue)}
-                      disabled={workMutation.isPending || isActiveWorkStatus(selectedIssue.workStatus) || Boolean(runtime?.drainMode) || selectedIssueHasExternalPr}
-                      title={
-                        runtime?.drainMode
-                          ? "Manual issue work is paused by drain mode"
-                          : selectedIssueHasExternalPr
-                            ? "Manual issue work is blocked because this issue already has a linked external PR"
-                            : "Work this issue"
-                      }
-                      data-testid="button-work-issue"
-                      className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-primary bg-primary px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
-                    >
-                      {workMutation.isPending ? (
-                        <>
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          Working
-                        </>
-                      ) : (
-                        <>
-                          <Wrench className="h-3.5 w-3.5" />
-                          Work issue
-                        </>
-                      )}
-                    </button>
                   </>
                 )}
               />
