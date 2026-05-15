@@ -229,16 +229,23 @@ test("GET /api/github-rate-limit reports the current reset time", async () => {
     const response = await fetch(`${harness.baseUrl}/api/github-rate-limit`);
     assert.equal(response.status, 200);
 
-    const body = await response.json() as {
+    type ResourceBody = {
       limited: boolean;
       resetAt: string | null;
       recentlyLimited: boolean;
       lastLimitedAt: string | null;
     };
+    const body = await response.json() as ResourceBody & {
+      resources: { core: ResourceBody; graphql: ResourceBody; search: ResourceBody };
+    };
     assert.equal(body.limited, true);
     assert.equal(body.resetAt, resetAt.toISOString());
     assert.equal(body.recentlyLimited, true);
     assert.ok(body.lastLimitedAt);
+    assert.equal(body.resources.core.limited, true);
+    assert.equal(body.resources.core.resetAt, resetAt.toISOString());
+    assert.equal(body.resources.graphql.limited, false);
+    assert.equal(body.resources.search.limited, false);
   } finally {
     clearRateLimited();
     await harness.close();
