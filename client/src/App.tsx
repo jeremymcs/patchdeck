@@ -6,6 +6,7 @@ import { ThemeProvider } from "next-themes";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import Dashboard from "@/pages/dashboard";
+import PRs from "@/pages/prs";
 import Settings from "@/pages/settings";
 import Releases from "@/pages/releases";
 import Issues from "@/pages/issues";
@@ -17,6 +18,7 @@ function AppRouter() {
   return (
     <Switch>
       <Route path="/" component={Dashboard} />
+      <Route path="/prs" component={PRs} />
       <Route path="/settings" component={Settings} />
       <Route path="/releases" component={Releases} />
       <Route path="/issues" component={Issues} />

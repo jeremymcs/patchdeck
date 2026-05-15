@@ -4,6 +4,8 @@ import { z } from "zod";
 
 export const prStatusEnum = z.enum(["watching", "processing", "done", "error", "archived"]);
 export type PRStatus = z.infer<typeof prStatusEnum>;
+export const prStageEnum = z.enum(["feedback_synced", "triaged", "applying", "tests", "done"]);
+export type PRStage = z.infer<typeof prStageEnum>;
 
 export const triageDecision = z.enum(["accept", "reject", "flag"]);
 export type TriageDecision = z.infer<typeof triageDecision>;
@@ -59,11 +61,14 @@ export const prSchema = z.object({
   id: z.string(),
   number: z.number(),
   title: z.string(),
+  body: z.string().nullable().default(null),
+  bodyHtml: z.string().nullable().default(null),
   repo: z.string(), // "owner/repo"
   branch: z.string(),
   author: z.string(),
   url: z.string(),
   status: prStatusEnum,
+  prStage: prStageEnum.optional(),
   feedbackItems: z.array(feedbackItemSchema),
   accepted: z.number(),
   rejected: z.number(),
@@ -232,6 +237,7 @@ export const issueSchema = z.object({
   number: z.number(),
   title: z.string(),
   repo: z.string(),
+  isWorked: z.boolean().optional(),
   author: z.string(),
   url: z.string(),
   body: z.string().nullable(),

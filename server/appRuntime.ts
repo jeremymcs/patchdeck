@@ -12,6 +12,7 @@ import type {
   LogEntry,
   OperatorWarning,
   PR,
+  PRStage,
   PRSummary,
   PRQuestion,
   ReleaseRun,
@@ -461,6 +462,45 @@ function issueWorkStatusFromJobs(jobs: BackgroundJob[]): { workStatus: Issue["wo
 
 export function issueWorkAttemptCountFromJobs(jobs: Array<Pick<BackgroundJob, "attemptCount">>): number {
   return jobs.reduce((total, job) => total + job.attemptCount + 1, 0);
+}
+
+function derivePrStageFromLogs(logs: LogEntry[]): PRStage {
+  let stage: PRStage = "feedback_synced";
+  for (const log of logs) {
+    const phase = log.phase?.toLowerCase() ?? "";
+    const message = log.message.toLowerCase();
+    if (phase.includes("run.sync") || message.includes("syncing github comments/reviews")) {
+      stage = "feedback_synced";
+      continue;
+    }
+    if (phase.includes("evaluate.comments")) {
+      stage = "triaged";
+      continue;
+    }
+    if (phase.includes("run.agent-running") || phase.includes("run.replay") || phase.includes("run.started")) {
+      stage = "applying";
+      continue;
+    }
+    if (phase.includes("verify.ci") || message.includes("waiting for checks") || message.includes("ci")) {
+      stage = "tests";
+      continue;
+    }
+    if (phase.includes("run.done") || message.includes("resolved")) {
+      stage = "done";
+    }
+  }
+  return stage;
+}
+
+async function attachDerivedPrStage<T extends PR | PRSummary>(pr: T, storage: IStorage): Promise<T> {
+  if (pr.status === "watching") {
+    return { ...pr, prStage: "feedback_synced" };
+  }
+  if (pr.status === "done" || pr.status === "archived") {
+    return { ...pr, prStage: "done" };
+  }
+  const logs = await storage.getLogs(pr.id);
+  return { ...pr, prStage: derivePrStageFromLogs(logs) };
 }
 
 function issueWorkStageFromLogs(
@@ -1081,6 +1121,7 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       includePrMergeability?: boolean;
       issueJobs?: BackgroundJob[];
       octokit?: Awaited<ReturnType<typeof buildOctokit>>;
+      isWorked?: boolean;
     } = {},
   ): Promise<Issue> {
     const targetId = formatIssueTargetId(issue.repoFullName, issue.number);
@@ -1129,6 +1170,7 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       ...issue,
       id: targetId,
       repo: issue.repoFullName,
+      isWorked: options.isWorked ?? false,
       lastSyncAttemptedAt: issueSyncState.get(targetId)?.lastSyncAttemptedAt ?? null,
       lastSyncSucceededAt: issueSyncState.get(targetId)?.lastSyncSucceededAt ?? null,
       lastSyncError: issueSyncState.get(targetId)?.lastSyncError ?? null,
@@ -1224,8 +1266,8 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       };
     }
 
-    const synced = await storage.listSyncedIssues({ repos: config.watchedRepos, limit, offset });
-    const counts = await storage.listSyncedIssueCounts({ repos: config.watchedRepos });
+    const synced = await storage.listSyncedIssues({ repos: config.watchedRepos, limit, offset, includeWorked: true });
+    const counts = await storage.listSyncedIssueCounts({ repos: config.watchedRepos, includeWorked: true });
     const octokit = await buildOctokit(config);
     const workJobs = await storage.listBackgroundJobs({ kind: "work_issue" });
     const workJobsByTarget = new Map<string, BackgroundJob[]>();
@@ -1241,7 +1283,7 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       const targetId = formatIssueTargetId(issue.repoFullName, issue.number);
       const attemptedAt = markIssueSyncAttempt(targetId);
       markIssueSyncSuccess(targetId, attemptedAt);
-      return applyIssueWorkState(issue, { issueJobs: workJobsByTarget.get(targetId) ?? [], octokit });
+      return applyIssueWorkState(issue, { issueJobs: workJobsByTarget.get(targetId) ?? [], octokit, isWorked: record.isWorked });
     }));
 
     const sortedItems = issuesWithWorkLinks
@@ -1304,7 +1346,7 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
     const attemptedAt = markIssueSyncAttempt(targetId);
     if (existing?.isWorked) {
       markIssueSyncSuccess(targetId, attemptedAt);
-      return applyIssueWorkState(existing.payload, { includePrMergeability: true });
+      return applyIssueWorkState(existing.payload, { includePrMergeability: true, isWorked: true });
     }
 
     const octokit = await buildOctokit(config);
@@ -2021,15 +2063,18 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
     },
 
     async listPRs(view = "active") {
-      if (view === "archived") {
-        return storage.getArchivedPRSummaries();
-      }
-
-      return storage.getPRSummaries();
+      const prs = view === "archived"
+        ? await storage.getArchivedPRSummaries()
+        : await storage.getPRSummaries();
+      return Promise.all(prs.map((pr) => attachDerivedPrStage(pr, storage)));
     },
 
     async getPR(id) {
-      return (await storage.getPR(id)) ?? null;
+      const pr = await storage.getPR(id);
+      if (!pr) {
+        return null;
+      }
+      return attachDerivedPrStage(pr, storage);
     },
 
     async addPR(url) {
@@ -2061,6 +2106,8 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       const pr = await storage.addPR({
         number: parsed.number,
         title: summary.title,
+        body: summary.body,
+        bodyHtml: summary.bodyHtml,
         repo: repoSlug,
         branch: summary.branch,
         author: summary.author,

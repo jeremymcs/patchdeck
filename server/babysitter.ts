@@ -1,7 +1,7 @@
 import { randomUUID } from "crypto";
 import { access } from "fs/promises";
 import path from "path";
-import type { AgentRun, CheckSnapshot, FeedbackItem, HealingSession, PR } from "@shared/schema";
+import type { AgentRun, CheckSnapshot, FeedbackItem, HealingSession, PR, PRStage } from "@shared/schema";
 import type { IStorage } from "./storage";
 import {
   applyFixesWithAgent,
@@ -226,6 +226,15 @@ export function isTrustedReviewer(author: string, trustedReviewers: readonly str
     }
   }
   return false;
+}
+
+const PR_STAGE_ORDER: PRStage[] = ["feedback_synced", "triaged", "applying", "tests", "done"];
+
+function maxPrStage(current: PRStage | undefined, candidate: PRStage): PRStage {
+  if (!current) return candidate;
+  const currentIdx = PR_STAGE_ORDER.indexOf(current);
+  const candidateIdx = PR_STAGE_ORDER.indexOf(candidate);
+  return currentIdx >= candidateIdx ? current : candidate;
 }
 
 function countDecisions(items: FeedbackItem[]): {
@@ -1778,8 +1787,28 @@ export class PRBabysitter {
     const { merged, newCount } = mergeFeedbackItems(pr.feedbackItems, incomingFeedback);
     const counters = countDecisions(merged);
 
+    let refreshedTitle = pr.title;
+    let refreshedBody: string | null = pr.body;
+    let refreshedBodyHtml: string | null = pr.bodyHtml;
+    try {
+      const pullSummary = await this.github.fetchPullSummary(octokit, parsed);
+      refreshedTitle = pullSummary.title;
+      refreshedBody = pullSummary.body;
+      refreshedBodyHtml = pullSummary.bodyHtml;
+    } catch {
+      // Non-fatal: keep existing PR metadata if the summary fetch fails.
+    }
+
+    const candidateStage: PRStage = counters.accepted + counters.rejected + counters.flagged > 0
+      ? "triaged"
+      : "feedback_synced";
+    const nextPrStage = maxPrStage(pr.prStage, candidateStage);
+
     const updated = await this.storage.updatePR(pr.id, {
-      title: pr.title,
+      title: refreshedTitle,
+      body: refreshedBody,
+      bodyHtml: refreshedBodyHtml,
+      prStage: nextPrStage,
       status: pr.status,
       lastChecked: new Date().toISOString(),
       lastSyncAttemptedAt: new Date().toISOString(),
@@ -1959,7 +1988,7 @@ export class PRBabysitter {
             }
           }
 
-          await this.storage.updatePR(pr.id, { status: "archived" });
+          await this.storage.updatePR(pr.id, { status: "archived", prStage: "done" });
           await this.supersedeActiveHealingSessionsForArchivedPr(pr.id);
           await this.storage.addLog(pr.id, "info", `PR #${pr.number} is no longer open on GitHub — archived`, {
             phase: "watcher",
@@ -2784,6 +2813,7 @@ export class PRBabysitter {
 
       await this.storage.updatePR(prId, {
         status: "processing",
+        prStage: "applying",
         lastChecked: new Date().toISOString(),
       });
       await queueLog(prId, "info", `Babysitter run started using preferred agent ${preferredAgent}${recoveryMode ? " (recovery)" : ""}`, {
@@ -4487,6 +4517,7 @@ export class PRBabysitter {
 
           await this.storage.updatePR(pr.id, {
             testsPassed: false,
+            prStage: "tests",
             lastChecked: new Date().toISOString(),
           });
 
@@ -4560,6 +4591,7 @@ export class PRBabysitter {
           });
           await this.storage.updatePR(pr.id, {
             testsPassed: true,
+            prStage: "tests",
             lastChecked: new Date().toISOString(),
           });
 

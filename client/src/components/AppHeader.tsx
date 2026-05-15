@@ -9,7 +9,7 @@ import { ToastAction } from "@/components/ui/toast";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { toast } from "@/hooks/use-toast";
 
-type AppHeaderSection = "prs" | "issues" | "releases" | "logs" | "settings";
+type AppHeaderSection = "dashboard" | "prs" | "issues" | "releases" | "logs" | "settings";
 type GitHubRateLimitState = {
   limited: boolean;
   resetAt: string | null;
@@ -18,8 +18,9 @@ type GitHubRateLimitState = {
 };
 
 const PRIMARY_NAV_ITEMS: Array<{ section: AppHeaderSection; label: string; href: string }> = [
-  { section: "prs", label: "PRs", href: "/" },
+  { section: "dashboard", label: "Dashboard", href: "/" },
   { section: "issues", label: "Issues", href: "/issues" },
+  { section: "prs", label: "PRs", href: "/prs" },
   { section: "releases", label: "Releases", href: "/releases" },
 ];
 
