@@ -9,7 +9,7 @@ PatchDeck is a local-first workbench for keeping GitHub pull requests and issues
 
 The goal is simple: fewer stale PRs, fewer forgotten review comments, and less time bouncing between GitHub tabs just to figure out what still needs action.
 
-![PatchDeck PRs dashboard](docs/assets/PatchDeck-PRs.png)
+![PatchDeck dashboard](docs/assets/PatchDeck-Dashboard.png)
 
 ![PatchDeck Issues dashboard](docs/assets/PatchDeck-Issues.png)
 
@@ -67,6 +67,8 @@ Direct PR URLs stay tracked even if a repository is still set to **My PRs only**
 ## Pull Requests
 
 PatchDeck monitors open PRs from watched repositories and PRs added directly by URL. It stores the PR metadata, comments, review threads, failing checks, mergeability, docs-assessment state, release-readiness state, and local activity logs.
+
+![PatchDeck PRs page](docs/assets/PatchDeck-PRs.png)
 
 Each feedback item moves through a visible lifecycle:
 
