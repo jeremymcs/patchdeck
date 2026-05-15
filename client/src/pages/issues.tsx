@@ -194,6 +194,18 @@ function formatEvaluationConfidence(confidence: number): string {
 }
 
 type IssueWorkFilter = "all" | "ready" | "worked" | "auto" | "needs_eval" | "review" | "failed" | "stale";
+type IssueCoverageRow = {
+  repo: string;
+  syncedOpenCount: number;
+  githubOpenCount: number | null;
+  lastSyncedAt: string | null;
+};
+
+type GitHubRateLimitState = {
+  limited: boolean;
+  resetAt: string | null;
+  recentlyLimited: boolean;
+};
 
 function isStaleIssue(issue: Issue): boolean {
   const updatedAt = Date.parse(issue.updatedAt);
@@ -653,7 +665,19 @@ function IssuesPage() {
     queryKey: ["/api/activities"],
   });
   const { data: config } = useQuery<Config>({ queryKey: ["/api/config"] });
+  const { data: githubRateLimit } = useQuery<GitHubRateLimitState>({
+    queryKey: ["/api/github-rate-limit"],
+    refetchInterval: 30000,
+  });
+  const { data: issueCoverage = [] } = useQuery<IssueCoverageRow[]>({
+    queryKey: ["/api/issues/coverage"],
+    refetchInterval: 30000,
+  });
   const queueStatusById = useMemo(() => buildQueueStatusIndex(activities), [activities]);
+  const isGitHubThrottled = githubRateLimit?.limited === true;
+  const throttledTitle = githubRateLimit?.resetAt
+    ? `GitHub rate limited until ${formatDateTime(githubRateLimit.resetAt)}`
+    : "GitHub rate limited";
   const cachedIssues = useMemo(() => readCachedIssues(), []);
 
   const clearFailedActivitiesMutation = useMutation({
@@ -732,22 +756,37 @@ function IssuesPage() {
     }
   };
 
-  const handleSyncIssues = async (): Promise<void> => {
+  const handleSyncIssues = async (fullSweep = false): Promise<void> => {
     setIsSyncingRepos(true);
     try {
-      await apiRequest("POST", "/api/repos/sync");
+      if (fullSweep) {
+        const rateLimit = await fetchJson<GitHubRateLimitState>("/api/github-rate-limit");
+        if (rateLimit.limited) {
+          const resetLabel = rateLimit.resetAt ? formatDateTime(rateLimit.resetAt) : "later";
+          toast({
+            title: "Full sweep blocked",
+            variant: "destructive",
+            description: `GitHub is rate-limited. Full sweep paused until ${resetLabel}.`,
+          });
+          return;
+        }
+        toast({ description: "Full sweep started." });
+      }
+      await apiRequest("POST", fullSweep ? "/api/repos/sync?fullSweep=1" : "/api/repos/sync");
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["/api/issues"] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/issues/coverage"] }),
         queryClient.invalidateQueries({ queryKey: ["/api/issues/detail"] }),
         queryClient.invalidateQueries({ queryKey: ["/api/activities"] }),
         queryClient.invalidateQueries({ queryKey: ["/api/runtime"] }),
         queryClient.invalidateQueries({ queryKey: ["/api/repos/settings"] }),
       ]);
       setExtraPages([]);
+      toast({ description: fullSweep ? "Full sweep completed." : "Issue sync completed." });
     } catch (error) {
       toast({
         variant: "destructive",
-        description: `Could not sync repositories: ${error instanceof Error ? error.message : String(error)}`,
+        description: `${fullSweep ? "Could not run full sweep" : "Could not sync repositories"}: ${error instanceof Error ? error.message : String(error)}`,
       });
     } finally {
       setIsSyncingRepos(false);
@@ -854,6 +893,25 @@ function IssuesPage() {
     [issuesPage?.repoTotals],
   );
   const totalIssueCount = issuesPage?.totalCount ?? issues.length;
+  const repoTotals = issuesPage?.repoTotals ?? {};
+  const coverageByRepo = useMemo(
+    () => new Map(issueCoverage.map((entry) => [entry.repo, entry])),
+    [issueCoverage],
+  );
+  const selectedCoverage = selectedRepo === "all" ? null : coverageByRepo.get(selectedRepo) ?? null;
+  const aggregateCoverage = useMemo(() => {
+    let synced = 0;
+    let github = 0;
+    let unknown = false;
+    for (const row of issueCoverage) {
+      synced += row.syncedOpenCount;
+      if (row.githubOpenCount === null) unknown = true;
+      else github += row.githubOpenCount;
+    }
+    return { synced, github: unknown ? null : github };
+  }, [issueCoverage]);
+  const selectedSyncedFallback = selectedRepo === "all" ? null : (repoTotals[selectedRepo] ?? 0);
+  const aggregateSyncedFallback = totalIssueCount;
 
   const { data: issueLogs = [] } = useQuery<LogEntry[]>({
     queryKey: ["/api/logs", selectedIssueKey ?? "issue"],
@@ -1086,8 +1144,9 @@ function IssuesPage() {
           <>
             <button
               type="button"
-              onClick={() => { void handleSyncIssues(); }}
-              disabled={isSyncingRepos || globalDrainMode}
+              onClick={() => { void handleSyncIssues(false); }}
+              disabled={isSyncingRepos || globalDrainMode || isGitHubThrottled}
+              title={isGitHubThrottled ? throttledTitle : undefined}
               data-testid="button-sync-issues"
               className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-0.5 text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
             >
@@ -1108,8 +1167,27 @@ function IssuesPage() {
 
       <div className="flex flex-1 flex-col overflow-hidden lg:flex-row">
         <div className="flex max-h-[42vh] w-full shrink-0 flex-col overflow-hidden border-b border-border lg:max-h-none lg:w-[42rem] lg:border-b-0 lg:border-r">
-          <div className="border-b border-border px-4 py-2 text-[11px] uppercase tracking-wider text-muted-foreground">
-            Watched issues
+          <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-2 text-[11px] uppercase tracking-wider text-muted-foreground">
+            <div>
+              Watched issues
+              <span className="ml-2 normal-case tracking-normal text-muted-foreground/80">
+                {selectedCoverage
+                  ? `synced ${selectedCoverage.syncedOpenCount}${selectedCoverage.githubOpenCount !== null ? ` / GitHub ${selectedCoverage.githubOpenCount}` : ""}`
+                  : selectedRepo !== "all"
+                    ? `synced ${selectedSyncedFallback}${aggregateCoverage.github !== null ? ` / GitHub ${aggregateCoverage.github}` : " / GitHub ?"}`
+                    : `synced ${aggregateSyncedFallback}${aggregateCoverage.github !== null ? ` / GitHub ${aggregateCoverage.github}` : " / GitHub ?"}`}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => { void handleSyncIssues(true); }}
+              disabled={isSyncingRepos || globalDrainMode || isGitHubThrottled}
+              title={isGitHubThrottled ? throttledTitle : undefined}
+              data-testid="button-full-sweep-issues"
+              className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
+            >
+              {globalDrainMode ? "paused" : "full sweep"}
+            </button>
           </div>
           <div data-testid="repo-filter-bar" className="flex flex-col gap-2 border-b border-border px-4 py-2.5">
             <div className="flex flex-wrap items-start gap-2">
