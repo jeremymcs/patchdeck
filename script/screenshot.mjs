@@ -6,7 +6,8 @@ const BASE = process.env.BASE_URL || "http://localhost:5001";
 const OUT_DIR = resolve(process.cwd(), "docs/assets");
 
 const PAGES = [
-  { route: "/", file: "PatchDeck-PRs.png", waitFor: "body" },
+  { route: "/", file: "PatchDeck-Dashboard.png", waitFor: "body" },
+  { route: "/prs", file: "PatchDeck-PRs.png", waitFor: "body" },
   { route: "/issues", file: "PatchDeck-Issues.png", waitFor: "body" },
   { route: "/releases", file: "PatchDeck-Releases.png", waitFor: "body" },
   { route: "/logs", file: "PatchDeck-Logs.png", waitFor: "body" },
@@ -34,10 +35,10 @@ const page = await context.newPage();
 for (const { route, file, waitFor } of PAGES) {
   const url = `${BASE}/#${route}`;
   process.stdout.write(`→ ${url}\n`);
-  await page.goto(url, { waitUntil: "networkidle", timeout: 30_000 });
+  await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45_000 });
   await page.waitForSelector(waitFor, { timeout: 10_000 });
-  // Allow charts/animations/data fetches to settle.
-  await page.waitForTimeout(1500);
+  // Allow dashboard polls and activity-driven UI to settle before capture.
+  await page.waitForTimeout(5000);
   const out = resolve(OUT_DIR, file);
   await page.screenshot({ path: out, fullPage: false });
   await mkdir(dirname(out), { recursive: true });
