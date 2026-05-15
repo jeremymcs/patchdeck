@@ -5,7 +5,9 @@ import { apiRequest } from "@/lib/queryClient";
 import type { ActivitySnapshot, Config, RuntimeState } from "@shared/schema";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
+import { ToastAction } from "@/components/ui/toast";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { toast } from "@/hooks/use-toast";
 
 type AppHeaderSection = "prs" | "issues" | "releases" | "logs" | "settings";
 type GitHubRateLimitState = {
@@ -140,13 +142,38 @@ function AutoModeButton() {
       const res = await apiRequest("POST", "/api/runtime/drain", input);
       return res.json();
     },
+    onSuccess: (_data, variables) => {
+      if (variables.enabled) {
+        toast({
+          description: "Background sync paused. New automation runs are blocked.",
+          action: (
+            <ToastAction
+              altText="Resume background sync"
+              onClick={() => drainMutation.mutate({ enabled: false })}
+            >
+              Undo
+            </ToastAction>
+          ),
+        });
+      } else {
+        toast({ description: "Background sync resumed." });
+      }
+    },
+    onError: (error, variables) => {
+      const message = error instanceof Error ? error.message : String(error);
+      toast({
+        variant: "destructive",
+        description: `Failed to ${variables.enabled ? "pause" : "resume"} background sync: ${message}`,
+      });
+    },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/runtime"] });
       queryClient.invalidateQueries({ queryKey: ["/api/activities"] });
     },
   });
 
-  const pending = updateConfigMutation.isPending || drainMutation.isPending;
+  const switchPending = updateConfigMutation.isPending;
+  const drainPending = drainMutation.isPending;
 
   const tooltip = drainMode
     ? "Automation paused via drain mode. Open to see status."
@@ -198,7 +225,7 @@ function AutoModeButton() {
             <Switch
               id="auto-mode-prs"
               checked={autoPrs}
-              disabled={pending || !config}
+              disabled={switchPending || !config}
               onCheckedChange={(next) => updateConfigMutation.mutate({ autoPrs: next })}
               data-testid="auto-mode-prs-switch"
             />
@@ -216,7 +243,7 @@ function AutoModeButton() {
             <Switch
               id="auto-mode-issues"
               checked={autoIssues}
-              disabled={pending || !config}
+              disabled={switchPending || !config}
               onCheckedChange={(next) => updateConfigMutation.mutate({ autoIssues: next })}
               data-testid="auto-mode-issues-switch"
             />
@@ -224,8 +251,8 @@ function AutoModeButton() {
         </div>
 
         <div className="mt-3 flex items-center justify-between gap-3 border-t border-border pt-2">
-          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-            Runtime
+          <div className="min-w-0 flex-1 text-[10px] uppercase tracking-wider text-muted-foreground">
+            Background sync
           </div>
           <button
             type="button"
@@ -234,11 +261,11 @@ function AutoModeButton() {
                 ? { enabled: false }
                 : { enabled: true, reason: "Paused from header auto mode menu" },
             )}
-            disabled={pending}
+            disabled={drainPending}
             data-testid="auto-mode-drain-toggle"
-            className="inline-flex items-center rounded-md border border-border px-2 py-1 text-[10px] uppercase tracking-wider text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
+            className="inline-flex min-h-[28px] items-center rounded-md border border-border px-2.5 py-1.5 text-[10px] uppercase tracking-wider text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
           >
-            {drainMode ? "Resume" : "Drain"}
+            {drainPending ? "…" : drainMode ? "Resume all" : "Pause all"}
           </button>
         </div>
 
@@ -258,34 +285,46 @@ function GitHubRateLimitNotice() {
     queryKey: ["/api/github-rate-limit"],
     refetchInterval: 30000,
   });
+  const explicitlyLimited = githubRateLimit?.limited === true;
   const { data: activities } = useQuery<ActivitySnapshot>({
     queryKey: ["/api/activities"],
-    refetchInterval: 5000,
+    refetchInterval: 30000,
+    enabled: !explicitlyLimited,
   });
 
-  const activityRateLimitMessage = activities
+  const activityRateLimitMessage = !explicitlyLimited && activities
     ? [...activities.failed, ...activities.warnings]
       .map((item) => ("lastError" in item ? item.lastError : item.message) ?? "")
       .find((message) => message.toLowerCase().includes("rate limit")) ?? null
     : null;
 
-  if (!githubRateLimit?.limited && !activityRateLimitMessage) {
+  if (!explicitlyLimited && !activityRateLimitMessage) {
     return null;
   }
+
+  const resetTime = githubRateLimit?.resetAt
+    ? new Date(githubRateLimit.resetAt).toLocaleTimeString("en-US")
+    : null;
+
+  const label = explicitlyLimited
+    ? resetTime
+      ? `GitHub rate limited until ${resetTime}`
+      : "GitHub rate limited"
+    : "GitHub rate limit hit in recent activity";
+
+  const tooltip = explicitlyLimited
+    ? resetTime
+      ? `GitHub rate limit active until ${resetTime}. Open settings for token configuration.`
+      : "GitHub rate limit active. Open settings for token configuration."
+    : activityRateLimitMessage ?? "GitHub rate limit errors detected in recent activity. Open settings for token configuration.";
 
   return (
     <Link
       href="/settings"
-      title={
-        githubRateLimit?.limited && githubRateLimit.resetAt
-          ? `GitHub rate limit active until ${new Date(githubRateLimit.resetAt).toLocaleTimeString("en-US")}. Open settings for token configuration.`
-          : activityRateLimitMessage ?? "GitHub rate limit errors detected in recent activity. Open settings for token configuration."
-      }
-      className="hidden max-w-[320px] items-center truncate whitespace-nowrap rounded-md border border-warning-border bg-warning-muted px-2.5 py-1 text-[10px] uppercase tracking-wider text-warning-foreground transition-colors hover:border-warning hover:bg-warning-muted/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background lg:inline-flex"
+      title={tooltip}
+      className="inline-flex max-w-[320px] items-center truncate whitespace-nowrap rounded-md border border-warning-border bg-warning-muted px-2.5 py-1 text-[10px] uppercase tracking-wider text-warning-foreground transition-colors hover:border-warning hover:bg-warning-muted/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
     >
-      {githubRateLimit?.limited && githubRateLimit.resetAt
-        ? `GitHub rate limited until ${new Date(githubRateLimit.resetAt).toLocaleTimeString("en-US")}`
-        : "GitHub rate limit error (activity)"}
+      {label}
     </Link>
   );
 }
