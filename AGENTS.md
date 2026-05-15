@@ -68,6 +68,8 @@ Before product UI or UX changes, read `.impeccable.md` and follow its Design Con
 ## Testing Guidelines
 Follow the standardized test guidance in `test.md`. Use the red-green-refactor loop for every feature, bug fix, refactor, or behavior change. Before completion, run the relevant Node test suite and `npm run check`. Maintain at least 70% coverage of the affected critical path for critical app workflows.
 
+**Every PR must include tests covering the change.** New behavior needs new tests; bug fixes need a regression test that fails without the fix. The only exceptions are docs-only changes, pure formatting, and dependency bumps with no behavior change — call the exception out in the PR description. A PR without tests for a behavior change will be sent back.
+
 Add focused regression coverage for changes to storage, GitHub sync, repo workspace isolation, background jobs, CI/deployment healing, or babysitter flows.
 
 ## Logging
@@ -79,7 +81,7 @@ For recoverable conditions, log at `warn` with the message only and emit the sta
 When agents are used, default to `codingAgent: "claude"` and `model: "opus"`. There is no separate "thinking"/reasoning-effort configuration flag in this app today; agent reasoning behavior follows the selected model/runtime defaults. These defaults are set in `server/defaultConfig.ts` and can be changed at runtime via the dashboard model selector or the `/api/config` endpoint.
 
 ## Commit & Pull Request Guidelines
-Recent commits favor short imperative summaries, usually with prefixes like `feat:`, `fix:`, and `docs:`. Keep PRs narrow, explain the behavior change, and list the commands you ran to verify it. Include screenshots for dashboard UI changes. Always start work in a git worktree created from a freshly updated `main`, then push to a branch instead of `main` unless the user explicitly asks for a direct push. Always open a PR when completed work is ready unless the user explicitly instructs otherwise. This repo/account enforces GitHub email privacy on pushes, so use the GitHub noreply email for commits you intend to push unless the user explicitly wants a different public identity.
+Recent commits favor short imperative summaries, usually with prefixes like `feat:`, `fix:`, and `docs:`. Keep PRs narrow, explain the behavior change, and list the commands you ran to verify it. Include screenshots for dashboard UI changes. **Every PR must include tests for the change** (see Testing Guidelines) — PRs without tests are only accepted for the documented exceptions. Always start work in a git worktree created from a freshly updated `main`, then push to a branch instead of `main` unless the user explicitly asks for a direct push. Always open a PR when completed work is ready unless the user explicitly instructs otherwise. This repo/account enforces GitHub email privacy on pushes, so use the GitHub noreply email for commits you intend to push unless the user explicitly wants a different public identity.
 
 ## Post-Merge Maintenance
 After every 5 PR merges, audit `AGENTS.md` for brevity: remove duplicate instructions, consolidate overlapping sections, and trim stale guidance. Submit the cleanup as its own PR so reviewers can approve the changes.
