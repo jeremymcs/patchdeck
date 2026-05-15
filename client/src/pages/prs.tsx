@@ -940,8 +940,10 @@ function PRDescriptionPanel({ pr }: { pr: PR }) {
 function RightPanel({ prId }: { prId: string | null }) {
   return (
     <div className="flex min-h-[24rem] w-full shrink-0 flex-col border-t border-border lg:min-h-0 lg:w-80 lg:border-l lg:border-t-0">
-      <div className="border-b border-border px-3 py-2 text-[11px] uppercase tracking-wider text-muted-foreground">
-        <span data-testid="tab-activity">Activity</span>
+      <div className="flex shrink-0 border-b border-border">
+        <div className="flex-1 bg-muted px-3 py-2 text-[11px] uppercase tracking-wider text-foreground shadow-[inset_0_-2px_0_0_hsl(var(--primary))]">
+          <span data-testid="tab-activity">Activity</span>
+        </div>
       </div>
       <div className="flex-1 overflow-hidden">
         <LogPanel prId={prId} />
@@ -1382,7 +1384,7 @@ export default function Dashboard() {
       <DashboardDrainBanner runtimeState={runtimeState} />
 
       <div className="flex flex-1 flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
-        <div className="flex max-h-[42vh] w-full shrink-0 flex-col overflow-y-auto border-b border-border lg:max-h-none lg:min-h-0 lg:w-80 lg:border-b-0 lg:border-r">
+        <div className="flex max-h-[42vh] w-full shrink-0 flex-col overflow-y-auto border-b border-border lg:max-h-none lg:min-h-0 lg:w-[42rem] lg:border-b-0 lg:border-r">
           <div className="sticky top-0 z-10 flex shrink-0 border-b border-border bg-background">
             <button
               type="button"
