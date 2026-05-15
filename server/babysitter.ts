@@ -80,6 +80,9 @@ const AGENT_STREAM_LOG_LINE_LIMIT = 120;
 const MAX_FEEDBACK_SYNCS_PER_TICK = 20;
 const FEEDBACK_SYNC_RATE_LIMIT_COOLDOWN_MS = 5 * 60 * 1000;
 const REPO_SYNC_FAILURE_BACKOFF_MS = 60_000;
+// After a repo's PR list comes back unchanged, defer its next sweep by this
+// long so quiet repos yield watcher slots and rate-limit budget to active ones.
+const QUIET_REPO_COOLDOWN_MS = 10 * 60_000;
 const APP_NAME = "patchdeck";
 const APP_REPOSITORY_URL = "https://github.com/jeremymcs/patchdeck";
 export const APP_COMMENT_FOOTER = formatAppCommentFooter(APP_NAME, true);
@@ -1964,8 +1967,10 @@ export class PRBabysitter {
           repo,
           cachedPrList?.etag ?? null,
         );
+        let prListUnchanged = false;
         if (conditional.notModified && cachedPrList) {
           openPulls = cachedPrList.pulls;
+          prListUnchanged = true;
         } else if (conditional.notModified) {
           // Etag hit without a cached list (should not happen, since both are
           // stored together) — fall back to a full fetch.
@@ -1974,9 +1979,13 @@ export class PRBabysitter {
           openPulls = conditional.pulls;
           this.prListCache.set(repoSlug, { etag: conditional.etag, pulls: conditional.pulls });
         }
+        // When the PR list is unchanged, defer the next sweep — a quiet repo
+        // does not need an every-tick slot. Any change returns it to every-tick.
         await this.storage.upsertRepoSyncState(repoSlug, "prs", {
           lastSyncedAt: this.now().toISOString(),
-          nextEligibleAt: null,
+          nextEligibleAt: prListUnchanged
+            ? new Date(this.now().getTime() + QUIET_REPO_COOLDOWN_MS).toISOString()
+            : null,
         });
         const repoIndex = repos.findIndex((entry) => formatRepoSlug(entry) === repoSlug);
         if (repoIndex >= 0) {

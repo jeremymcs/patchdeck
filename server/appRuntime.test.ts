@@ -729,3 +729,39 @@ test("syncRepos skips an issue sweep for a repo whose persisted backoff is activ
 
   assert.equal(listForRepoCalls, 0, "a backed-off repo must not be probed or synced");
 });
+
+test("syncRepos defers the next sweep for a repo whose issue list is unchanged", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig({ watchedRepos: ["owner/repo"] });
+  await storage.setGithubEtag("issues:open:owner/repo", 'W/"cached"');
+
+  const fakeOctokit = {
+    issues: {
+      listForRepo: async () => {
+        const error = new Error("Not modified") as Error & { status: number };
+        error.status = 304;
+        throw error;
+      },
+    },
+  };
+
+  const runtime = createAppRuntime({
+    storage,
+    startBackgroundServices: false,
+    startWatcher: false,
+    babysitter: { syncAndBabysitTrackedRepos: async () => {} } as never,
+    buildOctokitFn: async () => fakeOctokit as never,
+  });
+
+  const before = Date.now();
+  await runtime.syncRepos();
+
+  const state = (await storage.getRepoSyncStates("issues")).find((s) => s.repo === "owner/repo");
+  assert.ok(state?.lastSyncedAt, "a 304 still counts as a freshness check");
+  assert.ok(state?.nextEligibleAt, "an unchanged repo must be deprioritized");
+  const eligibleMs = new Date(state!.nextEligibleAt!).getTime();
+  assert.ok(
+    eligibleMs >= before + 9 * 60_000,
+    `expected a ~10min cooldown, got ${(eligibleMs - before) / 60_000}min`,
+  );
+});
