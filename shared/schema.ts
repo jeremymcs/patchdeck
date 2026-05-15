@@ -250,6 +250,17 @@ export const issueSchema = z.object({
 });
 export type Issue = z.infer<typeof issueSchema>;
 
+export const issueListPageSchema = z.object({
+  items: z.array(issueSchema),
+  limit: z.number().int().positive(),
+  offset: z.number().int().nonnegative(),
+  nextOffset: z.number().int().nonnegative().nullable(),
+  hasMore: z.boolean(),
+  fetchedAt: z.string(),
+  staleAt: z.string(),
+});
+export type IssueListPage = z.infer<typeof issueListPageSchema>;
+
 export const issueEvaluationSchema = z.object({
   targetId: z.string(),
   repo: z.string(),

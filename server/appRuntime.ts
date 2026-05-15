@@ -5,6 +5,7 @@ import type {
   BackgroundJob,
   Config,
   Issue,
+  IssueListPage,
   IssueEvaluation,
   DeploymentHealingSession,
   HealingSession,
@@ -61,6 +62,7 @@ import {
   listOpenLinkedPullRequestsForIssue,
   listReleasesForRepo,
   listUnreleasedMergedPulls,
+  type GitHubIssueSummary,
   type MergedPRSummary,
   parsePRUrl,
   parseRepoSlug,
@@ -149,7 +151,7 @@ export type AppRuntime = {
   listGitHubReleases(): Promise<RepoGitHubReleases[]>;
   startReleaseSocialPost(request: StartReleaseSocialPostRequest): Promise<ReleaseSocialPost>;
   getReleaseSocialPost(jobId: string): Promise<ReleaseSocialPost>;
-  listIssues(): Promise<Issue[]>;
+  listIssues(input?: { limit?: number; offset?: number }): Promise<IssueListPage>;
   getIssue(repo: string, number: number): Promise<Issue>;
   updateIssueLabels(repo: string, number: number, updates: { add?: string[]; remove?: string[] }): Promise<Issue>;
   evaluateIssue(repo: string, number: number): Promise<Issue>;
@@ -215,6 +217,11 @@ const AUTO_WORK_READY_LABELS = new Set([
   "agent-ready",
   "ready",
 ]);
+const DEFAULT_ISSUES_PAGE_SIZE = 20;
+const MAX_ISSUES_PAGE_SIZE = 100;
+const ISSUES_PAGE_CACHE_TTL_HOT_MS = 60 * 1000;
+const ISSUES_PAGE_CACHE_TTL_WARM_MS = 10 * 60 * 1000;
+const ISSUES_PAGE_CACHE_TTL_COLD_MS = 30 * 60 * 1000;
 const AUTO_WORK_BLOCKED_LABELS = new Set([
   "blocked",
   "question",
@@ -809,6 +816,24 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
     lastSyncSucceededAt: string | null;
     lastSyncError: string | null;
   }>();
+  const issuePageCache = new Map<string, {
+    items: GitHubIssueSummary[];
+    hasMore: boolean;
+    fetchedAt: string;
+    staleAt: string;
+    expiresAtMs: number;
+  }>();
+  const issuePageRefreshes = new Map<string, Promise<void>>();
+
+  function issuePageCacheKey(repo: string, limit: number, offset: number): string {
+    return `${repo}|${limit}|${offset}`;
+  }
+
+  function issuePageCacheTtlMs(offset: number): number {
+    if (offset <= 0) return ISSUES_PAGE_CACHE_TTL_HOT_MS;
+    if (offset < 100) return ISSUES_PAGE_CACHE_TTL_WARM_MS;
+    return ISSUES_PAGE_CACHE_TTL_COLD_MS;
+  }
 
   function markIssueSyncAttempt(targetId: string): string {
     const now = new Date().toISOString();
@@ -1072,21 +1097,93 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
     };
   }
 
-  async function listIssuesInternal(): Promise<Issue[]> {
+  async function listIssuesInternal(input?: { limit?: number; offset?: number }): Promise<IssueListPage> {
+    const limit = Math.min(Math.max(1, input?.limit ?? DEFAULT_ISSUES_PAGE_SIZE), MAX_ISSUES_PAGE_SIZE);
+    const offset = Math.max(0, input?.offset ?? 0);
     const config = await storage.getConfig();
+    const nowMs = Date.now();
     if (config.watchedRepos.length === 0) {
-      return [];
+      const ttlMs = issuePageCacheTtlMs(offset);
+      return {
+        items: [],
+        limit,
+        offset,
+        nextOffset: null,
+        hasMore: false,
+        fetchedAt: new Date(nowMs).toISOString(),
+        staleAt: new Date(nowMs + ttlMs).toISOString(),
+      };
     }
 
     const octokit = await buildOctokit(config);
-    const perRepoIssues = await Promise.all(
+    const refreshIssuePageCache = async (parsed: ReturnType<typeof parseRepoSlug>, limitValue: number, offsetValue: number): Promise<void> => {
+      if (!parsed) return;
+      const canonicalRepo = formatRepoSlug(parsed);
+      const cacheKey = issuePageCacheKey(canonicalRepo, limitValue, offsetValue);
+      const existing = issuePageRefreshes.get(cacheKey);
+      if (existing) {
+        await existing;
+        return;
+      }
+
+      const refreshPromise = (async () => {
+        const fetched = await listOpenIssuesForRepo(octokit, parsed, { limit: limitValue, offset: offsetValue });
+        const now = Date.now();
+        const ttlMs = issuePageCacheTtlMs(offsetValue);
+        issuePageCache.set(cacheKey, {
+          items: fetched.items,
+          hasMore: fetched.hasMore,
+          fetchedAt: new Date(now).toISOString(),
+          staleAt: new Date(now + ttlMs).toISOString(),
+          expiresAtMs: now + ttlMs,
+        });
+      })();
+
+      issuePageRefreshes.set(cacheKey, refreshPromise);
+      try {
+        await refreshPromise;
+      } finally {
+        issuePageRefreshes.delete(cacheKey);
+      }
+    };
+
+    const perRepoPages = await Promise.all(
       config.watchedRepos.map(async (repoSlug) => {
+        const ttlMs = issuePageCacheTtlMs(offset);
+        const fetchedAt = new Date(nowMs).toISOString();
+        const staleAt = new Date(nowMs + ttlMs).toISOString();
         const parsed = parseRepoSlug(repoSlug);
         if (!parsed) {
-          return [];
+          return { items: [], hasMore: false, fetchedAt, staleAt };
+        }
+        const canonicalRepo = formatRepoSlug(parsed);
+        const cacheKey = issuePageCacheKey(canonicalRepo, limit, offset);
+        const cached = issuePageCache.get(cacheKey);
+        if (cached) {
+          if (cached.expiresAtMs <= nowMs) {
+            void refreshIssuePageCache(parsed, limit, offset).catch((error) => {
+              log.warn(
+                {
+                  err: error instanceof Error ? error.message : String(error),
+                  repo: canonicalRepo,
+                  limit,
+                  offset,
+                },
+                "Issue page cache refresh failed",
+              );
+            });
+          }
+          return { items: cached.items, hasMore: cached.hasMore, fetchedAt: cached.fetchedAt, staleAt: cached.staleAt };
         }
 
-        return listOpenIssuesForRepo(octokit, parsed);
+        await refreshIssuePageCache(parsed, limit, offset);
+        const refreshed = issuePageCache.get(cacheKey);
+        return {
+          items: refreshed?.items ?? [],
+          hasMore: refreshed?.hasMore ?? false,
+          fetchedAt: refreshed?.fetchedAt ?? fetchedAt,
+          staleAt: refreshed?.staleAt ?? staleAt,
+        };
       }),
     );
     const workJobs = await storage.listBackgroundJobs({ kind: "work_issue" });
@@ -1098,15 +1195,27 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       workJobsByTarget.set(job.targetId, existing);
     }
 
-    const issuesWithWorkLinks = await Promise.all(perRepoIssues.flat().map((issue) => {
+    const issuesWithWorkLinks = await Promise.all(perRepoPages.flatMap((repoPage) => repoPage.items).map((issue) => {
       const targetId = formatIssueTargetId(issue.repoFullName, issue.number);
       const attemptedAt = markIssueSyncAttempt(targetId);
       markIssueSyncSuccess(targetId, attemptedAt);
       return applyIssueWorkState(issue, { issueJobs: workJobsByTarget.get(targetId) ?? [], octokit });
     }));
 
-    return issuesWithWorkLinks
+    const sortedItems = issuesWithWorkLinks
       .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+    const hasMore = perRepoPages.some((repoPage) => repoPage.hasMore);
+    const fetchedAtMs = Math.min(...perRepoPages.map((repoPage) => new Date(repoPage.fetchedAt).getTime()));
+    const staleAtMs = Math.min(...perRepoPages.map((repoPage) => new Date(repoPage.staleAt).getTime()));
+    return {
+      items: sortedItems,
+      limit,
+      offset,
+      nextOffset: hasMore ? offset + limit : null,
+      hasMore,
+      fetchedAt: new Date(fetchedAtMs).toISOString(),
+      staleAt: new Date(staleAtMs).toISOString(),
+    };
   }
 
   async function getIssueInternal(repoInput: string, number: number): Promise<Issue> {
@@ -1236,12 +1345,13 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       return;
     }
 
-    const [repoSettings, issues, evaluationJobs, workJobs] = await Promise.all([
+    const [repoSettings, issuesPage, evaluationJobs, workJobs] = await Promise.all([
       storage.listRepoSettings(),
-      listIssuesInternal(),
+      listIssuesInternal({ limit: MAX_ISSUES_PAGE_SIZE, offset: 0 }),
       storage.listBackgroundJobs({ kind: "evaluate_issue" }),
       storage.listBackgroundJobs({ kind: "work_issue" }),
     ]);
+    const issues = issuesPage.items;
 
     const isJobActive = (status: string) => status === "queued" || status === "leased";
     const activeEvaluationTargets = new Set(
@@ -1788,8 +1898,8 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       return release;
     },
 
-    async listIssues() {
-      return listIssuesInternal();
+    async listIssues(input) {
+      return listIssuesInternal(input);
     },
 
     async getIssue(repoInput, number) {

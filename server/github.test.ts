@@ -809,14 +809,14 @@ test("listOpenIssuesForRepo filters pull requests and normalizes issue metadata"
     },
   };
 
-  const issues = await listOpenIssuesForRepo(octokit as never, { owner: "owner", repo: "repo" });
+  const page = await listOpenIssuesForRepo(octokit as never, { owner: "owner", repo: "repo" });
 
-  assert.equal(issues.length, 1);
-  assert.equal(issues[0]?.number, 17);
-  assert.deepEqual(issues[0]?.labels, ["bug", "ui"]);
-  assert.deepEqual(issues[0]?.assignees, ["octocat"]);
-  assert.equal(issues[0]?.repoFullName, "owner/repo");
-  assert.match(issues[0]?.bodyHtml ?? "", /<p>The toggle is stuck<\/p>/);
+  assert.equal(page.items.length, 1);
+  assert.equal(page.items[0]?.number, 17);
+  assert.deepEqual(page.items[0]?.labels, ["bug", "ui"]);
+  assert.deepEqual(page.items[0]?.assignees, ["octocat"]);
+  assert.equal(page.items[0]?.repoFullName, "owner/repo");
+  assert.match(page.items[0]?.bodyHtml ?? "", /<p>The toggle is stuck<\/p>/);
 });
 
 test("listOpenLinkedPullRequestsForIssue returns unique open cross-referenced PRs", async () => {
