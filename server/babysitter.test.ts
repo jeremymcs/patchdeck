@@ -368,6 +368,71 @@ test("syncFeedbackForPR logs completion even when no new feedback items arrive",
   assert.equal(logs.at(-1)?.message, "GitHub sync complete: 1 feedback item (0 new)");
 });
 
+test("syncFeedbackForPR refreshes PR metadata from GitHub", async () => {
+  const storage = new MemStorage();
+  const existingItem = makeFeedbackItem();
+
+  const pr = await storage.addPR({
+    number: 42,
+    title: "Old PR title",
+    repo: "octo/example",
+    branch: "feature/old",
+    author: "old-author",
+    url: "https://github.com/octo/example/pull/42",
+    status: "watching",
+    feedbackItems: [existingItem],
+    accepted: 0,
+    rejected: 0,
+    flagged: 0,
+    testsPassed: null,
+    lintPassed: null,
+    lastChecked: null,
+  });
+
+  const babysitter = new PRBabysitter(storage, {
+    buildOctokit: async () => ({}) as never,
+    fetchFeedbackItemsForPR: async () => [existingItem],
+    fetchPullSummary: async () => makePullSummary(pr, {
+      title: "Fresh PR title",
+      body: "fresh body",
+      bodyHtml: "<p>fresh body</p>",
+      branch: "feature/fresh",
+      author: "fresh-author",
+      url: "https://github.com/octo/example/pull/42",
+      repoFullName: "octo/example",
+      mergeableState: "clean",
+    }),
+    listFailingStatuses: async () => {
+      throw new Error("unused in this test");
+    },
+    checkCISettled: async () => {
+      throw new Error("unused in this test");
+    },
+    listOpenPullsForRepo: async () => {
+      throw new Error("unused in this test");
+    },
+    postFollowUpForFeedbackItem: async () => {
+      throw new Error("unused in this test");
+    },
+    resolveReviewThread: async () => {
+      throw new Error("unused in this test");
+    },
+    resolveGitHubAuthToken: async () => undefined,
+    addReactionToComment: async () => {},
+    postStatusReplyForFeedbackItem: async () => null,
+    updateStatusReply: async () => {},
+  });
+
+  const updated = await babysitter.syncFeedbackForPR(pr.id);
+
+  assert.equal(updated.title, "Fresh PR title");
+  assert.equal(updated.body, "fresh body");
+  assert.equal(updated.bodyHtml, "<p>fresh body</p>");
+  assert.equal(updated.branch, "feature/fresh");
+  assert.equal(updated.author, "fresh-author");
+  assert.equal(updated.mergeableState, "clean");
+});
+
 test("syncAndBabysitTrackedRepos deprioritizes a repo whose PR list is unchanged", async () => {
   const storage = new MemStorage();
   await storage.updateConfig({ watchedRepos: ["octo/example"] });

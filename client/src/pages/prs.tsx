@@ -16,8 +16,11 @@ import {
   getFeedbackStatusBadgeClass,
   isFeedbackCollapsedByDefault,
   countActiveFeedbackStatuses,
-  isPRReadyToMerge,
 } from "@/lib/feedbackStatus";
+import {
+  isPRDetailReadyToMerge,
+  isPRSummaryReadyToMerge,
+} from "@/lib/prReadiness";
 import {
   getHealingSessionView,
   selectRelevantHealingSession,
@@ -70,8 +73,7 @@ type PrStatusFilter = "all" | "ready" | "ci_failing" | "attention" | "processing
 function matchesPrStatusFilter(pr: PRSummary, filter: PrStatusFilter): boolean {
   switch (filter) {
     case "ready":
-      // No mergeable_state on the stored PR — "done with green CI" is the proxy.
-      return pr.status === "done" && pr.testsPassed === true && pr.lintPassed === true;
+      return isPRSummaryReadyToMerge(pr);
     case "ci_failing":
       return pr.testsPassed === false || pr.lintPassed === false;
     case "attention":
@@ -1591,7 +1593,7 @@ export default function Dashboard() {
                 ) : undefined}
                 banner={(
                   <>
-                    {isPRReadyToMerge(selectedPR.feedbackItems) && selectedPR.status !== "processing" && countActiveFeedbackStatuses(selectedPR.feedbackItems).inProgress === 0 && (
+                    {isPRDetailReadyToMerge(selectedPR) && (
                       <ReadyToMergeIndicator
                         href={selectedPR.url}
                         testId="detail-ready-to-merge"

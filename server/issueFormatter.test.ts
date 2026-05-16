@@ -10,6 +10,7 @@ const input = {
   prNumber: 88,
   prUrl: "https://github.com/acme/widgets/pull/88",
   branch: "issue/17-fix-the-toggle-123",
+  author: "alice",
   summary: "Updated the toggle state.\nVerified the state transition with the targeted test.",
 };
 
@@ -35,8 +36,16 @@ test("buildPullRequestBody renders a structured PR body with related issue detai
   assert.match(body, /## Related Issue/);
   assert.match(body, /Closes #17/);
   assert.match(body, /\[#17 Fix the toggle\]\(https:\/\/github.com\/acme\/widgets\/issues\/17\)/);
+  assert.match(body, /## User/);
+  assert.match(body, /@alice/);
   assert.match(body, /## Repo/);
   assert.match(body, /## Branch/);
+});
+
+test("buildPullRequestBody normalizes an issue author into a GitHub mention", () => {
+  const body = buildPullRequestBody({ ...input, author: "@Alice" });
+
+  assert.match(body, /- @Alice/);
 });
 
 test("buildIssueWorkStatusComment renders the issue workflow milestones", () => {

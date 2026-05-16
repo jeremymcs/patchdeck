@@ -4,6 +4,7 @@ import type { NewPR } from "@shared/schema";
 import {
   createAppRuntime,
   deriveWorkPrMergeable,
+  getCurrentIssueEvaluationForLabels,
   getIssueAutoWorkEligibility,
   issueWorkAttemptCountFromJobs,
   issueWorkPrFromLogs,
@@ -335,6 +336,34 @@ test("getIssueAutoWorkEligibility requires a ready label, app approval, and no b
   });
 });
 
+test("getCurrentIssueEvaluationForLabels ignores stale blocked-label evaluations", () => {
+  assert.equal(getCurrentIssueEvaluationForLabels({ labels: ["needs-triage"] }, {
+    status: "blocked",
+    summary: "Blocked from automatic work by label: needs-maintainer-review.",
+    safetyFlags: ["blocked-label:needs-maintainer-review"],
+  }), null);
+
+  assert.deepEqual(getCurrentIssueEvaluationForLabels({ labels: ["needs-maintainer-review"] }, {
+    status: "blocked",
+    summary: "Blocked from automatic work by label: needs-maintainer-review.",
+    safetyFlags: ["blocked-label:needs-maintainer-review"],
+  }), {
+    status: "blocked",
+    summary: "Blocked from automatic work by label: needs-maintainer-review.",
+    safetyFlags: ["blocked-label:needs-maintainer-review"],
+  });
+
+  assert.deepEqual(getCurrentIssueEvaluationForLabels({ labels: ["needs-triage"] }, {
+    status: "blocked",
+    summary: "Blocked from automatic work because the issue asks for risky secret, network, or destructive behavior.",
+    safetyFlags: ["blocked-label:needs-maintainer-review", "secret-access"],
+  }), {
+    status: "blocked",
+    summary: "Blocked from automatic work because the issue asks for risky secret, network, or destructive behavior.",
+    safetyFlags: ["blocked-label:needs-maintainer-review", "secret-access"],
+  });
+});
+
 test("deriveWorkPrMergeable only treats a clean PR as ready to merge", () => {
   // "clean" is the only state where conflicts, required checks, and required
   // reviews are all satisfied — so it is the only one that counts as ready.
@@ -660,6 +689,83 @@ test("syncRepos syncs issues and persists the new etag when the issue list chang
     'W/"issues-v1"',
     "a successful sweep should persist the fresh etag for next tick",
   );
+});
+
+test("syncIssue refreshes worked issue metadata from GitHub", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig({ watchedRepos: ["owner/repo"] });
+  await storage.upsertSyncedIssues("owner/repo", [{
+    number: 7,
+    title: "Old title",
+    body: "old body",
+    bodyHtml: null,
+    url: "https://github.com/owner/repo/issues/7",
+    repoFullName: "owner/repo",
+    repoCloneUrl: "https://github.com/owner/repo.git",
+    author: "alice",
+    labels: ["needs-maintainer-review"],
+    assignees: [],
+    comments: 0,
+    createdAt: "2026-05-03T17:00:00.000Z",
+    updatedAt: "2026-05-03T18:00:00.000Z",
+  }], "2026-05-03T18:00:00.000Z");
+  await storage.markSyncedIssueWorked("owner/repo", 7);
+  await storage.upsertIssueEvaluation({
+    targetId: "owner/repo#7",
+    repo: "owner/repo",
+    issueNumber: 7,
+    status: "blocked",
+    confidence: 0.95,
+    summary: "Blocked from automatic work by label: needs-maintainer-review.",
+    safetyFlags: ["blocked-label:needs-maintainer-review"],
+    recommendedLabels: ["needs-maintainer-review", "blocked"],
+    markerCommentId: null,
+  });
+
+  let issueFetches = 0;
+  const fakeOctokit = {
+    issues: {
+      get: async () => {
+        issueFetches += 1;
+        return {
+          data: {
+            number: 7,
+            title: "Fresh title",
+            body: "fresh body",
+            html_url: "https://github.com/owner/repo/issues/7",
+            user: { login: "alice" },
+            labels: [{ name: "needs-triage" }],
+            assignees: [],
+            comments: 2,
+            created_at: "2026-05-03T17:00:00.000Z",
+            updated_at: "2026-05-16T18:00:00.000Z",
+          },
+        };
+      },
+    },
+    paginate: async () => [],
+  };
+
+  const runtime = createAppRuntime({
+    storage,
+    startBackgroundServices: false,
+    startWatcher: false,
+    babysitter: { syncAndBabysitTrackedRepos: async () => {} } as never,
+    buildOctokitFn: async () => fakeOctokit as never,
+  });
+
+  const synced = await runtime.syncIssue("owner/repo", 7);
+
+  assert.equal(issueFetches, 1, "manual issue sync must fetch GitHub even when the issue is already worked");
+  assert.equal(synced.isWorked, true);
+  assert.equal(synced.title, "Fresh title");
+  assert.deepEqual(synced.labels, ["needs-triage"]);
+  assert.equal(synced.evaluationStatus, null, "stale blocked-label evaluation should not survive label refresh");
+  assert.equal(synced.autoWorkBlockedReason, "missing ready-for-agent label");
+
+  const stored = await storage.getSyncedIssue("owner/repo", 7);
+  assert.equal(stored?.isWorked, true, "refresh must preserve the worked marker");
+  assert.equal(stored?.payload.title, "Fresh title");
 });
 
 test("pickWatcherColdStartDelayMs stays within the 15-45s cold-start window", () => {
