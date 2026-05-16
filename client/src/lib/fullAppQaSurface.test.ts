@@ -362,6 +362,7 @@ test("issues page keeps the QA-tested issue monitor and work surface wired", asy
 
   for (const [label, testId] of [
     ["sync button", "button-sync-issues"],
+    ["start visible issue work button", "button-start-visible-issue-work"],
     ["issue number search", "issue-number-search"],
     ["work issue button", "button-work-issue"],
     ["evaluate issue button", "button-evaluate-issue"],
@@ -405,6 +406,8 @@ test("issues page keeps the QA-tested issue monitor and work surface wired", asy
   assertHasExpression(sourceFile, "issue auto work eligibility", /\bautoWorkEligible\b/);
   assertHasExpression(sourceFile, "issue auto blocked reason", /\bautoWorkBlockedReason\b/);
   assertHasExpression(sourceFile, "issue work filter helper", /\bmatchesIssueWorkFilter\b/);
+  assertHasExpression(sourceFile, "issue start work eligibility", /\bcanStartIssueWork\b/);
+  assertHasExpression(sourceFile, "issue start work mutation", /\bstartVisibleWorkMutation\b/);
   assertHasExpression(sourceFile, "stale issue helper", /\bisStaleIssue\b/);
   assertHasExpression(sourceFile, "issue detail refresh", /\bselectedIssueDetail\b/);
   assertHasExpression(sourceFile, "issue UI polling uses tuning interval", /\bgetUiPollIntervalMs\(config\)/);

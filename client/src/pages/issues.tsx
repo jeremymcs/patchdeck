@@ -170,6 +170,13 @@ function hasExternalIssuePr(issue: Issue): boolean {
   return Boolean(issue.externalWorkPrUrl && issue.externalWorkPrNumber !== undefined && issue.externalWorkPrNumber !== null);
 }
 
+function canStartIssueWork(issue: Issue): boolean {
+  return issue.workStatus === "idle"
+    && !issue.workPrUrl
+    && !hasExternalIssuePr(issue)
+    && Boolean(issue.autoWorkEligible);
+}
+
 function formatIssueWorkStage(issue: Issue): string {
   const stage = issue.workStage ?? (
     issue.workStatus === "in_progress" ? "working" : issue.workStatus
@@ -240,7 +247,7 @@ function isStaleIssue(issue: Issue): boolean {
 function matchesIssueWorkFilter(issue: Issue, filter: IssueWorkFilter): boolean {
   if (filter === "ready") return issue.workPrMergeable === true;
   if (filter === "worked") return Boolean(issue.isWorked);
-  if (filter === "auto") return Boolean(issue.autoWorkEligible);
+  if (filter === "auto") return canStartIssueWork(issue);
   if (filter === "needs_eval") return !issue.evaluationStatus;
   if (filter === "review") return issue.evaluationStatus === "blocked" || issue.evaluationStatus === "needs_review";
   if (filter === "failed") return issue.workStatus === "failed";
@@ -843,6 +850,10 @@ function IssuesPage() {
       .filter((issue) => matchesNumberSearch(issue.number, issueNumberSearch)),
     [issues, selectedRepo, selectedWorkFilter, issueNumberSearch],
   );
+  const startableVisibleIssues = useMemo(
+    () => filteredIssues.filter(canStartIssueWork),
+    [filteredIssues],
+  );
 
   useEffect(() => {
     const nextIssue = filteredIssues[0];
@@ -968,6 +979,50 @@ function IssuesPage() {
     },
     onError: (error) => {
       toast({ variant: "destructive", description: `Could not queue issue work: ${error.message}` });
+    },
+  });
+
+  const startVisibleWorkMutation = useMutation({
+    mutationFn: async (issuesToStart: Issue[]) => {
+      const queued: Array<{ repo: string; number: number; id: string }> = [];
+      const failed: Array<{ issue: Issue; message: string }> = [];
+
+      for (const issue of issuesToStart) {
+        try {
+          const res = await apiRequest("POST", "/api/issues/work", {
+            repo: issue.repo,
+            number: issue.number,
+          });
+          queued.push(await res.json() as { repo: string; number: number; id: string });
+        } catch (error) {
+          failed.push({
+            issue,
+            message: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+
+      return { queued, failed };
+    },
+    onSuccess: async ({ queued, failed }) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["/api/issues"] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/issues/detail"] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/activities"] }),
+      ]);
+
+      if (failed.length > 0) {
+        toast({
+          variant: "destructive",
+          description: `Queued ${queued.length} issue${queued.length === 1 ? "" : "s"}; ${failed.length} failed to queue.`,
+        });
+        return;
+      }
+
+      toast({ description: `Queued work for ${queued.length} issue${queued.length === 1 ? "" : "s"}.` });
+    },
+    onError: (error) => {
+      toast({ variant: "destructive", description: `Could not start issue work: ${error.message}` });
     },
   });
 
@@ -1157,7 +1212,7 @@ function IssuesPage() {
     (selectedRepo === "all" || issue.repo === selectedRepo) && Boolean(issue.isWorked)
   ).length;
   const autoEligibleIssueCount = issues.filter((issue) =>
-    (selectedRepo === "all" || issue.repo === selectedRepo) && Boolean(issue.autoWorkEligible)
+    (selectedRepo === "all" || issue.repo === selectedRepo) && canStartIssueWork(issue)
   ).length;
   const needsEvaluationIssueCount = issues.filter((issue) =>
     (selectedRepo === "all" || issue.repo === selectedRepo) && !issue.evaluationStatus
@@ -1252,16 +1307,42 @@ function IssuesPage() {
                     : `synced ${aggregateSyncedFallback}${aggregateCoverage.github !== null ? ` / GitHub ${aggregateCoverage.github}` : " / GitHub ?"}`}
               </span>
             </div>
-            <button
-              type="button"
-              onClick={() => { void handleSyncIssues(true); }}
-              disabled={isSyncingRepos || globalDrainMode || isGitHubThrottled}
-              title={isGitHubThrottled ? throttledTitle : undefined}
-              data-testid="button-full-sweep-issues"
-              className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
-            >
-              {globalDrainMode ? "paused" : "full sweep"}
-            </button>
+            <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => startVisibleWorkMutation.mutate(startableVisibleIssues)}
+                disabled={
+                  startVisibleWorkMutation.isPending
+                  || startableVisibleIssues.length === 0
+                  || globalDrainMode
+                  || isGitHubThrottled
+                }
+                title={
+                  globalDrainMode
+                    ? "Issue work is paused by drain mode"
+                    : isGitHubThrottled
+                      ? throttledTitle
+                      : startableVisibleIssues.length === 0
+                        ? "No visible auto-eligible idle issues to start"
+                        : `Start work for ${startableVisibleIssues.length} visible issue${startableVisibleIssues.length === 1 ? "" : "s"}`
+                }
+                data-testid="button-start-visible-issue-work"
+                className="inline-flex items-center gap-1 rounded-md border border-primary bg-primary px-2 py-0.5 text-[10px] uppercase tracking-wider text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {startVisibleWorkMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Wrench className="h-3 w-3" />}
+                {startVisibleWorkMutation.isPending ? "starting" : `start work (${startableVisibleIssues.length})`}
+              </button>
+              <button
+                type="button"
+                onClick={() => { void handleSyncIssues(true); }}
+                disabled={isSyncingRepos || globalDrainMode || isGitHubThrottled}
+                title={isGitHubThrottled ? throttledTitle : undefined}
+                data-testid="button-full-sweep-issues"
+                className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
+              >
+                {globalDrainMode ? "paused" : "full sweep"}
+              </button>
+            </div>
           </div>
           <div data-testid="repo-filter-bar" className="flex flex-col gap-2 border-b border-border px-4 py-2.5">
             <div className="flex flex-wrap items-start gap-2">
@@ -1348,7 +1429,7 @@ function IssuesPage() {
                   : "border-border text-muted-foreground hover:border-primary/40 hover:text-primary"
               }`}
             >
-              auto eligible ({autoEligibleIssueCount})
+              ready to work ({autoEligibleIssueCount})
             </button>
             <button
               type="button"
