@@ -9,6 +9,9 @@
 - Closes #<issue-number>
 - [#<issue-number> <issue-title>](<issue-url>)
 
+## User
+- @<username>
+
 ## Repo
 - <owner/repo>
 

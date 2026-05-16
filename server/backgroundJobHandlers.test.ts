@@ -312,6 +312,8 @@ test("work_issue handler opens a PR after a successful repair run", async () => 
   assert.match(String(pullsCreated[0]?.body), /## Summary/);
   assert.match(String(pullsCreated[0]?.body), /## Verification/);
   assert.match(String(pullsCreated[0]?.body), /Closes #17/);
+  assert.match(String(pullsCreated[0]?.body), /## User/);
+  assert.match(String(pullsCreated[0]?.body), /@alice/);
   assert.match(String(pullsCreated[0]?.body), /## Repo/);
   assert.match(String(pullsCreated[0]?.body), /## Branch/);
   assert.equal(commentsCreated.length, 3);
