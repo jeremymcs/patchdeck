@@ -122,6 +122,7 @@ You can control babysitter behavior per repository:
 - **Poll interval** — How often to check for new reviews (default: 60 seconds).
 - **Auto-dispatch** — Whether to automatically dispatch agents or require approval.
 - **Agent preference** — Choose the global coding agent, with CLI fallback when the preferred tool is not installed.
+- **Max concurrent babysitter runs** — Cap how many autonomous `babysit_pr` jobs can be in-flight per watcher sweep before additional PRs are deferred.
 - **Per-PR watch toggle** — Pause one tracked PR's background automation while keeping manual runs available.
 
 See [Configuration](./configuration.md) for details.
