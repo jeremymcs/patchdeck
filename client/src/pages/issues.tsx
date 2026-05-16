@@ -24,6 +24,7 @@ const ISSUES_CACHE_KEY = "patchdeck:issues-cache:v2";
 const ISSUES_CACHE_MAX_AGE_MS = 5 * 60 * 1000;
 const ISSUES_PAGE_SIZE = 100;
 const LIVE_POLL_INTERVAL_MS = 5000;
+const AUTOMATION_LABELS = new Set(["blocked", "ready-for-agent", "needs-maintainer-review"]);
 
 function readCachedIssues(): { data: IssueListPage; updatedAt: number } | null {
   if (typeof window === "undefined") return null;
@@ -272,6 +273,18 @@ function issueLifecycleLabel(issue: Issue): string | null {
   return "worked";
 }
 
+function shouldShowIssueAutomationState(issue: Issue): boolean {
+  return !issue.isWorked && !issue.workPrUrl;
+}
+
+function visibleIssueListLabels(issue: Issue): string[] {
+  if (!issue.isWorked) {
+    return issue.labels;
+  }
+
+  return issue.labels.filter((label) => !AUTOMATION_LABELS.has(label.trim().toLowerCase()));
+}
+
 const LOG_METADATA_ORDER = ["repo", "issueNumber", "prNumber", "prUrl", "jobId", "stage", "status", "safetyFlags"] as const;
 
 function formatLogMetadataValue(key: string, value: unknown): string {
@@ -348,6 +361,8 @@ function IssueRow({
 }) {
   const showInlineStatusBadge = issue.workStatus !== "queued" && issue.workStatus !== "in_progress";
   const lifecycle = issueLifecycleLabel(issue);
+  const showAutomationState = shouldShowIssueAutomationState(issue);
+  const visibleLabels = visibleIssueListLabels(issue);
   const rowAction =
     issue.workPrUrl && issue.workPrNumber !== undefined && issue.workPrNumber !== null
       ? (
@@ -430,12 +445,14 @@ function IssueRow({
             {formatBodyPreview(issue.body)}
           </div>
           <div className="mt-2 flex flex-wrap gap-1">
-            <StatusChip
-              tone={issueEvaluationTone(issue.evaluationStatus)}
-              label={formatEvaluationState(issue)}
-              title={issue.evaluationSummary ?? undefined}
-              testId="issue-evaluation-state-list"
-            />
+            {showAutomationState && (
+              <StatusChip
+                tone={issueEvaluationTone(issue.evaluationStatus)}
+                label={formatEvaluationState(issue)}
+                title={issue.evaluationSummary ?? undefined}
+                testId="issue-evaluation-state-list"
+              />
+            )}
             <QueueStatusBadge status={queueStatus} />
             {verifyState && <VerifyStateBadge state={verifyState} />}
             {lifecycle && (
@@ -445,9 +462,6 @@ function IssueRow({
                 testId="issue-lifecycle-badge"
               />
             )}
-            {issue.isWorked && (
-              <StatusChip tone="success" label="worked" testId="issue-worked-badge" />
-            )}
             {issue.subtasks && issue.subtasks.length >= 2 && (
               <StatusChip
                 tone="primary"
@@ -456,14 +470,14 @@ function IssueRow({
                 testId="issue-multi-bug-badge"
               />
             )}
-            {issue.labels.slice(0, 3).map((label) => (
+            {visibleLabels.slice(0, 3).map((label) => (
               <span key={label} className="border border-border px-1.5 py-0 text-[10px] uppercase tracking-wider text-muted-foreground">
                 {label}
               </span>
             ))}
-            {issue.labels.length > 3 && (
+            {visibleLabels.length > 3 && (
               <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                +{issue.labels.length - 3}
+                +{visibleLabels.length - 3}
               </span>
             )}
           </div>
@@ -1588,17 +1602,21 @@ function IssuesPage() {
                         testId="issue-work-attempt"
                       />
                     )}
-                    <StatusChip
-                      tone={autoWorkTone(selectedIssue.autoWorkEligible)}
-                      label={formatAutoWorkState(selectedIssue)}
-                      testId="issue-auto-work-state"
-                    />
-                    <StatusChip
-                      tone={issueEvaluationTone(selectedIssue.evaluationStatus)}
-                      label={formatEvaluationState(selectedIssue)}
-                      title={selectedIssue.evaluationSummary ?? undefined}
-                      testId="issue-evaluation-state"
-                    />
+                    {shouldShowIssueAutomationState(selectedIssue) && (
+                      <>
+                        <StatusChip
+                          tone={autoWorkTone(selectedIssue.autoWorkEligible)}
+                          label={formatAutoWorkState(selectedIssue)}
+                          testId="issue-auto-work-state"
+                        />
+                        <StatusChip
+                          tone={issueEvaluationTone(selectedIssue.evaluationStatus)}
+                          label={formatEvaluationState(selectedIssue)}
+                          title={selectedIssue.evaluationSummary ?? undefined}
+                          testId="issue-evaluation-state"
+                        />
+                      </>
+                    )}
                   </>
                 )}
                 actions={(
@@ -1841,46 +1859,48 @@ function IssuesPage() {
                 {selectedIssue.subtasks && selectedIssue.subtasks.length > 0 && (
                   <SubtaskListPanel subtasks={selectedIssue.subtasks} />
                 )}
-                <DetailPanel
-                  title="Automation gate"
-                  testId="issue-evaluation-detail"
-                  chip={(
-                    <StatusChip
-                      tone={issueEvaluationTone(selectedIssue.evaluationStatus)}
-                      label={formatEvaluationState(selectedIssue)}
-                    />
-                  )}
-                >
-                  <div className="px-3 py-2">
-                    <div className="text-[12px] leading-5 text-foreground/85">
-                      {selectedIssue.evaluationSummary ?? selectedIssue.autoWorkBlockedReason ?? "Evaluate this issue before auto-mode can work it."}
-                    </div>
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      <span className="border border-border/60 px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
-                        auto: {selectedIssue.autoWorkEligible ? "enabled" : "blocked"}
-                      </span>
-                      {typeof selectedIssue.evaluationConfidence === "number" && (
-                        <span className="border border-border/60 px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
-                          confidence: {formatEvaluationConfidence(selectedIssue.evaluationConfidence)}
-                        </span>
-                      )}
-                      {selectedIssue.evaluationUpdatedAt && (
-                        <span className="border border-border/60 px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
-                          evaluated: {formatDateTime(selectedIssue.evaluationUpdatedAt)}
-                        </span>
-                      )}
-                    </div>
-                    {selectedIssue.evaluationSafetyFlags && selectedIssue.evaluationSafetyFlags.length > 0 && (
-                      <div className="mt-2 flex flex-wrap gap-1.5">
-                        {selectedIssue.evaluationSafetyFlags.map((flag) => (
-                          <span key={flag} className="border border-destructive/40 px-2 py-0.5 text-[10px] uppercase tracking-wider text-destructive">
-                            {flag}
-                          </span>
-                        ))}
-                      </div>
+                {shouldShowIssueAutomationState(selectedIssue) && (
+                  <DetailPanel
+                    title="Automation gate"
+                    testId="issue-evaluation-detail"
+                    chip={(
+                      <StatusChip
+                        tone={issueEvaluationTone(selectedIssue.evaluationStatus)}
+                        label={formatEvaluationState(selectedIssue)}
+                      />
                     )}
-                  </div>
-                </DetailPanel>
+                  >
+                    <div className="px-3 py-2">
+                      <div className="text-[12px] leading-5 text-foreground/85">
+                        {selectedIssue.evaluationSummary ?? selectedIssue.autoWorkBlockedReason ?? "Evaluate this issue before auto-mode can work it."}
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        <span className="border border-border/60 px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+                          auto: {selectedIssue.autoWorkEligible ? "enabled" : "blocked"}
+                        </span>
+                        {typeof selectedIssue.evaluationConfidence === "number" && (
+                          <span className="border border-border/60 px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+                            confidence: {formatEvaluationConfidence(selectedIssue.evaluationConfidence)}
+                          </span>
+                        )}
+                        {selectedIssue.evaluationUpdatedAt && (
+                          <span className="border border-border/60 px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+                            evaluated: {formatDateTime(selectedIssue.evaluationUpdatedAt)}
+                          </span>
+                        )}
+                      </div>
+                      {selectedIssue.evaluationSafetyFlags && selectedIssue.evaluationSafetyFlags.length > 0 && (
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {selectedIssue.evaluationSafetyFlags.map((flag) => (
+                            <span key={flag} className="border border-destructive/40 px-2 py-0.5 text-[10px] uppercase tracking-wider text-destructive">
+                              {flag}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </DetailPanel>
+                )}
                 <div className="mt-3 text-[11px] uppercase tracking-wider text-muted-foreground">
                   Issue body
                 </div>
