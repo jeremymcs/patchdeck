@@ -271,6 +271,7 @@ test("full app QA route matrix is wired through the hash router", async () => {
 
 test("dashboard keeps the QA-tested PR, repo, feedback, and side-panel workflows wired", async () => {
   const { sourceFile } = await parseProjectFile("client/src/pages/prs.tsx");
+  const { sourceFile: dashboardErrorsSourceFile } = await parseProjectFile("client/src/components/DashboardErrorsPanel.tsx");
 
   for (const [label, testId] of [
     ["active tab", "tab-active"],
@@ -286,19 +287,25 @@ test("dashboard keeps the QA-tested PR, repo, feedback, and side-panel workflows
     ["ask input", "input-question"],
     ["ask submit", "button-ask"],
     ["dashboard error pill", "dashboard-error-pill"],
-    ["dashboard errors panel", "dashboard-errors-panel"],
-    ["dashboard clear failed activities", "dashboard-clear-failed-activities"],
-    ["dashboard clear issue failure", "dashboard-clear-issue-failure"],
-    ["dashboard errors roll-up toggle", "dashboard-errors-rollup-toggle"],
-    ["dashboard errors roll-up summary", "dashboard-errors-rollup-summary"],
     ["dashboard sync action", "button-sync-dashboard"],
   ] satisfies SourceExpectation[]) {
     assertHasTestId(sourceFile, label, testId);
   }
 
+  for (const [label, testId] of [
+    ["dashboard errors panel", "dashboard-errors-panel"],
+    ["dashboard clear failed activities", "dashboard-clear-failed-activities"],
+    ["dashboard clear issue failure", "dashboard-clear-issue-failure"],
+    ["dashboard errors roll-up toggle", "dashboard-errors-rollup-toggle"],
+    ["dashboard errors roll-up summary", "dashboard-errors-rollup-summary"],
+  ] satisfies SourceExpectation[]) {
+    assertHasTestId(dashboardErrorsSourceFile, label, testId);
+  }
+
   assertHasExpression(sourceFile, "feedback retry action", /\bretryMutation\b/);
   assertHasExpression(sourceFile, "feedback manual decisions", /\[\s*["']accept["']\s*,\s*["']reject["']\s*,\s*["']flag["']\s*\]/);
   assertHasExpression(sourceFile, "dashboard error scroll action", /\bscrollToDashboardErrors\b/);
+  assertHasExpression(sourceFile, "dashboard errors panel component", /\bDashboardErrorsPanel\b/);
 
   for (const [label, endpoint] of [
     ["active PR API", "/api/prs"],
@@ -331,9 +338,9 @@ test("dashboard keeps the QA-tested PR, repo, feedback, and side-panel workflows
   assertHasStringValue(sourceFile, "blocked manual copy", "Manual runs are blocked while global automation is paused.");
   assertHasStringValue(sourceFile, "drained PR copy", "Background and manual runs are paused by drain mode.");
   assertHasStringValue(sourceFile, "drained ask copy", "Ask Agent is paused by drain mode.");
-  assertHasStringValue(sourceFile, "dashboard errors heading", "Needs attention");
-  assertHasStringValue(sourceFile, "dashboard errors roll-up label", "Roll up");
-  assertHasStringValue(sourceFile, "dashboard errors expand label", "Expand");
+  assertHasStringValue(dashboardErrorsSourceFile, "dashboard errors heading", "Needs attention");
+  assertHasStringValue(dashboardErrorsSourceFile, "dashboard errors roll-up label", "Roll up");
+  assertHasStringValue(dashboardErrorsSourceFile, "dashboard errors expand label", "Expand");
   assertHasExpression(sourceFile, "dashboard drain state", /\bglobalDrainMode\b/);
   assertHasExpression(sourceFile, "dashboard issues drain guard", /enabled: runtimeState !== undefined && !globalDrainMode/);
   assertHasExpression(sourceFile, "dashboard active error count", /\bactiveErrorCount\b/);
@@ -400,6 +407,8 @@ test("issues page keeps the QA-tested issue monitor and work surface wired", asy
   assertHasExpression(sourceFile, "issue work filter helper", /\bmatchesIssueWorkFilter\b/);
   assertHasExpression(sourceFile, "stale issue helper", /\bisStaleIssue\b/);
   assertHasExpression(sourceFile, "issue detail refresh", /\bselectedIssueDetail\b/);
+  assertHasExpression(sourceFile, "issue UI polling uses tuning interval", /\bgetUiPollIntervalMs\(config\)/);
+  assertHasExpression(sourceFile, "issue coverage pauses during GitHub throttling", /enabled: config !== undefined && !globalDrainMode && !isGitHubThrottled/);
   assertHasExpression(sourceFile, "issue PR mergeability", /\bworkPrMergeable\b/);
   assertHasExpression(sourceFile, "issue queue helper", /\bbuildQueueStatusIndex\b/);
   assertHasExpression(sourceFile, "issue queue badge", /\bQueueStatusBadge\b/);
@@ -456,6 +465,8 @@ test("settings keeps the QA-tested configuration, token, and runtime controls wi
   assertHasJsxTag(sourceFile, "repo tracking scope control", "WatchScopeControl");
   assertHasJsxTag(sourceFile, "issue work mode control", "IssueWorkModeControl");
   assertHasExpression(sourceFile, "settings TOC scroll action", /\bscrollToSettingsSection\b/);
+  assertHasStringValue(sourceFile, "setting default reset button", "Default");
+  assertHasExpression(sourceFile, "setting default reset action", /Reset \$\{label\} to default/);
   assert.doesNotMatch(
     sourceFile.getFullText(),
     /href=\{?\s*(?:`#|"#|'#)/,

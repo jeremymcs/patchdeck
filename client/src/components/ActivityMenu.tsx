@@ -22,7 +22,7 @@ function formatClock(timestamp: string | null): string | null {
 }
 
 function formatPollLabel(pollIntervalMs?: number): string {
-  const seconds = Math.max(1, Math.round((pollIntervalMs ?? 120000) / 1000));
+  const seconds = Math.max(1, Math.round((pollIntervalMs ?? 600000) / 1000));
   return `${seconds}s`;
 }
 

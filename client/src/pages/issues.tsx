@@ -1,15 +1,16 @@
 import { Component, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { CheckCircle2, CircleDashed, CircleSlash, ExternalLink, Loader2, Plus, RefreshCw, ShieldCheck, Trash2, Wrench, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, CircleDashed, CircleSlash, ExternalLink, Loader2, Plus, RefreshCw, ShieldCheck, Trash2, Wrench, X } from "lucide-react";
 import { apiRequest, fetchJson, queryClient } from "@/lib/queryClient";
 import { AppHeader } from "@/components/AppHeader";
 import { UpdateBanner } from "@/components/UpdateBanner";
 import { toast } from "@/hooks/use-toast";
-import { issueListPageSchema, issueSchema, type ActivitySnapshot, type Config, type Issue, type IssueListPage, type IssueSubtask, type LogEntry, type RuntimeState } from "@shared/schema";
+import { issueListPageSchema, issueSchema, type ActivityItem, type ActivitySnapshot, type Config, type Issue, type IssueListPage, type IssueSubtask, type LogEntry, type RuntimeState } from "@shared/schema";
 import { Skeleton } from "@/components/ui/skeleton";
 import { buildQueueStatusIndex, type QueueStatusView } from "@/lib/activityQueue";
 import { QueueStatusBadge } from "@/components/QueueStatusBadge";
 import { ActivityMenu, EMPTY_ACTIVITY_SNAPSHOT } from "@/components/ActivityMenu";
+import { DashboardErrorsPanel } from "@/components/DashboardErrorsPanel";
 import { DetailHeader } from "@/components/detail/DetailHeader";
 import { DetailPanel } from "@/components/detail/DetailPanel";
 import { MetaBreadcrumb, type MetaItem } from "@/components/detail/MetaBreadcrumb";
@@ -17,6 +18,7 @@ import { StageProgressBar } from "@/components/detail/StageProgressBar";
 import { StatusChip } from "@/components/detail/StatusChip";
 import { buildIssueStages } from "@/lib/stages";
 import { autoWorkTone, issueEvaluationTone, issueRowTone, issueWorkStatusTone, toneRailClass } from "@/lib/statusTones";
+import { getUiPollIntervalMs } from "@/lib/polling";
 
 const ISSUES_CACHE_KEY = "patchdeck:issues-cache:v2";
 const ISSUES_CACHE_MAX_AGE_MS = 5 * 60 * 1000;
@@ -102,6 +104,25 @@ function issueKey(issue: Issue): string {
 function issueDetailUrl(issue: Issue): string {
   const [owner, repo] = issue.repo.split("/");
   return `/api/issues/${encodeURIComponent(owner ?? "")}/${encodeURIComponent(repo ?? "")}/${issue.number}`;
+}
+
+function parseIssueTargetId(targetId: string): { repo: string; number: number } | null {
+  const separator = targetId.lastIndexOf("#");
+  if (separator === -1) {
+    return null;
+  }
+
+  const repo = targetId.slice(0, separator);
+  const number = Number(targetId.slice(separator + 1));
+  if (!repo || !Number.isInteger(number) || number <= 0) {
+    return null;
+  }
+
+  return { repo, number };
+}
+
+function scrollToDashboardErrors() {
+  document.getElementById("dashboard-errors")?.scrollIntoView({ block: "start" });
 }
 
 function issueListUrl(limit: number, offset: number): string {
@@ -665,16 +686,18 @@ function IssuesPage() {
     queryKey: ["/api/activities"],
   });
   const { data: config } = useQuery<Config>({ queryKey: ["/api/config"] });
+  const uiPollIntervalMs = getUiPollIntervalMs(config);
   const { data: githubRateLimit } = useQuery<GitHubRateLimitState>({
     queryKey: ["/api/github-rate-limit"],
-    refetchInterval: 30000,
+    refetchInterval: uiPollIntervalMs,
   });
+  const isGitHubThrottled = githubRateLimit?.limited === true;
   const { data: issueCoverage = [] } = useQuery<IssueCoverageRow[]>({
     queryKey: ["/api/issues/coverage"],
-    refetchInterval: 30000,
+    enabled: config !== undefined && !globalDrainMode && !isGitHubThrottled,
+    refetchInterval: uiPollIntervalMs,
   });
   const queueStatusById = useMemo(() => buildQueueStatusIndex(activities), [activities]);
-  const isGitHubThrottled = githubRateLimit?.limited === true;
   const throttledTitle = githubRateLimit?.resetAt
     ? `GitHub rate limited until ${formatDateTime(githubRateLimit.resetAt)}`
     : "GitHub rate limited";
@@ -811,6 +834,7 @@ function IssuesPage() {
   const [selectedWorkFilter, setSelectedWorkFilter] = useState<IssueWorkFilter>("all");
   const [issueNumberSearch, setIssueNumberSearch] = useState("");
   const [labelInput, setLabelInput] = useState("");
+  const [areErrorsRolledUp, setAreErrorsRolledUp] = useState(false);
   const normalizedIssueNumberSearch = normalizeNumberSearch(issueNumberSearch);
   const filteredIssues = useMemo(
     () => issues
@@ -870,7 +894,7 @@ function IssuesPage() {
       return parsed;
     },
     enabled: Boolean(selectedIssueFromList) && !globalDrainMode,
-    refetchInterval: selectedIssueFromList && isActiveWorkStatus(selectedIssueFromList.workStatus) && !globalDrainMode ? 5000 : false,
+    refetchInterval: selectedIssueFromList && isActiveWorkStatus(selectedIssueFromList.workStatus) && !globalDrainMode ? uiPollIntervalMs : false,
   });
   const selectedIssue = selectedIssueDetail ?? selectedIssueFromList;
   const selectedIssueKey = selectedIssue ? issueKey(selectedIssue) : null;
@@ -953,6 +977,30 @@ function IssuesPage() {
         repo: issue.repo,
         number: issue.number,
       });
+      return res.json() as Promise<Issue>;
+    },
+    onSuccess: async (issue) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["/api/issues"] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/issues/detail", issue.repo, issue.number] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/activities"] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/logs", issue.id] }),
+      ]);
+      toast({ description: `Cleared failed work attempts for #${issue.number}.` });
+    },
+    onError: (error) => {
+      toast({ variant: "destructive", description: `Could not clear issue failures: ${error.message}` });
+    },
+  });
+
+  const clearIssueFailureFromActivityMutation = useMutation({
+    mutationFn: async (activity: ActivityItem) => {
+      const issueTarget = parseIssueTargetId(activity.targetId);
+      if (!issueTarget) {
+        throw new Error(`Invalid issue activity target: ${activity.targetId}`);
+      }
+
+      const res = await apiRequest("DELETE", "/api/issues/work/failures", issueTarget);
       return res.json() as Promise<Issue>;
     },
     onSuccess: async (issue) => {
@@ -1100,6 +1148,7 @@ function IssuesPage() {
   });
 
   const activeIssueCount = issues.filter((issue) => isActiveWorkStatus(issue.workStatus)).length;
+  const activeErrorCount = activities.failed.length + activities.warnings.length;
   const visibleIssues = filteredIssues;
   const readyIssueCount = issues.filter((issue) =>
     (selectedRepo === "all" || issue.repo === selectedRepo) && issue.workPrMergeable === true
@@ -1142,6 +1191,21 @@ function IssuesPage() {
         )}
         actions={(
           <>
+            {activeErrorCount > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  setAreErrorsRolledUp(false);
+                  scrollToDashboardErrors();
+                }}
+                className="inline-flex items-center gap-1 rounded-md border border-destructive/50 px-2 py-0.5 text-[11px] uppercase tracking-wider text-destructive transition-colors hover:bg-destructive hover:text-background focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+                data-testid="issues-error-pill"
+              >
+                <AlertTriangle className="h-3 w-3" aria-hidden="true" />
+                Errors
+                <span className="font-mono">{activeErrorCount}</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={() => { void handleSyncIssues(false); }}
@@ -1163,6 +1227,16 @@ function IssuesPage() {
             />
           </>
         )}
+      />
+
+      <DashboardErrorsPanel
+        activities={activities}
+        onClearFailed={() => clearFailedActivitiesMutation.mutate()}
+        isClearingFailed={clearFailedActivitiesMutation.isPending}
+        onClearIssueFailure={(activity) => clearIssueFailureFromActivityMutation.mutate(activity)}
+        isClearingIssueFailure={clearIssueFailureFromActivityMutation.isPending}
+        rolledUp={areErrorsRolledUp}
+        onToggleRolledUp={() => setAreErrorsRolledUp((current) => !current)}
       />
 
       <div className="flex flex-1 flex-col overflow-hidden lg:flex-row">

@@ -114,6 +114,13 @@ export type RuntimeSnapshot = RuntimeState & {
   activeRuns: number;
 };
 
+export type IssueCoverage = {
+  repo: string;
+  syncedOpenCount: number;
+  githubOpenCount: number | null;
+  lastSyncedAt: string | null;
+};
+
 export type DrainModeParams = {
   enabled: boolean;
   reason?: string;
@@ -134,7 +141,8 @@ export type AppRuntime = {
   addRepo(repoInput: string): Promise<{ repo: string }>;
   removeRepo(repoInput: string, mode?: "soft" | "hard"): Promise<{ ok: true; repo: string; mode: "soft" | "hard"; removedPrs: number }>;
   updateRepoSettings(repoInput: string, updates: Partial<Omit<WatchedRepo, "repo">>): Promise<WatchedRepo>;
-  syncRepos(): Promise<{ ok: true }>;
+  syncRepos(options?: { fullSweep?: boolean }): Promise<{ ok: true }>;
+  listIssueCoverage(): Promise<IssueCoverage[]>;
   createManualRelease(repoInput: string): Promise<ReleaseRun>;
   listPRs(view?: "active" | "archived"): Promise<PRSummary[]>;
   getPR(id: string): Promise<PR | null>;
@@ -1788,7 +1796,7 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
 
   const refreshWatcherSchedule = async () => {
     const config = await storage.getConfig();
-    const interval = Math.max(10_000, config.pollIntervalMs || 120_000);
+    const interval = Math.max(10_000, config.pollIntervalMs || 600_000);
 
     if (watcherTimer && watcherIntervalMs === interval) {
       return;
@@ -2068,16 +2076,49 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       return updated;
     },
 
-    async syncRepos() {
+    async syncRepos(options?: { fullSweep?: boolean }) {
       const runtimeState = await storage.getRuntimeState();
       if (runtimeState.drainMode) {
         return { ok: true as const };
       }
 
-      await babysitter.syncAndBabysitTrackedRepos({ includeAllOpenPrs: true, fullSweep: true });
-      await syncStoredIssuesStep({ fullSweep: true });
+      const fullSweep = options?.fullSweep === true;
+      await babysitter.syncAndBabysitTrackedRepos({ includeAllOpenPrs: true, fullSweep });
+      await syncStoredIssuesStep({ fullSweep });
       notifyChange();
       return { ok: true as const };
+    },
+
+    async listIssueCoverage() {
+      const config = await storage.getConfig();
+      if (config.watchedRepos.length === 0) {
+        return [];
+      }
+      const [counts, syncStates] = await Promise.all([
+        storage.listSyncedIssueCounts({ repos: config.watchedRepos, includeWorked: false }),
+        storage.getRepoSyncStates("issues"),
+      ]);
+      const syncByRepo = new Map(syncStates.map((state) => [state.repo, state]));
+      const octokit = await buildOctokit(config);
+      const coverage = await Promise.all(config.watchedRepos.map(async (repo): Promise<IssueCoverage> => {
+        const localCount = counts.repoTotals[repo] ?? 0;
+        const syncState = syncByRepo.get(repo);
+        const parsed = parseRepoSlug(repo);
+        if (!parsed) {
+          return { repo, syncedOpenCount: localCount, githubOpenCount: null, lastSyncedAt: syncState?.lastSyncedAt ?? null };
+        }
+        try {
+          const result = await octokit.request("GET /search/issues", {
+            q: `repo:${repo} is:issue is:open`,
+            per_page: 1,
+          });
+          const githubOpenCount = typeof result.data?.total_count === "number" ? result.data.total_count : null;
+          return { repo, syncedOpenCount: localCount, githubOpenCount, lastSyncedAt: syncState?.lastSyncedAt ?? null };
+        } catch {
+          return { repo, syncedOpenCount: localCount, githubOpenCount: null, lastSyncedAt: syncState?.lastSyncedAt ?? null };
+        }
+      }));
+      return coverage;
     },
 
     async createManualRelease(repoInput) {

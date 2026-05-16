@@ -586,7 +586,7 @@ export class SqliteStorage implements IStorage {
         max_healing_attempts_per_session INTEGER NOT NULL DEFAULT 3,
         max_healing_attempts_per_fingerprint INTEGER NOT NULL DEFAULT 2,
         max_concurrent_healing_runs INTEGER NOT NULL DEFAULT 1,
-        healing_cooldown_ms INTEGER NOT NULL DEFAULT 300000,
+        healing_cooldown_ms INTEGER NOT NULL DEFAULT 900000,
         trusted_reviewers_json TEXT NOT NULL,
         priority_issue_authors_json TEXT NOT NULL DEFAULT '[]',
         ignored_bots_json TEXT NOT NULL
@@ -949,11 +949,11 @@ export class SqliteStorage implements IStorage {
     this.ensureColumn("config", "max_healing_attempts_per_session", "INTEGER NOT NULL DEFAULT 3");
     this.ensureColumn("config", "max_healing_attempts_per_fingerprint", "INTEGER NOT NULL DEFAULT 2");
     this.ensureColumn("config", "max_concurrent_healing_runs", "INTEGER NOT NULL DEFAULT 1");
-    this.ensureColumn("config", "healing_cooldown_ms", "INTEGER NOT NULL DEFAULT 300000");
+    this.ensureColumn("config", "healing_cooldown_ms", "INTEGER NOT NULL DEFAULT 900000");
     this.ensureColumn("config", "auto_heal_deployments", "INTEGER NOT NULL DEFAULT 0");
-    this.ensureColumn("config", "deployment_check_delay_ms", "INTEGER NOT NULL DEFAULT 60000");
-    this.ensureColumn("config", "deployment_check_timeout_ms", "INTEGER NOT NULL DEFAULT 600000");
-    this.ensureColumn("config", "deployment_check_poll_interval_ms", "INTEGER NOT NULL DEFAULT 15000");
+    this.ensureColumn("config", "deployment_check_delay_ms", "INTEGER NOT NULL DEFAULT 120000");
+    this.ensureColumn("config", "deployment_check_timeout_ms", "INTEGER NOT NULL DEFAULT 900000");
+    this.ensureColumn("config", "deployment_check_poll_interval_ms", "INTEGER NOT NULL DEFAULT 60000");
     this.ensureColumn("watched_repos", "auto_create_releases", "INTEGER NOT NULL DEFAULT 0");
     this.ensureColumn("watched_repos", "own_prs_only", "INTEGER NOT NULL DEFAULT 1");
     this.ensureColumn("watched_repos", "issue_auto_work", "INTEGER NOT NULL DEFAULT 0");
