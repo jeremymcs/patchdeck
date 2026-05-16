@@ -552,6 +552,7 @@ export function createBackgroundJobHandlers(params: {
           issueTitle: issue.title,
           issueUrl: issue.url,
           summary: repairResult.summary,
+          author: issue.author,
           branch: repairResult.fixBranch,
           subtasks: repairResult.subtasks,
         }),

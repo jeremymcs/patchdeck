@@ -19,6 +19,11 @@ function bulletLines(lines: string[]): string[] {
   return lines.map((line) => `- ${line}`);
 }
 
+function formatGitHubMention(login: string | null | undefined): string {
+  const trimmed = login?.trim().replace(/^@/, "");
+  return trimmed ? `@${trimmed}` : "@unknown";
+}
+
 function redactLocalPaths(text: string): string {
   return text
     .replace(/(?:[A-Za-z]:\\(?:[^\\\s`'"]+\\)+[^\\\s`'"]+|\/(?:Users|home|Volumes|private|var|tmp|opt|usr|Applications|Library)(?:\/[^\s`'"]+)+)/g, "[path redacted]");
@@ -30,6 +35,7 @@ type IssueWorkBodyInput = {
   issueTitle: string;
   issueUrl: string;
   summary: string;
+  author?: string | null;
 };
 
 type IssueReplyBodyInput = IssueWorkBodyInput & {
@@ -105,6 +111,9 @@ export function buildPullRequestBody(input: PullRequestBodyInput): string {
     "## Related Issue",
     `- Closes #${input.issueNumber}`,
     `- [#${input.issueNumber} ${input.issueTitle}](${input.issueUrl})`,
+    "",
+    "## User",
+    `- ${formatGitHubMention(input.author)}`,
     "",
     "## Repo",
     `- \`${input.repoFullName}\``,
