@@ -124,6 +124,11 @@ describe("DEFAULT_CONFIG", () => {
     assert.equal(DEFAULT_CONFIG.maxConcurrentIssueWork, 1);
   });
 
+  it("uses rate-limit-safe install timer defaults", () => {
+    assert.equal(DEFAULT_CONFIG.pollIntervalMs, 600000);
+    assert.equal(DEFAULT_CONFIG.batchWindowMs, 600000);
+  });
+
   it("has a valid codingAgent enum value", () => {
     const validAgents = ["codex", "claude"];
     assert.ok(
@@ -164,9 +169,9 @@ describe("DEFAULT_CONFIG", () => {
 
   it("includes deployment-healing defaults", () => {
     assert.equal(DEFAULT_CONFIG.autoHealDeployments, false);
-    assert.equal(DEFAULT_CONFIG.deploymentCheckDelayMs, 60000);
-    assert.equal(DEFAULT_CONFIG.deploymentCheckTimeoutMs, 600000);
-    assert.equal(DEFAULT_CONFIG.deploymentCheckPollIntervalMs, 15000);
+    assert.equal(DEFAULT_CONFIG.deploymentCheckDelayMs, 120000);
+    assert.equal(DEFAULT_CONFIG.deploymentCheckTimeoutMs, 900000);
+    assert.equal(DEFAULT_CONFIG.deploymentCheckPollIntervalMs, 60000);
   });
 
   it("includes CI-healing defaults and validates healing schemas", () => {
@@ -174,7 +179,7 @@ describe("DEFAULT_CONFIG", () => {
     assert.equal(DEFAULT_CONFIG.maxHealingAttemptsPerSession, 3);
     assert.equal(DEFAULT_CONFIG.maxHealingAttemptsPerFingerprint, 2);
     assert.equal(DEFAULT_CONFIG.maxConcurrentHealingRuns, 1);
-    assert.equal(DEFAULT_CONFIG.healingCooldownMs, 300000);
+    assert.equal(DEFAULT_CONFIG.healingCooldownMs, 900000);
 
     const snapshot = createCheckSnapshot({
       prId: "pr-1",

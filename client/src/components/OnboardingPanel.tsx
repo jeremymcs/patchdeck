@@ -4,6 +4,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import type { Config, RuntimeState } from "@shared/schema";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { toast } from "@/hooks/use-toast";
+import { getUiPollIntervalMs } from "@/lib/polling";
 
 const ONBOARDING_DISMISS_KEY = "onboarding-panel-dismissed-v2";
 const ONBOARDING_LAST_GITHUB_USER_KEY = "onboarding-last-github-user-v1";
@@ -238,18 +239,18 @@ export function OnboardingPanel() {
     refetchInterval: 5000,
   });
   const globalDrainMode = runtimeState?.drainMode === true;
-
-  const { data: status, isLoading } = useQuery<OnboardingStatus>({
-    queryKey: ["/api/onboarding/status"],
-    enabled: runtimeState !== undefined && !globalDrainMode,
-    refetchInterval: globalDrainMode ? false : 30000,
-  });
   const { data: config } = useQuery<Config>({
     queryKey: ["/api/config"],
   });
+  const uiPollIntervalMs = getUiPollIntervalMs(config);
+  const { data: status, isLoading } = useQuery<OnboardingStatus>({
+    queryKey: ["/api/onboarding/status"],
+    enabled: runtimeState !== undefined && !globalDrainMode,
+    refetchInterval: globalDrainMode ? false : uiPollIntervalMs,
+  });
   const { data: githubRateLimit } = useQuery<GitHubRateLimitState>({
     queryKey: ["/api/github-rate-limit"],
-    refetchInterval: globalDrainMode ? false : 30000,
+    refetchInterval: globalDrainMode ? false : uiPollIntervalMs,
   });
 
   const installWorkflowMutation = useMutation({

@@ -2,7 +2,7 @@ import { memo, useEffect, useMemo, useRef, useState, type MouseEvent } from "rea
 import { Link } from "wouter";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import * as Collapsible from "@radix-ui/react-collapsible";
-import { AlertTriangle, Bot, ChevronDown, ChevronUp, Loader2, Pause, Play, PlayCircle, RefreshCw, Trash2 } from "lucide-react";
+import { AlertTriangle, Bot, ChevronDown, ChevronUp, Loader2, Pause, Play, PlayCircle, RefreshCw } from "lucide-react";
 import { queryClient, apiRequest, fetchJson } from "@/lib/queryClient";
 import type { ActivityItem, ActivitySnapshot, Config, FeedbackItem, HealingSession, Issue, IssueListPage, LogEntry, OperatorWarning, PR, PRQuestion, PRSummary, RuntimeState, WatchedRepo } from "@shared/schema";
 import { AppHeader } from "@/components/AppHeader";
@@ -24,6 +24,7 @@ import {
 } from "@/lib/ciHealing";
 import { buildQueueStatusIndex, type QueueStatusView } from "@/lib/activityQueue";
 import { QueueStatusBadge } from "@/components/QueueStatusBadge";
+import { DashboardErrorsPanel } from "@/components/DashboardErrorsPanel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DetailHeader } from "@/components/detail/DetailHeader";
 import { MetaBreadcrumb, type MetaItem } from "@/components/detail/MetaBreadcrumb";
@@ -31,6 +32,13 @@ import { StageProgressBar } from "@/components/detail/StageProgressBar";
 import { StatusChip } from "@/components/detail/StatusChip";
 import { buildPRStages } from "@/lib/stages";
 import { prStatusTone, toneRailClass } from "@/lib/statusTones";
+import { getUiPollIntervalMs } from "@/lib/polling";
+
+type GitHubRateLimitState = {
+  limited: boolean;
+  resetAt: string | null;
+  recentlyLimited?: boolean;
+};
 
 function formatClock(timestamp: string | null): string | null {
   if (!timestamp) {
@@ -245,150 +253,6 @@ function OperatorWarningsBanner({ warnings }: { warnings: OperatorWarning[] }) {
         ))}
       </div>
     </div>
-  );
-}
-
-function DashboardErrorsPanel({
-  activities,
-  onClearFailed,
-  isClearingFailed,
-  onClearIssueFailure,
-  isClearingIssueFailure,
-  rolledUp,
-  onToggleRolledUp,
-}: {
-  activities: ActivitySnapshot;
-  onClearFailed: () => void;
-  isClearingFailed: boolean;
-  onClearIssueFailure: (activity: ActivityItem) => void;
-  isClearingIssueFailure: boolean;
-  rolledUp: boolean;
-  onToggleRolledUp: () => void;
-}) {
-  if (activities.failed.length === 0) {
-    return null;
-  }
-
-  const latestError = activities.failed[0];
-
-  return (
-    <section
-      id="dashboard-errors"
-      className="shrink-0 border-b border-destructive/40 bg-destructive/10 px-4 py-3"
-      data-testid="dashboard-errors-panel"
-    >
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <div className="inline-flex items-center gap-2 text-[12px] font-medium uppercase tracking-wider text-destructive">
-          <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
-          Needs attention
-          <span className="font-mono text-foreground">{activities.failed.length}</span>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="text-[11px] text-muted-foreground">
-            Failed jobs stay here until retried or cleared from activity.
-          </div>
-          <button
-            type="button"
-            onClick={onClearFailed}
-            disabled={isClearingFailed}
-            data-testid="dashboard-clear-failed-activities"
-            className="inline-flex items-center gap-1 rounded-md border border-destructive/50 px-2 py-0.5 text-[10px] uppercase tracking-wider text-destructive transition-colors hover:bg-destructive hover:text-background disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
-          >
-            {isClearingFailed ? (
-              "Clearing"
-            ) : (
-              <>
-                <Trash2 className="h-3 w-3" aria-hidden="true" />
-                Clear failed
-              </>
-            )}
-          </button>
-          <button
-            type="button"
-            onClick={onToggleRolledUp}
-            aria-expanded={!rolledUp}
-            data-testid="dashboard-errors-rollup-toggle"
-            className="inline-flex items-center gap-1 rounded-md border border-destructive/50 px-2 py-0.5 text-[10px] uppercase tracking-wider text-destructive transition-colors hover:bg-destructive hover:text-background focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
-          >
-            {rolledUp ? <ChevronDown className="h-3 w-3" aria-hidden="true" /> : <ChevronUp className="h-3 w-3" aria-hidden="true" />}
-            {rolledUp ? "Expand" : "Roll up"}
-          </button>
-        </div>
-      </div>
-      {rolledUp ? (
-        <div
-          className="truncate text-[11px] text-muted-foreground"
-          data-testid="dashboard-errors-rollup-summary"
-          title={latestError?.lastError ?? latestError?.detail ?? latestError?.label}
-        >
-          {`Latest: ${latestError.label}${latestError.detail ? ` - ${latestError.detail}` : ""}`}
-        </div>
-      ) : (
-        <>
-          <div className="grid gap-2 lg:grid-cols-2">
-            {activities.failed.slice(0, 4).map((activity) => (
-              <div
-                key={activity.id}
-                className="rounded-md border border-destructive/40 bg-background/70 px-3 py-2"
-                data-testid={`dashboard-error-${activity.id}`}
-              >
-                <div className="flex min-w-0 items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="truncate text-[13px] font-medium text-foreground">{activity.label}</div>
-                    {activity.detail && (
-                      <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{activity.detail}</div>
-                    )}
-                  </div>
-                  <div className="flex shrink-0 flex-wrap justify-end gap-2">
-                    {activity.kind === "work_issue" && parseIssueTargetId(activity.targetId) && (
-                      <button
-                        type="button"
-                        onClick={() => onClearIssueFailure(activity)}
-                        disabled={isClearingIssueFailure}
-                        className="inline-flex items-center gap-1 rounded-md border border-destructive/50 px-2 py-0.5 text-[10px] uppercase tracking-wider text-destructive transition-colors hover:bg-destructive hover:text-background disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
-                        data-testid="dashboard-clear-issue-failure"
-                      >
-                        {isClearingIssueFailure ? (
-                          "Clearing"
-                        ) : (
-                          <>
-                            <Trash2 className="h-3 w-3" aria-hidden="true" />
-                            Clear
-                          </>
-                        )}
-                      </button>
-                    )}
-                    {activity.targetUrl && (
-                      <a
-                        href={activity.targetUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="shrink-0 rounded-md border border-destructive/50 px-2 py-0.5 text-[10px] uppercase tracking-wider text-destructive transition-colors hover:bg-destructive hover:text-background focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
-                      >
-                        Open
-                      </a>
-                    )}
-                  </div>
-                </div>
-                {activity.lastError && (
-                  <div
-                    className="mt-2 line-clamp-3 whitespace-pre-wrap break-words text-[11px] leading-4 text-destructive"
-                    title={activity.lastError}
-                  >
-                    {activity.lastError}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-          {activities.failed.length > 4 && (
-            <div className="mt-2 text-[11px] text-muted-foreground">
-              {activities.failed.length - 4} more failed job{activities.failed.length - 4 === 1 ? "" : "s"} in activity.
-            </div>
-          )}
-        </>
-      )}
-    </section>
   );
 }
 
@@ -1118,6 +982,12 @@ export default function Dashboard() {
     }
   };
 
+  const { data: config } = useQuery<Config>({
+    queryKey: ["/api/config"],
+    refetchInterval: 5000,
+  });
+  const uiPollIntervalMs = getUiPollIntervalMs(config);
+
   const { data: prs = [], isLoading } = useQuery<PRSummary[]>({
     queryKey: ["/api/prs"],
     refetchInterval: 3000,
@@ -1132,19 +1002,22 @@ export default function Dashboard() {
     queryKey: ["/api/runtime"],
     refetchInterval: 3000,
   });
+  const { data: githubRateLimit } = useQuery<GitHubRateLimitState>({
+    queryKey: ["/api/github-rate-limit"],
+    refetchInterval: uiPollIntervalMs,
+  });
   const globalDrainMode = runtimeState?.drainMode === true;
+  const isGitHubThrottled = githubRateLimit?.limited === true;
+  const throttledTitle = githubRateLimit?.resetAt
+    ? `GitHub rate limited until ${new Date(githubRateLimit.resetAt).toLocaleTimeString("en-US")}`
+    : "GitHub rate limited";
 
   const { data: issuesPage, isLoading: isLoadingIssues } = useQuery<IssueListPage>({
     queryKey: ["/api/issues"],
     enabled: runtimeState !== undefined && !globalDrainMode,
-    refetchInterval: 30000,
+    refetchInterval: uiPollIntervalMs,
   });
   const issues = issuesPage?.items ?? [];
-
-  const { data: config } = useQuery<Config>({
-    queryKey: ["/api/config"],
-    refetchInterval: 5000,
-  });
 
   const { data: healingSessions = [] } = useQuery<HealingSession[]>({
     queryKey: ["/api/healing-sessions"],
@@ -1354,7 +1227,8 @@ export default function Dashboard() {
             <button
               type="button"
               onClick={() => { void handleSyncDashboard(); }}
-              disabled={isRefreshing}
+              disabled={isRefreshing || globalDrainMode || isGitHubThrottled}
+              title={isGitHubThrottled ? throttledTitle : undefined}
               data-testid="button-sync-dashboard"
               className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-0.5 text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
             >
@@ -1527,8 +1401,14 @@ export default function Dashboard() {
                     <button
                       type="button"
                       onClick={() => syncPrMutation.mutate(selectedPR.id)}
-                      disabled={syncPrMutation.isPending || globalDrainMode}
-                      title={globalDrainMode ? DRAIN_PAUSED_TITLE : "Sync GitHub feedback now"}
+                      disabled={syncPrMutation.isPending || globalDrainMode || isGitHubThrottled}
+                      title={
+                        globalDrainMode
+                          ? DRAIN_PAUSED_TITLE
+                          : isGitHubThrottled
+                            ? throttledTitle
+                            : "Sync GitHub feedback now"
+                      }
                       data-testid="button-sync-pr"
                       className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-border bg-transparent px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground transition-colors hover:border-foreground/30 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
                     >
@@ -1555,8 +1435,14 @@ export default function Dashboard() {
                     <button
                       type="button"
                       onClick={() => applyMutation.mutate(selectedPR.id)}
-                      disabled={applyMutation.isPending || selectedPR.status === "processing" || globalDrainMode}
-                      title={globalDrainMode ? DRAIN_PAUSED_TITLE : "Run babysitter now"}
+                      disabled={applyMutation.isPending || selectedPR.status === "processing" || globalDrainMode || isGitHubThrottled}
+                      title={
+                        globalDrainMode
+                          ? DRAIN_PAUSED_TITLE
+                          : isGitHubThrottled
+                            ? throttledTitle
+                            : "Run babysitter now"
+                      }
                       data-testid="button-apply"
                       className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-primary bg-primary px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
                     >

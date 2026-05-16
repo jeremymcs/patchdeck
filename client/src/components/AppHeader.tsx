@@ -8,6 +8,7 @@ import { Switch } from "@/components/ui/switch";
 import { ToastAction } from "@/components/ui/toast";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { toast } from "@/hooks/use-toast";
+import { getUiPollIntervalMs } from "@/lib/polling";
 
 type AppHeaderSection = "dashboard" | "prs" | "issues" | "releases" | "logs" | "settings";
 type GitHubRateLimitState = {
@@ -284,15 +285,19 @@ function AutoModeButton() {
 }
 
 function GitHubRateLimitNotice() {
+  const { data: config } = useQuery<Config>({
+    queryKey: ["/api/config"],
+  });
+  const uiPollIntervalMs = getUiPollIntervalMs(config);
   const { data: githubRateLimit } = useQuery<GitHubRateLimitState>({
     queryKey: ["/api/github-rate-limit"],
-    refetchInterval: 30000,
+    refetchInterval: uiPollIntervalMs,
   });
   const explicitlyLimited = githubRateLimit?.limited === true;
   const recentlyLimited = githubRateLimit?.recentlyLimited === true;
   const { data: activities } = useQuery<ActivitySnapshot>({
     queryKey: ["/api/activities"],
-    refetchInterval: 30000,
+    refetchInterval: uiPollIntervalMs,
     enabled: !explicitlyLimited,
   });
 

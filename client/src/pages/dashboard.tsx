@@ -1,4 +1,4 @@
-import { useMemo, type KeyboardEvent } from "react";
+import { useMemo, useRef, type KeyboardEvent, type RefObject } from "react";
 import { Link, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, ExternalLink, GitPullRequest, ListTodo, Loader2 } from "lucide-react";
@@ -165,10 +165,22 @@ function formatRelative(value: string | null | undefined): string {
   return `${Math.round(diffMs / 86_400_000)}d ago`;
 }
 
-function scrollToId(id: string): void {
+function scrollToId(id: string, scrollRoot?: HTMLElement | null): void {
   if (typeof document === "undefined") return;
   const target = document.getElementById(id);
-  if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+  if (!target) return;
+
+  if (scrollRoot) {
+    const targetRect = target.getBoundingClientRect();
+    const rootRect = scrollRoot.getBoundingClientRect();
+    scrollRoot.scrollTo({
+      top: scrollRoot.scrollTop + targetRect.top - rootRect.top - 16,
+      behavior: "smooth",
+    });
+    return;
+  }
+
+  target.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function KpiCell({
@@ -177,12 +189,14 @@ function KpiCell({
   tone = "neutral",
   testId,
   scrollTo,
+  scrollRootRef,
 }: {
   label: string;
   value: number | string;
   tone?: "neutral" | "primary" | "success" | "warning" | "destructive";
   testId?: string;
   scrollTo?: string;
+  scrollRootRef?: RefObject<HTMLElement | null>;
 }) {
   const toneClass = tone === "destructive"
     ? "border-destructive/40 bg-destructive/[0.04] text-destructive"
@@ -201,7 +215,9 @@ function KpiCell({
       <button
         type="button"
         data-testid={testId}
-        onClick={() => scrollToId(scrollTo)}
+        onClick={() => scrollToId(scrollTo, scrollRootRef?.current ?? null)}
+        title="Jump to failed activity"
+        aria-label="Jump to failed activity"
         className={`${baseClass} text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring`}
       >
         <div className="text-[10px] font-medium uppercase tracking-wider opacity-80">{label}</div>
@@ -333,6 +349,7 @@ function DashboardActivityPanel({ activities }: { activities: ActivitySnapshot }
 }
 
 export default function Dashboard() {
+  const mainScrollRef = useRef<HTMLElement | null>(null);
   const { data: config } = useQuery<Config>({ queryKey: ["/api/config"] });
   const { data: prs = [], isLoading: prsLoading } = useQuery<PR[]>({
     queryKey: ["/api/prs"],
@@ -385,7 +402,9 @@ export default function Dashboard() {
             {failedTotal > 0 && (
               <button
                 type="button"
-                onClick={() => scrollToId("failed-activity")}
+                onClick={() => scrollToId("failed-activity", mainScrollRef.current)}
+                title="Jump to failed activity"
+                aria-label="Jump to failed activity"
                 data-testid="header-failed-link"
                 className="cursor-pointer rounded-md border border-destructive/40 bg-destructive/[0.06] px-1.5 py-0 text-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               >
@@ -396,7 +415,7 @@ export default function Dashboard() {
         )}
       />
 
-      <main className="flex-1 overflow-y-auto p-4 lg:p-6">
+      <main ref={mainScrollRef} className="flex-1 overflow-y-auto p-4 lg:p-6">
         <div className="space-y-4">
           <section data-testid="dashboard-kpi-strip" className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
             <KpiCell label="Watched repos" value={watchedRepos.length} testId="kpi-repos" />
@@ -420,6 +439,7 @@ export default function Dashboard() {
               tone={failedTotal > 0 ? "destructive" : "neutral"}
               testId="kpi-failed"
               scrollTo={failedTotal > 0 ? "failed-activity" : undefined}
+              scrollRootRef={mainScrollRef}
             />
           </section>
 

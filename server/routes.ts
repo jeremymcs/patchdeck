@@ -450,9 +450,10 @@ export async function registerRoutes(
     }
   });
 
-  app.post("/api/repos/sync", async (_req, res) => {
+  app.post("/api/repos/sync", async (req, res) => {
     try {
-      const result = await runtime.syncRepos();
+      const fullSweep = req.query.fullSweep === "1" || req.query.fullSweep === "true";
+      const result = await runtime.syncRepos({ fullSweep });
       invalidatePrDetailCache();
       res.json(result);
     } catch (error: unknown) {
@@ -625,6 +626,14 @@ export async function registerRoutes(
         offset: z.coerce.number().int().nonnegative().optional(),
       }).parse(req.query);
       res.json(await runtime.listIssues(query));
+    } catch (error: unknown) {
+      sendAppAwareError(res, error);
+    }
+  });
+
+  app.get("/api/issues/coverage", async (_req, res) => {
+    try {
+      res.json(await runtime.listIssueCoverage());
     } catch (error: unknown) {
       sendAppAwareError(res, error);
     }

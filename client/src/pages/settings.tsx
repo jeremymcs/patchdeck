@@ -10,6 +10,7 @@ import {
   getDrainActionLabel,
   getDrainStatusView,
 } from "@/lib/runtimeDisplay";
+import { getUiPollIntervalMs } from "@/lib/polling";
 
 const WATCH_SCOPE_OPTIONS = [
   { value: "mine", label: "My PRs only" },
@@ -31,6 +32,20 @@ const REPO_AGENT_OPTIONS = [
   { value: "codex", label: "codex" },
   { value: "claude", label: "claude" },
 ] as const;
+
+const DEFAULT_SETTING_VALUES = {
+  maxTurns: 15,
+  pollIntervalSeconds: 600,
+  batchWindowSeconds: 600,
+  maxChangesPerRun: 20,
+  maxHealingAttemptsPerSession: 3,
+  maxHealingAttemptsPerFingerprint: 2,
+  maxConcurrentHealingRuns: 1,
+  healingCooldownSeconds: 900,
+  deploymentCheckDelaySeconds: 120,
+  deploymentCheckTimeoutSeconds: 900,
+  deploymentCheckPollSeconds: 60,
+};
 
 const CODEX_MODEL_OPTIONS = [
   { value: "", label: "CLI default" },
@@ -400,9 +415,10 @@ export default function Settings() {
     queryKey: ["/api/runtime"],
     refetchInterval: 5000,
   });
+  const uiPollIntervalMs = getUiPollIntervalMs(config);
   const { data: githubRateLimit } = useQuery<GitHubRateLimitState>({
     queryKey: ["/api/github-rate-limit"],
-    refetchInterval: 30000,
+    refetchInterval: uiPollIntervalMs,
   });
   const drainStatusView = getDrainStatusView(runtimeState, runtimeStateIsError);
   const globalDrainMode = runtimeState?.drainMode === true;
@@ -1235,20 +1251,23 @@ export default function Settings() {
                 description="Maximum agent turns per feedback item"
                 value={config?.maxTurns ?? 15}
                 onChange={(v) => updateConfigMutation.mutate({ maxTurns: v })}
+                defaultValue={DEFAULT_SETTING_VALUES.maxTurns}
                 disabled={updateConfigMutation.isPending}
               />
               <SettingRow
                 label="Poll interval (seconds)"
                 description="How often to check for new feedback"
-                value={msToSeconds(config?.pollIntervalMs ?? 120000)}
+                value={msToSeconds(config?.pollIntervalMs ?? 600000)}
                 onChange={(v) => updateConfigMutation.mutate({ pollIntervalMs: secondsToMs(v) })}
+                defaultValue={DEFAULT_SETTING_VALUES.pollIntervalSeconds}
                 disabled={updateConfigMutation.isPending}
               />
               <SettingRow
                 label="Batch window (seconds)"
                 description="Time to batch feedback before processing"
-                value={msToSeconds(config?.batchWindowMs ?? 300000)}
+                value={msToSeconds(config?.batchWindowMs ?? 600000)}
                 onChange={(v) => updateConfigMutation.mutate({ batchWindowMs: secondsToMs(v) })}
+                defaultValue={DEFAULT_SETTING_VALUES.batchWindowSeconds}
                 disabled={updateConfigMutation.isPending}
               />
               <SettingRow
@@ -1256,6 +1275,7 @@ export default function Settings() {
                 description="Limit on concurrent changes"
                 value={config?.maxChangesPerRun ?? 20}
                 onChange={(v) => updateConfigMutation.mutate({ maxChangesPerRun: v })}
+                defaultValue={DEFAULT_SETTING_VALUES.maxChangesPerRun}
                 disabled={updateConfigMutation.isPending}
               />
             </div>
@@ -1288,6 +1308,7 @@ export default function Settings() {
                 description="Upper bound on repair attempts for a single healing session"
                 value={config?.maxHealingAttemptsPerSession ?? 3}
                 onChange={(v) => updateConfigMutation.mutate({ maxHealingAttemptsPerSession: v })}
+                defaultValue={DEFAULT_SETTING_VALUES.maxHealingAttemptsPerSession}
                 disabled={updateConfigMutation.isPending}
               />
               <SettingRow
@@ -1295,6 +1316,7 @@ export default function Settings() {
                 description="Cap retries for the same failure fingerprint"
                 value={config?.maxHealingAttemptsPerFingerprint ?? 2}
                 onChange={(v) => updateConfigMutation.mutate({ maxHealingAttemptsPerFingerprint: v })}
+                defaultValue={DEFAULT_SETTING_VALUES.maxHealingAttemptsPerFingerprint}
                 disabled={updateConfigMutation.isPending}
               />
               <SettingRow
@@ -1302,13 +1324,39 @@ export default function Settings() {
                 description="How many healing runs can execute at once"
                 value={config?.maxConcurrentHealingRuns ?? 1}
                 onChange={(v) => updateConfigMutation.mutate({ maxConcurrentHealingRuns: v })}
+                defaultValue={DEFAULT_SETTING_VALUES.maxConcurrentHealingRuns}
                 disabled={updateConfigMutation.isPending}
               />
               <SettingRow
                 label="Healing cooldown (seconds)"
                 description="Backoff before a cooldowned session can retry"
-                value={msToSeconds(config?.healingCooldownMs ?? 300000)}
+                value={msToSeconds(config?.healingCooldownMs ?? 900000)}
                 onChange={(v) => updateConfigMutation.mutate({ healingCooldownMs: secondsToMs(v) })}
+                defaultValue={DEFAULT_SETTING_VALUES.healingCooldownSeconds}
+                disabled={updateConfigMutation.isPending}
+              />
+              <SettingRow
+                label="Deployment check delay (seconds)"
+                description="Wait before checking a freshly produced deployment"
+                value={msToSeconds(config?.deploymentCheckDelayMs ?? 120000)}
+                onChange={(v) => updateConfigMutation.mutate({ deploymentCheckDelayMs: secondsToMs(v) })}
+                defaultValue={DEFAULT_SETTING_VALUES.deploymentCheckDelaySeconds}
+                disabled={updateConfigMutation.isPending}
+              />
+              <SettingRow
+                label="Deployment check timeout (seconds)"
+                description="Maximum time to wait for deployment checks"
+                value={msToSeconds(config?.deploymentCheckTimeoutMs ?? 900000)}
+                onChange={(v) => updateConfigMutation.mutate({ deploymentCheckTimeoutMs: secondsToMs(v) })}
+                defaultValue={DEFAULT_SETTING_VALUES.deploymentCheckTimeoutSeconds}
+                disabled={updateConfigMutation.isPending}
+              />
+              <SettingRow
+                label="Deployment check poll (seconds)"
+                description="How often deployment healing checks provider status"
+                value={msToSeconds(config?.deploymentCheckPollIntervalMs ?? 60000)}
+                onChange={(v) => updateConfigMutation.mutate({ deploymentCheckPollIntervalMs: secondsToMs(v) })}
+                defaultValue={DEFAULT_SETTING_VALUES.deploymentCheckPollSeconds}
                 disabled={updateConfigMutation.isPending}
               />
             </div>
@@ -1853,35 +1901,51 @@ function SettingRow({
   description,
   value,
   onChange,
+  defaultValue,
   disabled,
 }: {
   label: string;
   description: string;
   value: number;
   onChange: (v: number) => void;
+  defaultValue?: number;
   disabled: boolean;
 }) {
   const inputId = `setting-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`;
   const descriptionId = `${inputId}-description`;
+  const canReset = defaultValue !== undefined && value !== defaultValue;
 
   return (
-    <div className="flex items-center justify-between">
+    <div className="flex items-center justify-between gap-3">
       <div>
         <label htmlFor={inputId} className="text-sm">{label}</label>
         <div id={descriptionId} className="text-[11px] text-muted-foreground">{description}</div>
       </div>
-      <input
-        id={inputId}
-        type="number"
-        value={value}
-        onChange={(e) => {
-          const n = parseInt(e.target.value, 10);
-          if (!isNaN(n)) onChange(n);
-        }}
-        disabled={disabled}
-        aria-describedby={descriptionId}
-        className="w-28 border border-border bg-transparent px-2 py-1 text-right text-sm focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
-      />
+      <div className="flex shrink-0 items-center gap-2">
+        {canReset && (
+          <button
+            type="button"
+            onClick={() => onChange(defaultValue)}
+            disabled={disabled}
+            aria-label={`Reset ${label} to default`}
+            className="rounded-md border border-border px-2 py-1 text-[10px] uppercase tracking-wider text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
+          >
+            Default
+          </button>
+        )}
+        <input
+          id={inputId}
+          type="number"
+          value={value}
+          onChange={(e) => {
+            const n = parseInt(e.target.value, 10);
+            if (!isNaN(n)) onChange(n);
+          }}
+          disabled={disabled}
+          aria-describedby={descriptionId}
+          className="w-28 border border-border bg-transparent px-2 py-1 text-right text-sm focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
+        />
+      </div>
     </div>
   );
 }
