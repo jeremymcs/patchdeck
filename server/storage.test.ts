@@ -1250,3 +1250,68 @@ test("MemStorage repo sync state matches the SqliteStorage contract", async () =
     { repo: "o/r", kind: "prs", lastSyncedAt: "t1", nextEligibleAt: null },
   ]);
 });
+
+test("SqliteStorage persists the GitHub releases cache and overwrites per repo across reopen", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "codefactory-storage-"));
+  const entry = {
+    repo: "o/r",
+    releases: [{
+      id: 1,
+      tagName: "v1.0.0",
+      name: "v1.0.0",
+      body: "notes",
+      bodyHtml: "<p>notes</p>",
+      htmlUrl: "https://example.com/releases/1",
+      draft: false,
+      prerelease: false,
+      publishedAt: "2026-05-15T10:00:00.000Z",
+    }],
+    etag: 'W/"rel-abc"',
+    fetchedAt: "2026-05-15T10:00:00.000Z",
+  };
+  const first = new SqliteStorage(root);
+  try {
+    assert.equal(await first.getGithubReleaseCache("o/r"), undefined);
+    await first.upsertGithubReleaseCache(entry);
+    assert.deepEqual(await first.getGithubReleaseCache("o/r"), entry);
+
+    // Upsert keeps a single row per repo.
+    const updated = { ...entry, releases: [], etag: 'W/"rel-def"', fetchedAt: "2026-05-15T12:00:00.000Z" };
+    await first.upsertGithubReleaseCache(updated);
+    assert.deepEqual(await first.getGithubReleaseCache("o/r"), updated);
+  } finally {
+    first.close();
+  }
+
+  const second = new SqliteStorage(root);
+  try {
+    const reloaded = await second.getGithubReleaseCache("o/r");
+    assert.equal(reloaded?.etag, 'W/"rel-def"');
+    assert.deepEqual(reloaded?.releases, []);
+  } finally {
+    second.close();
+  }
+});
+
+test("MemStorage GitHub releases cache matches the SqliteStorage contract", async () => {
+  const storage = new MemStorage();
+  assert.equal(await storage.getGithubReleaseCache("o/r"), undefined);
+  const entry = {
+    repo: "o/r",
+    releases: [{
+      id: 9,
+      tagName: "v9",
+      name: "v9",
+      body: null,
+      bodyHtml: null,
+      htmlUrl: "https://example.com/releases/9",
+      draft: false,
+      prerelease: true,
+      publishedAt: null,
+    }],
+    etag: null,
+    fetchedAt: "t1",
+  };
+  await storage.upsertGithubReleaseCache(entry);
+  assert.deepEqual(await storage.getGithubReleaseCache("o/r"), entry);
+});

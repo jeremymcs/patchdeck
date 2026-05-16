@@ -11,6 +11,7 @@ import type {
   HealingSession,
   LogEntry,
   OperatorWarning,
+  GitHubRelease,
   PR,
   PRStage,
   PRSummary,
@@ -64,6 +65,7 @@ import {
   listOpenIssuesForRepo,
   listOpenLinkedPullRequestsForIssue,
   listReleasesForRepo,
+  listReleasesForRepoConditional,
   listUnreleasedMergedPulls,
   type MergedPRSummary,
   parsePRUrl,
@@ -252,6 +254,9 @@ const MAX_AUTO_ISSUE_SWEEP_PAGES = 50;
 // so quiet repos yield watcher slots and rate-limit budget to active ones. Any
 // observed change clears the cooldown and the repo returns to every-tick.
 const QUIET_REPO_COOLDOWN_MS = 10 * 60_000;
+// How long a cached GitHub releases entry is served before a background
+// refresh is triggered on the next Releases-page read.
+const RELEASE_CACHE_TTL_MS = 10 * 60_000;
 const AUTO_WORK_BLOCKED_LABELS = new Set([
   "blocked",
   "question",
@@ -1886,6 +1891,57 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
     throw new AppRuntimeError(409, message);
   };
 
+  // GitHub releases are served from a DB cache; this refreshes one repo's
+  // entry via a conditional request. A 304 just bumps fetchedAt so the TTL
+  // resets without re-storing unchanged data.
+  const releaseCacheRefreshInFlight = new Set<string>();
+  const refreshReleaseCache = async (repoSlug: string): Promise<void> => {
+    if (releaseCacheRefreshInFlight.has(repoSlug)) {
+      return;
+    }
+    releaseCacheRefreshInFlight.add(repoSlug);
+    try {
+      const parsed = parseRepoSlug(repoSlug);
+      if (!parsed) {
+        return;
+      }
+      const config = await storage.getConfig();
+      const octokit = await buildOctokit(config);
+      const existing = await storage.getGithubReleaseCache(repoSlug);
+      const result = await listReleasesForRepoConditional(octokit, parsed, existing?.etag ?? null);
+      if (result.notModified) {
+        if (existing) {
+          await storage.upsertGithubReleaseCache({ ...existing, fetchedAt: new Date().toISOString() });
+        }
+        return;
+      }
+      const releases: GitHubRelease[] = result.releases.map((release) => ({
+        id: release.id,
+        tagName: release.tagName,
+        name: release.name,
+        body: release.body,
+        bodyHtml: release.body ? renderGitHubMarkdown(release.body) : null,
+        htmlUrl: release.htmlUrl,
+        draft: release.draft,
+        prerelease: release.prerelease,
+        publishedAt: release.publishedAt,
+      }));
+      await storage.upsertGithubReleaseCache({
+        repo: repoSlug,
+        releases,
+        etag: result.etag,
+        fetchedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      log.warn(
+        { err: error instanceof Error ? error.message : String(error), repo: repoSlug },
+        "Failed to refresh GitHub releases cache",
+      );
+    } finally {
+      releaseCacheRefreshInFlight.delete(repoSlug);
+    }
+  };
+
   const runtime: AppRuntime = {
     async start() {
       if (started) {
@@ -2611,37 +2667,26 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
         return [];
       }
 
-      const octokit = await buildOctokit(config);
+      const now = Date.now();
       const perRepo = await Promise.all(
         config.watchedRepos.map(async (repoSlug): Promise<RepoGitHubReleases | null> => {
-          const parsed = parseRepoSlug(repoSlug);
-          if (!parsed) {
+          if (!parseRepoSlug(repoSlug)) {
             return null;
           }
 
-          try {
-            const summaries = await listReleasesForRepo(octokit, parsed);
-            return {
-              repo: repoSlug,
-              releases: summaries.map((release) => ({
-                id: release.id,
-                tagName: release.tagName,
-                name: release.name,
-                body: release.body,
-                bodyHtml: release.body ? renderGitHubMarkdown(release.body) : null,
-                htmlUrl: release.htmlUrl,
-                draft: release.draft,
-                prerelease: release.prerelease,
-                publishedAt: release.publishedAt,
-              })),
-            };
-          } catch (error) {
-            log.warn(
-              { err: error instanceof Error ? error.message : String(error), repo: repoSlug },
-              "Failed to fetch GitHub releases for repo",
-            );
-            return { repo: repoSlug, releases: [] };
+          const cached = await storage.getGithubReleaseCache(repoSlug);
+          if (!cached) {
+            // Cold cache: block on the first fetch so the page gets real data.
+            await refreshReleaseCache(repoSlug);
+            const fresh = await storage.getGithubReleaseCache(repoSlug);
+            return { repo: repoSlug, releases: fresh?.releases ?? [] };
           }
+
+          if (now - new Date(cached.fetchedAt).getTime() > RELEASE_CACHE_TTL_MS) {
+            // Warm but stale: refresh in the background, serve cached now.
+            void refreshReleaseCache(repoSlug);
+          }
+          return { repo: repoSlug, releases: cached.releases };
         }),
       );
 

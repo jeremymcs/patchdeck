@@ -1580,6 +1580,23 @@ export async function getDefaultBranchForRepo(
   return defaultBranch;
 }
 
+type RawGitHubRelease = Awaited<ReturnType<Octokit["repos"]["listReleases"]>>["data"][number];
+
+function mapReleaseToSummary(release: RawGitHubRelease): GitHubReleaseSummary {
+  return {
+    id: release.id,
+    tagName: release.tag_name || "",
+    name: release.name || release.tag_name || `Release ${release.id}`,
+    body: release.body || null,
+    htmlUrl: release.html_url || "",
+    apiUrl: release.url || "",
+    draft: Boolean(release.draft),
+    prerelease: Boolean(release.prerelease),
+    targetCommitish: release.target_commitish || null,
+    publishedAt: release.published_at || null,
+  };
+}
+
 export async function listReleasesForRepo(
   octokit: Octokit,
   repo: ParsedRepoSlug,
@@ -1592,18 +1609,55 @@ export async function listReleasesForRepo(
     }),
   );
 
-  return releases.map((release) => ({
-    id: release.id,
-    tagName: release.tag_name || "",
-    name: release.name || release.tag_name || `Release ${release.id}`,
-    body: release.body || null,
-    htmlUrl: release.html_url || "",
-    apiUrl: release.url || "",
-    draft: Boolean(release.draft),
-    prerelease: Boolean(release.prerelease),
-    targetCommitish: release.target_commitish || null,
-    publishedAt: release.published_at || null,
-  }));
+  return releases.map(mapReleaseToSummary);
+}
+
+export type ConditionalReleaseList =
+  | { notModified: true }
+  | { notModified: false; etag: string | null; releases: GitHubReleaseSummary[] };
+
+/**
+ * Conditional GET of a repo's releases. Page 1 carries an `If-None-Match`; a
+ * 304 means the release list is unchanged since `cachedEtag` and costs no
+ * primary rate-limit budget.
+ */
+export async function listReleasesForRepoConditional(
+  octokit: Octokit,
+  repo: ParsedRepoSlug,
+  cachedEtag: string | null,
+): Promise<ConditionalReleaseList> {
+  return withGitHubErrorHandling("repository releases", repo, async () => {
+    const perPage = 100;
+    const collected: GitHubReleaseSummary[] = [];
+    let firstPageEtag: string | null = null;
+
+    for (let page = 1; ; page += 1) {
+      let response;
+      try {
+        response = await octokit.repos.listReleases({
+          owner: repo.owner,
+          repo: repo.repo,
+          per_page: perPage,
+          page,
+          ...(page === 1 && cachedEtag ? { headers: { "if-none-match": cachedEtag } } : {}),
+        });
+      } catch (error) {
+        if (page === 1 && (error as { status?: number } | undefined)?.status === 304) {
+          return { notModified: true };
+        }
+        throw error;
+      }
+
+      if (page === 1) {
+        const etag = response.headers?.etag;
+        firstPageEtag = typeof etag === "string" ? etag : null;
+      }
+      collected.push(...response.data.map(mapReleaseToSummary));
+      if (response.data.length < perPage) break;
+    }
+
+    return { notModified: false, etag: firstPageEtag, releases: collected };
+  });
 }
 
 export async function listTagsForRepo(

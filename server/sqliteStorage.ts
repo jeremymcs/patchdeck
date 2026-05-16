@@ -60,7 +60,7 @@ import {
   createReleaseRun,
   createSocialChangelog,
 } from "@shared/models";
-import type { IStorage, RepoSyncKind, RepoSyncState, StoredIssueRecord } from "./storage";
+import type { GithubReleaseCacheEntry, IStorage, RepoSyncKind, RepoSyncState, StoredIssueRecord } from "./storage";
 import { getCodeFactoryPaths } from "./paths";
 import { DEFAULT_CONFIG } from "./defaultConfig";
 import { appendLogFile } from "./logFiles";
@@ -895,6 +895,13 @@ export class SqliteStorage implements IStorage {
         last_synced_at TEXT,
         next_eligible_at TEXT,
         PRIMARY KEY(repo, kind)
+      );
+
+      CREATE TABLE IF NOT EXISTS github_release_cache (
+        repo TEXT PRIMARY KEY,
+        releases_json TEXT NOT NULL,
+        etag TEXT,
+        fetched_at TEXT NOT NULL
       );
 
       CREATE INDEX IF NOT EXISTS idx_feedback_items_pr_id ON feedback_items(pr_id);
@@ -2359,6 +2366,38 @@ export class SqliteStorage implements IStorage {
         kind,
         lastSyncedAt,
         nextEligibleAt,
+      );
+    });
+  }
+
+  async getGithubReleaseCache(repo: string): Promise<GithubReleaseCacheEntry | undefined> {
+    const row = this.get<{ releases_json: string; etag: string | null; fetched_at: string }>(
+      "SELECT releases_json, etag, fetched_at FROM github_release_cache WHERE repo = ?",
+      repo,
+    );
+    if (!row) {
+      return undefined;
+    }
+    return {
+      repo,
+      releases: JSON.parse(row.releases_json) as GithubReleaseCacheEntry["releases"],
+      etag: row.etag,
+      fetchedAt: row.fetched_at,
+    };
+  }
+
+  async upsertGithubReleaseCache(entry: GithubReleaseCacheEntry): Promise<void> {
+    this.withWriteTransaction(() => {
+      this.run(
+        `INSERT INTO github_release_cache (repo, releases_json, etag, fetched_at) VALUES (?, ?, ?, ?)
+         ON CONFLICT(repo) DO UPDATE SET
+           releases_json = excluded.releases_json,
+           etag = excluded.etag,
+           fetched_at = excluded.fetched_at`,
+        entry.repo,
+        JSON.stringify(entry.releases),
+        entry.etag,
+        entry.fetchedAt,
       );
     });
   }

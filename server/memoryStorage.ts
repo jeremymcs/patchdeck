@@ -54,7 +54,7 @@ import {
   createSocialChangelog,
   touchAgentRun,
 } from "@shared/models";
-import type { IStorage, RepoSyncKind, RepoSyncState, StoredIssueRecord } from "./storage";
+import type { GithubReleaseCacheEntry, IStorage, RepoSyncKind, RepoSyncState, StoredIssueRecord } from "./storage";
 import { DEFAULT_CONFIG } from "./defaultConfig";
 
 export class MemStorage implements IStorage {
@@ -82,6 +82,7 @@ export class MemStorage implements IStorage {
   private syncedIssues: Map<string, StoredIssueRecord> = new Map();
   private githubEtags: Map<string, string> = new Map();
   private repoSyncStates: Map<string, RepoSyncState> = new Map();
+  private githubReleaseCache: Map<string, GithubReleaseCacheEntry> = new Map();
 
   private cloneConfig(config: Config): Config {
     return structuredClone(config);
@@ -436,6 +437,18 @@ export class MemStorage implements IStorage {
       nextEligibleAt: "nextEligibleAt" in updates
         ? updates.nextEligibleAt ?? null
         : existing?.nextEligibleAt ?? null,
+    });
+  }
+
+  async getGithubReleaseCache(repo: string): Promise<GithubReleaseCacheEntry | undefined> {
+    const entry = this.githubReleaseCache.get(repo);
+    return entry ? { ...entry, releases: entry.releases.map((release) => ({ ...release })) } : undefined;
+  }
+
+  async upsertGithubReleaseCache(entry: GithubReleaseCacheEntry): Promise<void> {
+    this.githubReleaseCache.set(entry.repo, {
+      ...entry,
+      releases: entry.releases.map((release) => ({ ...release })),
     });
   }
 

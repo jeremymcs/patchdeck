@@ -12,6 +12,7 @@ import type {
   IssueSubtaskSet,
   LogEntry,
   FailureFingerprint,
+  GitHubRelease,
   HealingAttempt,
   HealingAttemptStatus,
   HealingSession,
@@ -60,6 +61,16 @@ export type RepoSyncState = {
   kind: RepoSyncKind;
   lastSyncedAt: string | null;
   nextEligibleAt: string | null;
+};
+
+// DB-backed cache of a repo's GitHub releases so the Releases page reads from
+// storage instead of hitting the GitHub API on every load. `etag` drives a
+// conditional refresh; `fetchedAt` drives the staleness TTL.
+export type GithubReleaseCacheEntry = {
+  repo: string;
+  releases: GitHubRelease[];
+  etag: string | null;
+  fetchedAt: string;
 };
 
 export interface IStorage {
@@ -134,6 +145,10 @@ export interface IStorage {
     kind: RepoSyncKind,
     updates: { lastSyncedAt?: string | null; nextEligibleAt?: string | null },
   ): Promise<void>;
+
+  // DB-backed GitHub releases cache (one row per repo).
+  getGithubReleaseCache(repo: string): Promise<GithubReleaseCacheEntry | undefined>;
+  upsertGithubReleaseCache(entry: GithubReleaseCacheEntry): Promise<void>;
 
   // CI healing
   getHealingSession(id: string): Promise<HealingSession | undefined>;

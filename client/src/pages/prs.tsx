@@ -1591,7 +1591,7 @@ export default function Dashboard() {
                 ) : undefined}
                 banner={(
                   <>
-                    {isPRReadyToMerge(selectedPR.feedbackItems) && selectedPR.status !== "processing" && countActiveFeedbackStatuses(selectedPR.feedbackItems).inProgress === 0 && (
+                    {isPRReadyToMerge(selectedPR.feedbackItems) && (selectedPR.status === "watching" || selectedPR.status === "done") && countActiveFeedbackStatuses(selectedPR.feedbackItems).inProgress === 0 && (
                       <ReadyToMergeIndicator
                         href={selectedPR.url}
                         testId="detail-ready-to-merge"

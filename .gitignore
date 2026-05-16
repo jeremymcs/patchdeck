@@ -8,3 +8,4 @@ vite.config.ts.*
 .gstack/qa-reports/screenshots/
 src-tauri/target/
 .claude/
+.agents/
