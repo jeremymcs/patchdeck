@@ -652,6 +652,7 @@ export const configSchema = z.object({
   deploymentCheckPollIntervalMs: z.number(),
   maxConcurrentIssueEvaluations: z.number().int().positive().default(2),
   maxConcurrentIssueWork: z.number().int().positive().default(1),
+  maxConcurrentBabysitRuns: z.number().int().positive().default(3),
   watchedRepos: z.array(z.string()),
   trustedReviewers: z.array(z.string()),
   priorityIssueAuthors: z.array(z.string()),

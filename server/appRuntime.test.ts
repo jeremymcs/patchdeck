@@ -3,6 +3,7 @@ import test from "node:test";
 import type { NewPR } from "@shared/schema";
 import {
   createAppRuntime,
+  deriveWorkPrMergeable,
   getIssueAutoWorkEligibility,
   issueWorkAttemptCountFromJobs,
   issueWorkPrFromLogs,
@@ -332,6 +333,25 @@ test("getIssueAutoWorkEligibility requires a ready label, app approval, and no b
     autoWorkEligible: false,
     autoWorkBlockedReason: "missing ready-for-agent label",
   });
+});
+
+test("deriveWorkPrMergeable only treats a clean PR as ready to merge", () => {
+  // "clean" is the only state where conflicts, required checks, and required
+  // reviews are all satisfied — so it is the only one that counts as ready.
+  assert.equal(deriveWorkPrMergeable("clean"), true);
+
+  // A PR with red or pending CI must never read as ready to merge. "blocked"
+  // = a required check is failing/pending; "unstable" = a non-required check
+  // is failing; "dirty" = merge conflicts; "behind" = base moved on.
+  assert.equal(deriveWorkPrMergeable("blocked"), false);
+  assert.equal(deriveWorkPrMergeable("unstable"), false);
+  assert.equal(deriveWorkPrMergeable("dirty"), false);
+  assert.equal(deriveWorkPrMergeable("behind"), false);
+
+  // GitHub computes the state lazily; until it is known, stay undecided
+  // (null) rather than asserting the PR is not ready.
+  assert.equal(deriveWorkPrMergeable("unknown"), null);
+  assert.equal(deriveWorkPrMergeable(null), null);
 });
 
 // ── planAutomaticIssueQueueActions ───────────────────────────────────────────

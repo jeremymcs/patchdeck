@@ -23,6 +23,7 @@ import { getUiPollIntervalMs } from "@/lib/polling";
 const ISSUES_CACHE_KEY = "patchdeck:issues-cache:v2";
 const ISSUES_CACHE_MAX_AGE_MS = 5 * 60 * 1000;
 const ISSUES_PAGE_SIZE = 100;
+const LIVE_POLL_INTERVAL_MS = 5000;
 
 function readCachedIssues(): { data: IssueListPage; updatedAt: number } | null {
   if (typeof window === "undefined") return null;
@@ -687,10 +688,12 @@ class IssuesErrorBoundary extends Component<{ children: ReactNode }, IssuesError
 function IssuesPage() {
   const { data: runtime } = useQuery<RuntimeState>({
     queryKey: ["/api/runtime"],
+    refetchInterval: LIVE_POLL_INTERVAL_MS,
   });
   const globalDrainMode = runtime?.drainMode === true;
   const { data: activities = EMPTY_ACTIVITY_SNAPSHOT } = useQuery<ActivitySnapshot>({
     queryKey: ["/api/activities"],
+    refetchInterval: LIVE_POLL_INTERVAL_MS,
   });
   const { data: config } = useQuery<Config>({ queryKey: ["/api/config"] });
   const uiPollIntervalMs = getUiPollIntervalMs(config);
@@ -727,6 +730,7 @@ function IssuesPage() {
     },
   });
 
+  const [extraPages, setExtraPages] = useState<IssueListPage[]>([]);
   const issuesQuery = useQuery<IssueListPage>({
     queryKey: ["/api/issues", ISSUES_PAGE_SIZE, 0],
     queryFn: async () => parseIssueListPageOrThrow(await fetchJson<unknown>(issueListUrl(ISSUES_PAGE_SIZE, 0))),
@@ -739,14 +743,16 @@ function IssuesPage() {
       if (globalDrainMode) {
         return false;
       }
-      const data = query.state.data?.items;
-      return Array.isArray(data) && data.some((issue) => isActiveWorkStatus(issue.workStatus))
-        ? 5000
+      const loaded = [
+        ...(query.state.data?.items ?? []),
+        ...extraPages.flatMap((page) => page.items),
+      ];
+      return loaded.some((issue) => isActiveWorkStatus(issue.workStatus))
+        ? LIVE_POLL_INTERVAL_MS
         : false;
     },
   });
   const { data: issuesPage, isLoading, isFetching } = issuesQuery;
-  const [extraPages, setExtraPages] = useState<IssueListPage[]>([]);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [isSyncingRepos, setIsSyncingRepos] = useState(false);
   useEffect(() => {

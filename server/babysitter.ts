@@ -23,6 +23,7 @@ import {
   buildOctokit,
   checkCISettled,
   fetchCheckSnapshotsForRef,
+  fetchCiPollResult,
   fetchFeedbackItemsForPR,
   fetchPullCloseState,
   fetchPullSummary,
@@ -39,6 +40,7 @@ import {
   resolveGitHubAuthToken,
   updateStatusReply,
   APP_STATUS_COMMENT_PATTERN,
+  type CiPollResult,
   type GitHubPullSummary,
   type GitHubStatusFailure,
   type ParsedPRUrl,
@@ -52,6 +54,7 @@ import { runCIHealingRepairAttempt } from "./ciHealingAgent";
 import { childLogger } from "./logger";
 import { getCodeFactoryPaths } from "./paths";
 import { isResourceBudgetBelowReserve } from "./rateLimitState";
+import { runWithRequestPriority } from "./requestPriority";
 
 const log = childLogger("babysitter");
 import { ensureRepoCache, preparePrWorktree, removePrWorktree } from "./repoWorkspace";
@@ -108,6 +111,7 @@ type GitHubService = {
   fetchPullCloseState?: typeof fetchPullCloseState;
   fetchPullSummary: typeof fetchPullSummary;
   fetchCheckSnapshotsForRef?: typeof fetchCheckSnapshotsForRef;
+  fetchCiPollResult?: typeof fetchCiPollResult;
   getAuthenticatedLogin?: (octokit: Awaited<ReturnType<typeof buildOctokit>>) => Promise<string | null>;
   listFailingStatuses: typeof listFailingStatuses;
   listOpenPullsForRepo: typeof listOpenPullsForRepo;
@@ -182,6 +186,7 @@ const defaultGitHubService: GitHubService = {
   buildOctokit,
   checkCISettled,
   fetchCheckSnapshotsForRef,
+  fetchCiPollResult,
   fetchFeedbackItemsForPR,
   fetchPullCloseState,
   fetchPullSummary,
@@ -1957,6 +1962,15 @@ export class PRBabysitter {
           })
           .slice(0, 1);
 
+    // Cap concurrently in-flight babysit_pr jobs across the whole sweep. Count
+    // jobs already queued or leased so the sweep never pushes the total past
+    // the configured ceiling; deferred PRs are dedupe-keyed and retried later.
+    const maxConcurrentBabysitRuns = currentConfig.maxConcurrentBabysitRuns;
+    let inFlightBabysitJobs = this.scheduleBackgroundJob
+      ? (await this.storage.listBackgroundJobs({ kind: "babysit_pr" }))
+          .filter((job) => job.status === "queued" || job.status === "leased").length
+      : 0;
+
     for (const repo of selectedRepos) {
       const repoSlug = formatRepoSlug(repo);
 
@@ -2312,13 +2326,19 @@ export class PRBabysitter {
         }
 
         if (this.scheduleBackgroundJob) {
-          // Defer this PR's babysit run when the budget is tight or this
-          // sweep already enqueued its quota for the repo.
-          if (babysitBudgetTight || babysitEnqueues >= MAX_BABYSIT_ENQUEUES_PER_SWEEP) {
+          // Defer this PR's babysit run when the core budget is tight, this
+          // sweep already enqueued its per-repo quota, or the in-flight
+          // babysit_pr concurrency ceiling is reached.
+          if (
+            babysitBudgetTight
+            || babysitEnqueues >= MAX_BABYSIT_ENQUEUES_PER_SWEEP
+            || inFlightBabysitJobs >= maxConcurrentBabysitRuns
+          ) {
             babysitDeferred += 1;
             continue;
           }
           babysitEnqueues += 1;
+          inFlightBabysitJobs += 1;
           await this.storage.addLog(local.id, "info", "Watcher queued autonomous babysitter run", {
             phase: "watcher",
             metadata: { repo: repoSlug },
@@ -2350,7 +2370,11 @@ export class PRBabysitter {
             repo: repoSlug,
             deferred: babysitDeferred,
             enqueued: babysitEnqueues,
-            reason: babysitBudgetTight ? "core budget reserve" : "per-sweep cap",
+            reason: babysitBudgetTight
+              ? "core budget reserve"
+              : inFlightBabysitJobs >= maxConcurrentBabysitRuns
+                ? "concurrency cap"
+                : "per-sweep cap",
           },
           "Deferred babysit runs to a later sweep to pace GitHub usage",
         );
@@ -2374,12 +2398,25 @@ export class PRBabysitter {
     const MAX_ATTEMPTS = 10;
     const pollIntervalMs = this.runtime.ciPollIntervalMs ?? 30_000;
 
+    // One CI status check. Attempt 1 runs at default (high) priority; re-polls
+    // run at "low" so the GitHub budget-reserve guard can defer them when core
+    // quota is tight instead of draining it on a PR that hasn't settled yet.
+    const pollOnce = (priority: "high" | "low"): Promise<CiPollResult> => {
+      const fetchResult = (): Promise<CiPollResult> =>
+        this.github.fetchCiPollResult
+          ? this.github.fetchCiPollResult(octokit, repo, headSha)
+          : Promise.all([
+              this.github.checkCISettled(octokit, repo, headSha),
+              this.github.listFailingStatuses(octokit, repo, headSha),
+            ]).then(([settled, failures]) => ({ settled, failures }));
+      return priority === "high" ? fetchResult() : runWithRequestPriority("low", fetchResult);
+    };
+
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       await wait(pollIntervalMs);
 
       try {
-        const settled = await this.github.checkCISettled(octokit, repo, headSha);
-        const failures = await this.github.listFailingStatuses(octokit, repo, headSha);
+        const { settled, failures } = await pollOnce(attempt === 1 ? "high" : "low");
 
         await queueLog(prId, "info", `CI poll attempt ${attempt}/${MAX_ATTEMPTS}: ${failures.length} failure(s), settled=${settled}`, {
           phase: "verify.ci",

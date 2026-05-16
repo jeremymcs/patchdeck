@@ -57,6 +57,7 @@ export type GitHubPullSummary = {
   baseRef: string;
   baseSha: string;
   mergeable: boolean | null;
+  mergeableState: string | null;
 };
 
 export type GitHubIssueSummary = {
@@ -1398,6 +1399,7 @@ export async function fetchPullSummary(
     baseRef,
     baseSha: pull.base?.sha || "",
     mergeable: typeof pull.mergeable === "boolean" ? pull.mergeable : null,
+    mergeableState: typeof pull.mergeable_state === "string" ? pull.mergeable_state : null,
   };
 }
 
@@ -2132,6 +2134,7 @@ function mapPullToSummary(pull: GitHubPullListItem, repo: ParsedRepoSlug): GitHu
     baseRef: pull.base?.ref || pull.base?.repo?.default_branch || "",
     baseSha: pull.base?.sha || "",
     mergeable: null,
+    mergeableState: null,
   };
 }
 
@@ -2615,6 +2618,64 @@ export async function checkCISettled(
   } catch {
     return false;
   }
+}
+
+export type CiPollResult = {
+  settled: boolean;
+  failures: GitHubStatusFailure[];
+};
+
+/**
+ * Single-fetch CI status check for the verification poll loop. Fetches commit
+ * statuses and check runs once, then derives both "settled" and the failure
+ * list — replacing a separate checkCISettled + listFailingStatuses pair that
+ * fetched the same two endpoints twice per poll attempt.
+ */
+export async function fetchCiPollResult(
+  octokit: Octokit,
+  repo: ParsedRepoSlug,
+  headSha: string,
+): Promise<CiPollResult> {
+  if (!headSha) return { settled: false, failures: [] };
+
+  const [statusResponse, checkRunsResponse] = await Promise.all([
+    withGitHubErrorHandling("commit statuses", repo, () => octokit.repos.getCombinedStatusForRef({
+      owner: repo.owner,
+      repo: repo.repo,
+      ref: headSha,
+    })),
+    withGitHubErrorHandling("check runs", repo, () => octokit.checks.listForRef({
+      owner: repo.owner,
+      repo: repo.repo,
+      ref: headSha,
+    })),
+  ]);
+
+  const statuses = statusResponse.data.statuses;
+  const checkRuns = checkRunsResponse.data.check_runs;
+
+  const failures: GitHubStatusFailure[] = [
+    ...statuses
+      .filter((status) => status.state === "failure" || status.state === "error")
+      .map((status) => ({
+        context: status.context || "status-check",
+        description: status.description || "Failed status check",
+        targetUrl: status.target_url || null,
+      })),
+    ...checkRuns
+      .filter((run) => run.conclusion === "failure" || run.conclusion === "timed_out" || run.conclusion === "cancelled")
+      .map((run) => ({
+        context: run.name,
+        description: run.output?.summary || run.output?.title || `Check run ${run.conclusion}`,
+        targetUrl: run.html_url || null,
+      })),
+  ];
+
+  const hasAnyChecks = statuses.length > 0 || checkRuns.length > 0;
+  const hasPending = statuses.some((s) => s.state === "pending")
+    || checkRuns.some((r) => r.status !== "completed");
+
+  return { settled: hasAnyChecks && !hasPending, failures };
 }
 
 export type MergedPRSummary = {

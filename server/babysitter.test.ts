@@ -51,6 +51,7 @@ function makePullSummary(pr: { url: string }, overrides?: Record<string, unknown
     baseRef: "main",
     baseSha: "base123",
     mergeable: true as boolean | null,
+    mergeableState: "clean" as string | null,
     ...overrides,
   };
 }
@@ -404,6 +405,7 @@ test("syncAndBabysitTrackedRepos deprioritizes a repo whose PR list is unchanged
     baseRef: "main",
     baseSha: "base1",
     mergeable: null,
+    mergeableState: null,
   };
 
   let deprioritizeConditionalCalls = 0;
@@ -478,6 +480,7 @@ test("syncAndBabysitTrackedRepos reuses the cached PR list on a conditional 304"
     baseRef: "main",
     baseSha: "base1",
     mergeable: null,
+    mergeableState: null,
   };
 
   const babysitter = new PRBabysitter(
@@ -795,7 +798,8 @@ function makeOctocatPull(n: number) {
 test("syncAndBabysitTrackedRepos caps babysit_pr enqueues per repo per sweep", async () => {
   clearRateLimitStateForTests();
   const storage = new MemStorage();
-  await storage.updateConfig({ watchedRepos: ["octo/example"] });
+  // Raise the concurrency ceiling so the per-sweep cap is the binding limit.
+  await storage.updateConfig({ watchedRepos: ["octo/example"], maxConcurrentBabysitRuns: 50 });
   const backgroundJobQueue = new BackgroundJobQueue(storage);
   const pulls = Array.from({ length: 15 }, (_, i) => makeOctocatPull(100 + i));
 
@@ -820,6 +824,40 @@ test("syncAndBabysitTrackedRepos caps babysit_pr enqueues per repo per sweep", a
 
   const jobs = await storage.listBackgroundJobs({ kind: "babysit_pr", status: "queued" });
   assert.equal(jobs.length, 10, "at most 10 babysit jobs are enqueued per repo per sweep");
+});
+
+test("syncAndBabysitTrackedRepos caps in-flight babysit_pr jobs at maxConcurrentBabysitRuns", async () => {
+  clearRateLimitStateForTests();
+  const storage = new MemStorage();
+  await storage.updateConfig({ watchedRepos: ["octo/example"], maxConcurrentBabysitRuns: 3 });
+  const backgroundJobQueue = new BackgroundJobQueue(storage);
+  const pulls = Array.from({ length: 15 }, (_, i) => makeOctocatPull(100 + i));
+
+  const babysitter = new PRBabysitter(
+    storage,
+    makeWatcherGitHubService({ listOpenPullsForRepo: async () => pulls }),
+    {
+      resolveAgent: async () => "codex",
+      ciPollIntervalMs: 0,
+      evaluateFixNecessityWithAgent: async () => ({ needsFix: false, reason: "unused" }),
+      applyFixesWithAgent: async () => ({ code: 0, stdout: "", stderr: "" }),
+      runCommand: async () => ({ code: 0, stdout: "", stderr: "" }),
+    },
+    undefined,
+    async (...args) => backgroundJobQueue.enqueue(...args),
+  );
+  babysitter.babysitPR = async () => {
+    throw new Error("watcher should enqueue, not babysit directly");
+  };
+
+  await babysitter.syncAndBabysitTrackedRepos();
+  const afterFirst = await storage.listBackgroundJobs({ kind: "babysit_pr", status: "queued" });
+  assert.equal(afterFirst.length, 3, "first sweep enqueues no more than maxConcurrentBabysitRuns");
+
+  // A second sweep must count the still-queued jobs as in-flight and add none.
+  await babysitter.syncAndBabysitTrackedRepos();
+  const afterSecond = await storage.listBackgroundJobs({ kind: "babysit_pr", status: "queued" });
+  assert.equal(afterSecond.length, 3, "already-queued babysit jobs count toward the cap");
 });
 
 test("syncAndBabysitTrackedRepos enqueues no babysit_pr jobs while the core budget is in the reserve", async () => {

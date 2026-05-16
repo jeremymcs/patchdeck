@@ -1,5 +1,5 @@
 import { Activity as ActivityIcon } from "lucide-react";
-import type { ActivityItem, ActivitySnapshot } from "@shared/schema";
+import type { ActivityItem, ActivitySnapshot, BackgroundJobKind } from "@shared/schema";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { QueueStatusBadge } from "@/components/QueueStatusBadge";
 import type { QueueStatusView } from "@/lib/activityQueue";
@@ -26,6 +26,29 @@ function formatPollLabel(pollIntervalMs?: number): string {
   return `${seconds}s`;
 }
 
+const ACTIVITY_KIND_META: Record<BackgroundJobKind, { label: string; className: string }> = {
+  evaluate_issue: { label: "issue", className: "border-sky-500/40 text-sky-400" },
+  verify_issue: { label: "issue", className: "border-sky-500/40 text-sky-400" },
+  work_issue: { label: "issue", className: "border-sky-500/40 text-sky-400" },
+  babysit_pr: { label: "pr", className: "border-emerald-500/40 text-emerald-400" },
+  answer_pr_question: { label: "pr", className: "border-emerald-500/40 text-emerald-400" },
+  process_release_run: { label: "release", className: "border-border text-muted-foreground" },
+  sync_watched_repos: { label: "sync", className: "border-border text-muted-foreground" },
+  generate_social_changelog: { label: "changelog", className: "border-border text-muted-foreground" },
+  heal_deployment: { label: "deploy", className: "border-border text-muted-foreground" },
+};
+
+function ActivityKindBadge({ kind }: { kind: BackgroundJobKind }) {
+  const meta = ACTIVITY_KIND_META[kind];
+  return (
+    <span
+      className={`shrink-0 border px-1 text-[9px] uppercase leading-4 tracking-wider ${meta.className}`}
+    >
+      {meta.label}
+    </span>
+  );
+}
+
 function ActivityRow({ activity, queueStatus }: { activity: ActivityItem; queueStatus: QueueStatusView | null }) {
   const timeLabel = activity.status === "failed"
     ? formatClock(activity.updatedAt)
@@ -45,7 +68,10 @@ function ActivityRow({ activity, queueStatus }: { activity: ActivityItem; queueS
         }`}
       />
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-[12px] leading-4 text-foreground">{activity.label}</span>
+        <span className="flex min-w-0 items-center gap-1.5">
+          <ActivityKindBadge kind={activity.kind} />
+          <span className="min-w-0 truncate text-[12px] leading-4 text-foreground">{activity.label}</span>
+        </span>
         {activity.detail && (
           <span className="block truncate text-[11px] leading-4 text-muted-foreground">{activity.detail}</span>
         )}
