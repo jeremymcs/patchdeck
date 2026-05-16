@@ -350,9 +350,6 @@ export class MemStorage implements IStorage {
     for (const issue of issues) {
       const key = `${repo}#${issue.number}`;
       const existing = this.syncedIssues.get(key);
-      if (existing?.isWorked) {
-        continue;
-      }
       this.syncedIssues.set(key, {
         repo,
         number: issue.number,

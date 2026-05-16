@@ -128,6 +128,7 @@ test("SqliteStorage reloads config and PR state from the same root", async () =>
     flagged: 0,
     testsPassed: null,
     lintPassed: null,
+    mergeableState: "clean",
     lastChecked: null,
     watchEnabled: false,
   });
@@ -263,6 +264,7 @@ test("SqliteStorage reloads config and PR state from the same root", async () =>
   assert.equal(reloadedPr?.feedbackItems[0]?.threadId, "PRRT_kwDO_thread");
   assert.equal(reloadedPr?.feedbackItems[0]?.auditToken, "codefactory-feedback:feedback-1");
   assert.equal(reloadedPr?.accepted, 1);
+  assert.equal(reloadedPr?.mergeableState, "clean");
   assert.equal(reloadedPr?.watchEnabled, false);
   assert.equal(reloadedPr?.docsAssessment?.headSha, "abc123");
   assert.equal(reloadedPr?.docsAssessment?.status, "needed");
@@ -1188,6 +1190,57 @@ test("SqliteStorage stores, overwrites, and clears GitHub etags across reopen", 
     assert.equal(await second.getGithubEtag("issues:open:owner/repo"), undefined);
   } finally {
     second.close();
+  }
+});
+
+test("synced issue upsert refreshes worked issue payloads without clearing worked state", async () => {
+  async function assertRefreshesWorkedIssue(storage: Pick<MemStorage, "upsertSyncedIssues" | "markSyncedIssueWorked" | "getSyncedIssue">) {
+    await storage.upsertSyncedIssues("owner/repo", [{
+      number: 7,
+      title: "Old title",
+      body: null,
+      bodyHtml: null,
+      url: "https://github.com/owner/repo/issues/7",
+      repoFullName: "owner/repo",
+      repoCloneUrl: "https://github.com/owner/repo.git",
+      author: "alice",
+      labels: ["needs-maintainer-review"],
+      assignees: [],
+      comments: 0,
+      createdAt: "2026-05-03T17:00:00.000Z",
+      updatedAt: "2026-05-03T18:00:00.000Z",
+    }], "2026-05-03T18:00:00.000Z");
+    await storage.markSyncedIssueWorked("owner/repo", 7);
+    await storage.upsertSyncedIssues("owner/repo", [{
+      number: 7,
+      title: "Fresh title",
+      body: null,
+      bodyHtml: null,
+      url: "https://github.com/owner/repo/issues/7",
+      repoFullName: "owner/repo",
+      repoCloneUrl: "https://github.com/owner/repo.git",
+      author: "alice",
+      labels: ["needs-triage"],
+      assignees: [],
+      comments: 1,
+      createdAt: "2026-05-03T17:00:00.000Z",
+      updatedAt: "2026-05-16T18:00:00.000Z",
+    }], "2026-05-16T18:00:00.000Z");
+
+    const record = await storage.getSyncedIssue("owner/repo", 7);
+    assert.equal(record?.isWorked, true);
+    assert.equal(record?.payload.title, "Fresh title");
+    assert.deepEqual(record?.payload.labels, ["needs-triage"]);
+  }
+
+  await assertRefreshesWorkedIssue(new MemStorage());
+
+  const root = await mkdtemp(path.join(os.tmpdir(), "codefactory-storage-"));
+  const sqlite = new SqliteStorage(root);
+  try {
+    await assertRefreshesWorkedIssue(sqlite);
+  } finally {
+    sqlite.close();
   }
 });
 

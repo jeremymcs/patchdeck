@@ -1809,11 +1809,21 @@ export class PRBabysitter {
     let refreshedTitle = pr.title;
     let refreshedBody: string | null = pr.body;
     let refreshedBodyHtml: string | null = pr.bodyHtml;
+    let refreshedRepo = pr.repo;
+    let refreshedBranch = pr.branch;
+    let refreshedAuthor = pr.author;
+    let refreshedUrl = pr.url;
+    let refreshedMergeableState = pr.mergeableState;
     try {
       const pullSummary = await this.github.fetchPullSummary(octokit, parsed);
       refreshedTitle = pullSummary.title;
       refreshedBody = pullSummary.body;
       refreshedBodyHtml = pullSummary.bodyHtml;
+      refreshedRepo = pullSummary.repoFullName;
+      refreshedBranch = pullSummary.branch;
+      refreshedAuthor = pullSummary.author;
+      refreshedUrl = pullSummary.url;
+      refreshedMergeableState = pullSummary.mergeableState;
     } catch {
       // Non-fatal: keep existing PR metadata if the summary fetch fails.
     }
@@ -1827,6 +1837,11 @@ export class PRBabysitter {
       title: refreshedTitle,
       body: refreshedBody,
       bodyHtml: refreshedBodyHtml,
+      repo: refreshedRepo,
+      branch: refreshedBranch,
+      author: refreshedAuthor,
+      url: refreshedUrl,
+      mergeableState: refreshedMergeableState,
       prStage: nextPrStage,
       status: pr.status,
       lastChecked: new Date().toISOString(),

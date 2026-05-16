@@ -75,6 +75,7 @@ export const prSchema = z.object({
   flagged: z.number(),
   testsPassed: z.boolean().nullable(),
   lintPassed: z.boolean().nullable(),
+  mergeableState: z.string().nullable().default(null),
   lastChecked: z.string().nullable(),
   lastSyncAttemptedAt: z.string().nullable().default(null),
   lastSyncSucceededAt: z.string().nullable().default(null),
