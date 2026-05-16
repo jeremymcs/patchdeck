@@ -38,6 +38,7 @@ const DEFAULT_SETTING_VALUES = {
   pollIntervalSeconds: 600,
   batchWindowSeconds: 600,
   maxChangesPerRun: 20,
+  maxConcurrentBabysitRuns: 3,
   maxHealingAttemptsPerSession: 3,
   maxHealingAttemptsPerFingerprint: 2,
   maxConcurrentHealingRuns: 1,
@@ -1276,6 +1277,14 @@ export default function Settings() {
                 value={config?.maxChangesPerRun ?? 20}
                 onChange={(v) => updateConfigMutation.mutate({ maxChangesPerRun: v })}
                 defaultValue={DEFAULT_SETTING_VALUES.maxChangesPerRun}
+                disabled={updateConfigMutation.isPending}
+              />
+              <SettingRow
+                label="Max concurrent babysit runs"
+                description="How many PRs the watcher babysits at once before queueing the rest"
+                value={config?.maxConcurrentBabysitRuns ?? 3}
+                onChange={(v) => updateConfigMutation.mutate({ maxConcurrentBabysitRuns: v })}
+                defaultValue={DEFAULT_SETTING_VALUES.maxConcurrentBabysitRuns}
                 disabled={updateConfigMutation.isPending}
               />
             </div>

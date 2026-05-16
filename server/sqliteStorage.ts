@@ -100,6 +100,7 @@ type ConfigRow = {
   deployment_check_poll_interval_ms: number;
   max_concurrent_issue_evaluations: number;
   max_concurrent_issue_work: number;
+  max_concurrent_babysit_runs: number;
   trusted_reviewers_json: string;
   priority_issue_authors_json: string;
   ignored_bots_json: string;
@@ -967,6 +968,7 @@ export class SqliteStorage implements IStorage {
     this.exec("UPDATE watched_repos SET issue_auto_evaluate = 1 WHERE issue_auto_work = 1 AND issue_auto_evaluate = 0");
     this.ensureColumn("config", "max_concurrent_issue_evaluations", "INTEGER NOT NULL DEFAULT 2");
     this.ensureColumn("config", "max_concurrent_issue_work", "INTEGER NOT NULL DEFAULT 1");
+    this.ensureColumn("config", "max_concurrent_babysit_runs", "INTEGER NOT NULL DEFAULT 3");
     this.ensureColumn("config", "priority_issue_authors_json", "TEXT NOT NULL DEFAULT '[]'");
     this.ensureColumn("synced_issues", "is_worked", "INTEGER NOT NULL DEFAULT 0");
     this.ensureColumn("release_runs", "source", "TEXT NOT NULL DEFAULT 'automatic'");
@@ -1087,6 +1089,7 @@ export class SqliteStorage implements IStorage {
       deploymentCheckPollIntervalMs: row.deployment_check_poll_interval_ms ?? DEFAULT_CONFIG.deploymentCheckPollIntervalMs,
       maxConcurrentIssueEvaluations: row.max_concurrent_issue_evaluations ?? DEFAULT_CONFIG.maxConcurrentIssueEvaluations,
       maxConcurrentIssueWork: row.max_concurrent_issue_work ?? DEFAULT_CONFIG.maxConcurrentIssueWork,
+      maxConcurrentBabysitRuns: row.max_concurrent_babysit_runs ?? DEFAULT_CONFIG.maxConcurrentBabysitRuns,
       watchedRepos,
       trustedReviewers: JSON.parse(row.trusted_reviewers_json),
       priorityIssueAuthors: parseStringArrayJson(row.priority_issue_authors_json),
@@ -1140,10 +1143,11 @@ export class SqliteStorage implements IStorage {
           deployment_check_poll_interval_ms,
           max_concurrent_issue_evaluations,
           max_concurrent_issue_work,
+          max_concurrent_babysit_runs,
           trusted_reviewers_json,
           priority_issue_authors_json,
           ignored_bots_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           github_token = excluded.github_token,
           github_tokens_json = excluded.github_tokens_json,
@@ -1179,6 +1183,7 @@ export class SqliteStorage implements IStorage {
           deployment_check_poll_interval_ms = excluded.deployment_check_poll_interval_ms,
           max_concurrent_issue_evaluations = excluded.max_concurrent_issue_evaluations,
           max_concurrent_issue_work = excluded.max_concurrent_issue_work,
+          max_concurrent_babysit_runs = excluded.max_concurrent_babysit_runs,
           trusted_reviewers_json = excluded.trusted_reviewers_json,
           priority_issue_authors_json = excluded.priority_issue_authors_json,
           ignored_bots_json = excluded.ignored_bots_json
@@ -1218,6 +1223,7 @@ export class SqliteStorage implements IStorage {
         config.deploymentCheckPollIntervalMs,
         config.maxConcurrentIssueEvaluations,
         config.maxConcurrentIssueWork,
+        config.maxConcurrentBabysitRuns,
         JSON.stringify(config.trustedReviewers),
         JSON.stringify(config.priorityIssueAuthors),
         JSON.stringify(config.ignoredBots),
@@ -2003,6 +2009,7 @@ export class SqliteStorage implements IStorage {
              max_healing_attempts_per_fingerprint, max_concurrent_healing_runs, healing_cooldown_ms,
              auto_heal_deployments, deployment_check_delay_ms, deployment_check_timeout_ms,
              deployment_check_poll_interval_ms, max_concurrent_issue_evaluations, max_concurrent_issue_work,
+             max_concurrent_babysit_runs,
              trusted_reviewers_json, priority_issue_authors_json, ignored_bots_json
       FROM config
       WHERE id = 1

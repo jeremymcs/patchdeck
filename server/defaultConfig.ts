@@ -33,6 +33,7 @@ export const DEFAULT_CONFIG: Config = {
   deploymentCheckPollIntervalMs: 60000,
   maxConcurrentIssueEvaluations: 2,
   maxConcurrentIssueWork: 1,
+  maxConcurrentBabysitRuns: 3,
   watchedRepos: [],
   trustedReviewers: [],
   priorityIssueAuthors: [],

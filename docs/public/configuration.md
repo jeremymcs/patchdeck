@@ -69,6 +69,7 @@ The settings page in the dashboard provides a UI for:
 - **Priority issue authors** — Add GitHub logins whose issues should be evaluated and worked before the regular issue queue.
 - **PR comment branding** — Customize the app name shown in agent-authored GitHub PR comments, or remove that signature entirely. Toggle whether the signature links back to patchdeck and includes the `Posted by patchdeck` footer.
 - **GitHub progress replies** — Toggle whether the babysitter posts public Accepted/running/completed status replies while working through review comments.
+- **Babysitter run concurrency** — Set how many `babysit_pr` jobs can be in-flight (`queued` + `leased`) across watcher sweeps.
 - **CI healing** — Enable autonomous CI repair and tune retry/session limits.
 - **Deployment healing** — Not yet exposed in the dashboard; use `PATCH /api/config` for the deployment-healing keys listed below.
 - **Theme** — Toggle between light and dark mode.
@@ -151,6 +152,16 @@ patchdeck can track failing CI checks as first-class healing sessions and, when 
 | `Healing cooldown (ms)` | `300000` | Backoff window before a cooldowned session can retry |
 
 The dashboard shows healing state on each tracked PR, while the local API exposes `GET /api/healing-sessions` and `GET /api/healing-sessions/:id` for external tooling.
+
+## Babysitter Queue Settings
+
+patchdeck paces autonomous PR babysitter dispatch using a global in-flight cap for `babysit_pr` jobs.
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `Max concurrent babysitter runs` | `3` | Limits total `babysit_pr` jobs in `queued` or `leased` states during watcher sweeps; additional eligible PRs are deferred to later sweeps instead of being enqueued immediately |
+
+This value maps to `maxConcurrentBabysitRuns` in `GET /api/config` and `PATCH /api/config`.
 
 ## Deployment Healing Settings
 

@@ -440,6 +440,21 @@ export function getIssueAutoWorkEligibility(
   };
 }
 
+/**
+ * Maps a GitHub pull request `mergeable_state` to the "ready to merge" flag.
+ * GitHub's `mergeable` boolean only reflects merge conflicts — it stays true
+ * even when CI is red. Only `mergeable_state === "clean"` guarantees no
+ * conflicts AND that required checks and reviews pass, so that is the sole
+ * state treated as ready. "unknown" (GitHub has not finished computing the
+ * state) and a missing value resolve to null rather than false.
+ */
+export function deriveWorkPrMergeable(mergeableState: string | null): boolean | null {
+  if (mergeableState === null || mergeableState === "unknown") {
+    return null;
+  }
+  return mergeableState === "clean";
+}
+
 function getLatestBackgroundJob(jobs: BackgroundJob[]): BackgroundJob | undefined {
   return jobs
     .slice()
@@ -1188,7 +1203,7 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
           const config = await storage.getConfig();
           const octokit = await buildOctokit(config);
           const pull = await fetchPullSummary(octokit, parsedPr);
-          workPrMergeable = pull.mergeable;
+          workPrMergeable = deriveWorkPrMergeable(pull.mergeableState);
         } catch (error) {
           log.warn(
             { err: error instanceof Error ? error.message : String(error), repo: issue.repoFullName, prNumber: readyPr.workPrNumber },
