@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { Link } from "wouter";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import * as Collapsible from "@radix-ui/react-collapsible";
@@ -63,6 +63,61 @@ function matchesNumberSearch(number: number, search: string): boolean {
 
 function prIssueLinkKey(repo: string, number: number): string {
   return `${repo}#${number}`;
+}
+
+type PrStatusFilter = "all" | "ready" | "ci_failing" | "attention" | "processing" | "done";
+
+function matchesPrStatusFilter(pr: PRSummary, filter: PrStatusFilter): boolean {
+  switch (filter) {
+    case "ready":
+      // No mergeable_state on the stored PR — "done with green CI" is the proxy.
+      return pr.status === "done" && pr.testsPassed === true && pr.lintPassed === true;
+    case "ci_failing":
+      return pr.testsPassed === false || pr.lintPassed === false;
+    case "attention":
+      return pr.flagged > 0 || pr.status === "error";
+    case "processing":
+      return pr.status === "processing";
+    case "done":
+      return pr.status === "done";
+    case "all":
+      return true;
+  }
+}
+
+const PR_STATUS_FILTERS: { value: PrStatusFilter; label: string; testId: string }[] = [
+  { value: "ready", label: "ready to merge", testId: "pr-ready-filter" },
+  { value: "ci_failing", label: "ci failing", testId: "pr-ci-failing-filter" },
+  { value: "attention", label: "needs attention", testId: "pr-attention-filter" },
+  { value: "processing", label: "processing", testId: "pr-processing-filter" },
+  { value: "done", label: "done", testId: "pr-done-filter" },
+];
+
+function FilterChip({
+  active,
+  onClick,
+  testId,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  testId?: string;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      data-testid={testId}
+      className={`rounded-md border px-2 py-0.5 text-[10px] uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background ${
+        active
+          ? "border-primary bg-primary/10 text-primary"
+          : "border-border text-muted-foreground hover:border-primary/40 hover:text-primary"
+      }`}
+    >
+      {children}
+    </button>
+  );
 }
 
 function buildIssueLinkedPRIndex(issues: Issue[]): Map<string, Issue> {
@@ -960,6 +1015,8 @@ export default function Dashboard() {
   const [selectedPRId, setSelectedPRId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<"active" | "issues" | "archived">("active");
   const [prNumberSearch, setPrNumberSearch] = useState("");
+  const [selectedRepo, setSelectedRepo] = useState<string>("all");
+  const [selectedStatusFilter, setSelectedStatusFilter] = useState<PrStatusFilter>("all");
   const [areErrorsRolledUp, setAreErrorsRolledUp] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isAskOpen, setIsAskOpen] = useState(false);
@@ -1041,13 +1098,40 @@ export default function Dashboard() {
     () => prs.filter((pr) => issueLinkedPRByKey.has(prIssueLinkKey(pr.repo, pr.number))),
     [prs, issueLinkedPRByKey],
   );
-  const displayedPRs = (viewMode === "archived"
+  const viewPRs = viewMode === "archived"
     ? archivedPRs
     : viewMode === "issues"
       ? issueLinkedPRs
-      : prs
-  )
+      : prs;
+  const repoCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const pr of viewPRs) {
+      counts.set(pr.repo, (counts.get(pr.repo) ?? 0) + 1);
+    }
+    return Array.from(counts.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+  }, [viewPRs]);
+  const statusCounts = useMemo(() => {
+    const counts: Record<PrStatusFilter, number> = {
+      all: viewPRs.length,
+      ready: 0,
+      ci_failing: 0,
+      attention: 0,
+      processing: 0,
+      done: 0,
+    };
+    for (const pr of viewPRs) {
+      for (const { value } of PR_STATUS_FILTERS) {
+        if (matchesPrStatusFilter(pr, value)) {
+          counts[value] += 1;
+        }
+      }
+    }
+    return counts;
+  }, [viewPRs]);
+  const displayedPRs = viewPRs
     .filter((pr) => matchesNumberSearch(pr.number, prNumberSearch))
+    .filter((pr) => selectedRepo === "all" || pr.repo === selectedRepo)
+    .filter((pr) => matchesPrStatusFilter(pr, selectedStatusFilter))
     .sort((a, b) => b.number - a.number);
   const isArchived = viewMode === "archived";
   const normalizedPrNumberSearch = normalizeNumberSearch(prNumberSearch);
@@ -1062,6 +1146,13 @@ export default function Dashboard() {
     },
     refetchInterval: 3000,
   });
+
+  useEffect(() => {
+    // Switching tabs changes the available repos/statuses; reset filters so a
+    // stale selection doesn't leave the list looking empty.
+    setSelectedRepo("all");
+    setSelectedStatusFilter("all");
+  }, [viewMode]);
 
   useEffect(() => {
     if (displayedPRs.length === 0) {
@@ -1300,16 +1391,60 @@ export default function Dashboard() {
               Archived ({archivedPRs.length})
             </button>
           </div>
-          <div className="border-b border-border px-3 py-2">
-            <label htmlFor="pr-number-search" className="sr-only">Search PR number</label>
-            <input
-              id="pr-number-search"
-              value={prNumberSearch}
-              onChange={(event) => setPrNumberSearch(event.target.value)}
-              placeholder="Search #"
-              data-testid="pr-number-search"
-              className="h-7 w-full rounded-md border border-border bg-background px-2 font-mono text-[12px] text-foreground placeholder:font-sans placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-            />
+          <div className="flex flex-col gap-2 border-b border-border px-3 py-2" data-testid="pr-filter-bar">
+            <div>
+              <label htmlFor="pr-number-search" className="sr-only">Search PR number</label>
+              <input
+                id="pr-number-search"
+                value={prNumberSearch}
+                onChange={(event) => setPrNumberSearch(event.target.value)}
+                placeholder="Search #"
+                data-testid="pr-number-search"
+                className="h-7 w-full rounded-md border border-border bg-background px-2 font-mono text-[12px] text-foreground placeholder:font-sans placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              />
+            </div>
+            <div className="flex flex-wrap items-start gap-2">
+              <span className="mt-1 w-14 shrink-0 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                Repo
+              </span>
+              <div className="flex min-w-0 flex-1 flex-wrap gap-1">
+                <FilterChip active={selectedRepo === "all"} onClick={() => setSelectedRepo("all")}>
+                  all ({viewPRs.length})
+                </FilterChip>
+                {repoCounts.map(([repo, count]) => (
+                  <FilterChip
+                    key={repo}
+                    active={selectedRepo === repo}
+                    onClick={() => setSelectedRepo(repo)}
+                  >
+                    {repo} ({count})
+                  </FilterChip>
+                ))}
+              </div>
+            </div>
+            <div className="flex flex-wrap items-start gap-2">
+              <span className="mt-1 w-14 shrink-0 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                Status
+              </span>
+              <div className="flex min-w-0 flex-1 flex-wrap gap-1">
+                {PR_STATUS_FILTERS.map((filter) => (
+                  <FilterChip
+                    key={filter.value}
+                    active={selectedStatusFilter === filter.value}
+                    onClick={() => setSelectedStatusFilter(filter.value)}
+                    testId={filter.testId}
+                  >
+                    {filter.label} ({statusCounts[filter.value]})
+                  </FilterChip>
+                ))}
+                <FilterChip
+                  active={selectedStatusFilter === "all"}
+                  onClick={() => setSelectedStatusFilter("all")}
+                >
+                  all statuses
+                </FilterChip>
+              </div>
+            </div>
           </div>
           <div className="flex-1 overflow-y-auto">
             {isLoadingCurrentView ? (
