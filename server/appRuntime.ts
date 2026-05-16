@@ -440,6 +440,31 @@ export function getIssueAutoWorkEligibility(
   };
 }
 
+export function getCurrentIssueEvaluationForLabels<T extends Pick<IssueEvaluation, "status" | "summary" | "safetyFlags">>(
+  issue: Pick<Issue, "labels">,
+  evaluation?: T | null,
+): T | null {
+  if (!evaluation) {
+    return null;
+  }
+
+  const currentLabels = new Set(issue.labels.map(normalizeIssueLabel).filter(Boolean));
+  const blockedLabelFlags = evaluation.safetyFlags
+    .map((flag) => flag.trim().toLowerCase())
+    .filter((flag) => flag.startsWith("blocked-label:"));
+
+  if (
+    evaluation.status === "blocked"
+    && blockedLabelFlags.length > 0
+    && evaluation.safetyFlags.length === blockedLabelFlags.length
+    && blockedLabelFlags.some((flag) => !currentLabels.has(flag.slice("blocked-label:".length)))
+  ) {
+    return null;
+  }
+
+  return evaluation;
+}
+
 /**
  * Maps a GitHub pull request `mergeable_state` to the "ready to merge" flag.
  * GitHub's `mergeable` boolean only reflects merge conflicts — it stays true
@@ -964,7 +989,7 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       });
     }
 
-    const octokit = await buildOctokit(config);
+    const octokit = await buildOctokitImpl(config);
     const issue = await fetchIssueSummary(octokit, { ...parsedRepo, number });
     const targetId = formatIssueTargetId(issue.repoFullName, issue.number);
     const priority = isPriorityIssueAuthor(issue.author, config.priorityIssueAuthors)
@@ -1024,7 +1049,7 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       });
     }
 
-    const octokit = await buildOctokit(config);
+    const octokit = await buildOctokitImpl(config);
     const issueSummary = await fetchIssueSummary(octokit, { ...parsedRepo, number });
     const enriched = await applyIssueWorkState(issueSummary);
     const targetId = formatIssueTargetId(issueSummary.repoFullName, issueSummary.number);
@@ -1176,7 +1201,10 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
     const latestJob = getLatestBackgroundJob(issueJobs);
     const workState = issueWorkStatusFromJobs(issueJobs);
     const workLogs = latestJob ? await storage.getLogs(targetId) : [];
-    const evaluation = await storage.getIssueEvaluation(targetId);
+    const storedEvaluation = await storage.getIssueEvaluation(targetId);
+    const evaluation = getCurrentIssueEvaluationForLabels({
+      labels: issue.labels,
+    }, storedEvaluation);
     const subtaskSet = await storage.getIssueSubtasks(targetId);
     const readyPr = latestJob?.status === "completed"
       ? issueWorkPrFromLogs(workLogs, issue.repoFullName)
@@ -1200,8 +1228,7 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       const parsedPr = parsePRUrl(readyPr.workPrUrl);
       if (parsedPr) {
         try {
-          const config = await storage.getConfig();
-          const octokit = await buildOctokit(config);
+          const octokit = options.octokit ?? await buildOctokitImpl(await storage.getConfig());
           const pull = await fetchPullSummary(octokit, parsedPr);
           workPrMergeable = deriveWorkPrMergeable(pull.mergeableState);
         } catch (error) {
@@ -1373,7 +1400,12 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       const targetId = formatIssueTargetId(issue.repoFullName, issue.number);
       const attemptedAt = markIssueSyncAttempt(targetId);
       markIssueSyncSuccess(targetId, attemptedAt);
-      return applyIssueWorkState(issue, { issueJobs: workJobsByTarget.get(targetId) ?? [], octokit, isWorked: record.isWorked });
+      return applyIssueWorkState(issue, {
+        issueJobs: workJobsByTarget.get(targetId) ?? [],
+        includePrMergeability: record.isWorked,
+        octokit,
+        isWorked: record.isWorked,
+      });
     }));
 
     const sortedItems = issuesWithWorkLinks
@@ -1406,7 +1438,7 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       throw new AppRuntimeError(404, `Repository ${canonical} is not being watched`);
     }
 
-    const octokit = await buildOctokit(config);
+    const octokit = await buildOctokitImpl(config);
     const targetId = formatIssueTargetId(canonical, number);
     const attemptedAt = markIssueSyncAttempt(targetId);
     try {
@@ -1431,19 +1463,14 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       throw new AppRuntimeError(404, `Repository ${canonical} is not being watched`);
     }
 
-    const existing = await storage.getSyncedIssue(canonical, number);
     const targetId = formatIssueTargetId(canonical, number);
     const attemptedAt = markIssueSyncAttempt(targetId);
-    if (existing?.isWorked) {
-      markIssueSyncSuccess(targetId, attemptedAt);
-      return applyIssueWorkState(existing.payload, { includePrMergeability: true, isWorked: true });
-    }
-
-    const octokit = await buildOctokit(config);
+    const octokit = await buildOctokitImpl(config);
+    const existing = await storage.getSyncedIssue(canonical, number);
     const issue = await fetchIssueSummary(octokit, { ...parsedRepo, number });
     await storage.upsertSyncedIssues(canonical, [issue], new Date().toISOString());
     markIssueSyncSuccess(targetId, attemptedAt);
-    return applyIssueWorkState(issue, { includePrMergeability: true, octokit });
+    return applyIssueWorkState(issue, { includePrMergeability: true, octokit, isWorked: existing?.isWorked ?? false });
   }
 
   async function updateIssueLabelsInternal(
@@ -2249,6 +2276,7 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
         flagged: 0,
         testsPassed: null,
         lintPassed: null,
+        mergeableState: summary.mergeableState,
         lastChecked: null,
       });
 

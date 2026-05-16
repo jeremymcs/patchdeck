@@ -160,6 +160,7 @@ type PRRow = {
   flagged: number;
   tests_passed: number | null;
   lint_passed: number | null;
+  mergeable_state: string | null;
   last_checked: string | null;
   last_sync_attempted_at: string | null;
   last_sync_succeeded_at: string | null;
@@ -619,6 +620,7 @@ export class SqliteStorage implements IStorage {
         flagged INTEGER NOT NULL,
         tests_passed INTEGER,
         lint_passed INTEGER,
+        mergeable_state TEXT,
         last_checked TEXT,
         last_sync_attempted_at TEXT,
         last_sync_succeeded_at TEXT,
@@ -980,6 +982,7 @@ export class SqliteStorage implements IStorage {
     this.ensureColumn("prs", "body", "TEXT");
     this.ensureColumn("prs", "body_html", "TEXT");
     this.ensureColumn("prs", "pr_stage", "TEXT");
+    this.ensureColumn("prs", "mergeable_state", "TEXT");
 
     const configExists = this.get<{ present: number }>("SELECT 1 AS present FROM config WHERE id = 1");
     if (!configExists) {
@@ -1295,6 +1298,7 @@ export class SqliteStorage implements IStorage {
       flagged: row.flagged,
       testsPassed: row.tests_passed === null ? null : Boolean(row.tests_passed),
       lintPassed: row.lint_passed === null ? null : Boolean(row.lint_passed),
+      mergeableState: row.mergeable_state ?? null,
       lastChecked: row.last_checked,
       lastSyncAttemptedAt: row.last_sync_attempted_at ?? null,
       lastSyncSucceededAt: row.last_sync_succeeded_at ?? null,
@@ -1323,6 +1327,7 @@ export class SqliteStorage implements IStorage {
       flagged: row.flagged,
       testsPassed: row.tests_passed === null ? null : Boolean(row.tests_passed),
       lintPassed: row.lint_passed === null ? null : Boolean(row.lint_passed),
+      mergeableState: row.mergeable_state ?? null,
       lastChecked: row.last_checked,
       lastSyncAttemptedAt: row.last_sync_attempted_at ?? null,
       lastSyncSucceededAt: row.last_sync_succeeded_at ?? null,
@@ -1656,7 +1661,7 @@ export class SqliteStorage implements IStorage {
   async getPRs(): Promise<PR[]> {
     const rows = this.all<PRRow>(`
       SELECT id, number, title, body, body_html, pr_stage, repo, branch, author, url, status, accepted, rejected, flagged,
-             tests_passed, lint_passed, last_checked, last_sync_attempted_at, last_sync_succeeded_at, last_sync_error, watch_enabled, docs_assessment_json, added_at
+             tests_passed, lint_passed, mergeable_state, last_checked, last_sync_attempted_at, last_sync_succeeded_at, last_sync_error, watch_enabled, docs_assessment_json, added_at
       FROM prs
       WHERE status != 'archived'
       ORDER BY number DESC
@@ -1670,7 +1675,7 @@ export class SqliteStorage implements IStorage {
   async getArchivedPRs(): Promise<PR[]> {
     const rows = this.all<PRRow>(`
       SELECT id, number, title, body, body_html, pr_stage, repo, branch, author, url, status, accepted, rejected, flagged,
-             tests_passed, lint_passed, last_checked, last_sync_attempted_at, last_sync_succeeded_at, last_sync_error, watch_enabled, docs_assessment_json, added_at
+             tests_passed, lint_passed, mergeable_state, last_checked, last_sync_attempted_at, last_sync_succeeded_at, last_sync_error, watch_enabled, docs_assessment_json, added_at
       FROM prs
       WHERE status = 'archived'
       ORDER BY number DESC
@@ -1684,7 +1689,7 @@ export class SqliteStorage implements IStorage {
   async getPRSummaries(): Promise<PRSummary[]> {
     const rows = this.all<PRRow>(`
       SELECT id, number, title, body, body_html, pr_stage, repo, branch, author, url, status, accepted, rejected, flagged,
-             tests_passed, lint_passed, last_checked, last_sync_attempted_at, last_sync_succeeded_at, last_sync_error, watch_enabled, docs_assessment_json, added_at
+             tests_passed, lint_passed, mergeable_state, last_checked, last_sync_attempted_at, last_sync_succeeded_at, last_sync_error, watch_enabled, docs_assessment_json, added_at
       FROM prs
       WHERE status != 'archived'
       ORDER BY number DESC
@@ -1696,7 +1701,7 @@ export class SqliteStorage implements IStorage {
   async getArchivedPRSummaries(): Promise<PRSummary[]> {
     const rows = this.all<PRRow>(`
       SELECT id, number, title, body, body_html, pr_stage, repo, branch, author, url, status, accepted, rejected, flagged,
-             tests_passed, lint_passed, last_checked, last_sync_attempted_at, last_sync_succeeded_at, last_sync_error, watch_enabled, docs_assessment_json, added_at
+             tests_passed, lint_passed, mergeable_state, last_checked, last_sync_attempted_at, last_sync_succeeded_at, last_sync_error, watch_enabled, docs_assessment_json, added_at
       FROM prs
       WHERE status = 'archived'
       ORDER BY number DESC
@@ -1708,7 +1713,7 @@ export class SqliteStorage implements IStorage {
   async getPR(id: string): Promise<PR | undefined> {
     const row = this.get<PRRow>(`
       SELECT id, number, title, body, body_html, pr_stage, repo, branch, author, url, status, accepted, rejected, flagged,
-             tests_passed, lint_passed, last_checked, last_sync_attempted_at, last_sync_succeeded_at, last_sync_error, watch_enabled, docs_assessment_json, added_at
+             tests_passed, lint_passed, mergeable_state, last_checked, last_sync_attempted_at, last_sync_succeeded_at, last_sync_error, watch_enabled, docs_assessment_json, added_at
       FROM prs
       WHERE id = ?
     `, id);
@@ -1724,7 +1729,7 @@ export class SqliteStorage implements IStorage {
   async getPRByRepoAndNumber(repo: string, number: number): Promise<PR | undefined> {
     const row = this.get<PRRow>(`
       SELECT id, number, title, body, body_html, pr_stage, repo, branch, author, url, status, accepted, rejected, flagged,
-             tests_passed, lint_passed, last_checked, last_sync_attempted_at, last_sync_succeeded_at, last_sync_error, watch_enabled, docs_assessment_json, added_at
+             tests_passed, lint_passed, mergeable_state, last_checked, last_sync_attempted_at, last_sync_succeeded_at, last_sync_error, watch_enabled, docs_assessment_json, added_at
       FROM prs
       WHERE repo = ? AND number = ?
     `, repo, number);
@@ -1744,8 +1749,8 @@ export class SqliteStorage implements IStorage {
       this.run(`
         INSERT INTO prs (
           id, number, title, body, body_html, pr_stage, repo, branch, author, url, status, accepted, rejected, flagged,
-          tests_passed, lint_passed, last_checked, last_sync_attempted_at, last_sync_succeeded_at, last_sync_error, watch_enabled, docs_assessment_json, added_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          tests_passed, lint_passed, mergeable_state, last_checked, last_sync_attempted_at, last_sync_succeeded_at, last_sync_error, watch_enabled, docs_assessment_json, added_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
         full.id,
         full.number,
@@ -1763,6 +1768,7 @@ export class SqliteStorage implements IStorage {
         full.flagged,
         full.testsPassed === null ? null : Number(full.testsPassed),
         full.lintPassed === null ? null : Number(full.lintPassed),
+        full.mergeableState ?? null,
         full.lastChecked,
         full.lastSyncAttemptedAt ?? null,
         full.lastSyncSucceededAt ?? null,
@@ -1789,7 +1795,7 @@ export class SqliteStorage implements IStorage {
       this.run(`
         UPDATE prs
         SET number = ?, title = ?, body = ?, body_html = ?, pr_stage = ?, repo = ?, branch = ?, author = ?, url = ?, status = ?,
-            accepted = ?, rejected = ?, flagged = ?, tests_passed = ?, lint_passed = ?, last_checked = ?,
+            accepted = ?, rejected = ?, flagged = ?, tests_passed = ?, lint_passed = ?, mergeable_state = ?, last_checked = ?,
             last_sync_attempted_at = ?, last_sync_succeeded_at = ?, last_sync_error = ?, watch_enabled = ?, docs_assessment_json = ?
         WHERE id = ?
       `,
@@ -1808,6 +1814,7 @@ export class SqliteStorage implements IStorage {
         updated.flagged,
         updated.testsPassed === null ? null : Number(updated.testsPassed),
         updated.lintPassed === null ? null : Number(updated.lintPassed),
+        updated.mergeableState ?? null,
         updated.lastChecked,
         updated.lastSyncAttemptedAt ?? null,
         updated.lastSyncSucceededAt ?? null,
@@ -2212,7 +2219,6 @@ export class SqliteStorage implements IStorage {
               payload_json = excluded.payload_json,
               is_open = 1,
               last_seen_at = excluded.last_seen_at
-            WHERE synced_issues.is_worked = 0
           `,
           repo,
           issue.number,
