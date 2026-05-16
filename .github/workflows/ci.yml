@@ -6,6 +6,9 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
 jobs:
   lint-and-test:
     runs-on: ubuntu-latest
@@ -19,4 +22,6 @@ jobs:
 
       - run: npm ci
       - run: npm run lint
-      - run: npm run test
+      - run: npm run check
+      - run: npm run test:all
+      - run: npm run build
