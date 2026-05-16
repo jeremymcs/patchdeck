@@ -369,6 +369,7 @@ test("syncFeedbackForPR logs completion even when no new feedback items arrive",
 
 test("syncAndBabysitTrackedRepos deprioritizes a repo whose PR list is unchanged", async () => {
   const storage = new MemStorage();
+  await storage.updateConfig({ watchedRepos: ["octo/example"] });
   await storage.addPR({
     number: 1,
     title: "Tracked PR",
@@ -441,6 +442,7 @@ test("syncAndBabysitTrackedRepos deprioritizes a repo whose PR list is unchanged
 
 test("syncAndBabysitTrackedRepos reuses the cached PR list on a conditional 304", async () => {
   const storage = new MemStorage();
+  await storage.updateConfig({ watchedRepos: ["octo/example"] });
   await storage.addPR({
     number: 1,
     title: "Tracked PR",
@@ -512,6 +514,7 @@ test("syncAndBabysitTrackedRepos reuses the cached PR list on a conditional 304"
 
 test("syncAndBabysitTrackedRepos persists a backoff when listing open PRs fails", async () => {
   const storage = new MemStorage();
+  await storage.updateConfig({ watchedRepos: ["octo/example"] });
   await storage.addPR({
     number: 7,
     title: "Tracked PR",
@@ -609,6 +612,7 @@ test("syncAndBabysitTrackedRepos queues release evaluation for merged archived P
 
 test("syncAndBabysitTrackedRepos supersedes active healing sessions when archiving closed PRs", async () => {
   const storage = new MemStorage();
+  await storage.updateConfig({ watchedRepos: ["octo/example"] });
   const pr = await storage.addPR({
     number: 43,
     title: "Closed PR with active healing",
@@ -716,6 +720,7 @@ test("syncAndBabysitTrackedRepos does not enqueue social changelog generation", 
 
 test("syncAndBabysitTrackedRepos enqueues babysit_pr jobs when a background scheduler is provided", async () => {
   const storage = new MemStorage();
+  await storage.updateConfig({ watchedRepos: ["octo/example"] });
   const backgroundJobQueue = new BackgroundJobQueue(storage);
 
   const pr = await storage.addPR({
@@ -1051,6 +1056,7 @@ test("syncAndBabysitTrackedRepos does not duplicate drain sync after metadata re
 
 test("syncAndBabysitTrackedRepos skips same-head dependency preflight failures", async () => {
   const storage = new MemStorage();
+  await storage.updateConfig({ watchedRepos: ["octo/example"] });
   const backgroundJobQueue = new BackgroundJobQueue(storage);
   const pr = await storage.addPR({
     number: 42,
@@ -1149,6 +1155,7 @@ test("syncAndBabysitTrackedRepos skips same-head dependency preflight failures",
 
 test("syncAndBabysitTrackedRepos skips terminal conflict repair failures for the same head and base", async () => {
   const storage = new MemStorage();
+  await storage.updateConfig({ watchedRepos: ["octo/example"] });
   const backgroundJobQueue = new BackgroundJobQueue(storage);
   const pr = await storage.addPR({
     number: 42,
@@ -1240,6 +1247,7 @@ test("syncAndBabysitTrackedRepos skips terminal conflict repair failures for the
 
 test("syncAndBabysitTrackedRepos does not repeat terminal conflict logs for PRs already in error", async () => {
   const storage = new MemStorage();
+  await storage.updateConfig({ watchedRepos: ["octo/example"] });
   const backgroundJobQueue = new BackgroundJobQueue(storage);
   const pr = await storage.addPR({
     number: 42,
@@ -1334,6 +1342,7 @@ test("syncAndBabysitTrackedRepos does not repeat terminal conflict logs for PRs 
 
 test("syncAndBabysitTrackedRepos resumes after terminal conflict repair when head or base changes", async () => {
   const storage = new MemStorage();
+  await storage.updateConfig({ watchedRepos: ["octo/example"] });
   const backgroundJobQueue = new BackgroundJobQueue(storage);
   const now = new Date().toISOString();
   const prs = await Promise.all([43, 44].map((number) => storage.addPR({
@@ -1584,7 +1593,7 @@ test("syncAndBabysitTrackedRepos skips automatic babysits when pr watch is pause
 
 test("syncAndBabysitTrackedRepos caps feedback sync attempts per tick while automation is paused", async () => {
   const storage = new MemStorage();
-  await storage.updateConfig({ autoPrs: false, autoIssues: true });
+  await storage.updateConfig({ autoPrs: false, autoIssues: true, watchedRepos: ["octo/example"] });
   const feedbackFetchTargets: number[] = [];
 
   const pulls = Array.from({ length: 30 }, (_, index) => ({
@@ -1764,6 +1773,7 @@ test("syncAndBabysitTrackedRepos returns early while drain mode is enabled", asy
 
 test("syncAndBabysitTrackedRepos resumes automatic babysits when pr watch is re-enabled", async () => {
   const storage = new MemStorage();
+  await storage.updateConfig({ watchedRepos: ["octo/example"] });
   const babysitCalls: string[] = [];
 
   const pr = await storage.addPR({
@@ -1958,6 +1968,7 @@ test("syncAndBabysitTrackedRepos does not enter drain mode for transient agent h
 
 test("syncAndBabysitTrackedRepos does not queue release evaluation for closed-unmerged PRs", async () => {
   const storage = new MemStorage();
+  await storage.updateConfig({ watchedRepos: ["octo/example"] });
   const queued: Array<Record<string, string | number>> = [];
 
   const pr = await storage.addPR({

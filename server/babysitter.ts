@@ -1850,8 +1850,7 @@ export class PRBabysitter {
     return updated;
   }
 
-  async syncAndBabysitTrackedRepos(options?: { includeAllOpenPrs?: boolean; fullSweep?: boolean }): Promise<void> {
-    const includeAllOpenPrs = options?.includeAllOpenPrs === true;
+  async syncAndBabysitTrackedRepos(options?: { fullSweep?: boolean }): Promise<void> {
     const fullSweep = options?.fullSweep === true;
     const [runtimeState, configEarly] = await Promise.all([
       this.storage.getRuntimeState(),
@@ -1885,10 +1884,10 @@ export class PRBabysitter {
 
     const currentConfig = await this.storage.getConfig();
     const tracked = await this.storage.getPRs();
-    const repoCandidates = new Set<string>([
-      ...tracked.map((pr) => pr.repo),
-      ...currentConfig.watchedRepos,
-    ]);
+    // Only sweep repos that are currently watched. A repo removed from
+    // settings must drop out of scope even if it still has tracked PRs —
+    // otherwise an unwatched repo can never actually leave automation.
+    const repoCandidates = new Set<string>(currentConfig.watchedRepos);
     const selectedAgent = currentConfig.codingAgent as CodingAgent;
     const watchedPrIds = tracked
       .filter((pr) => pr.watchEnabled !== false && pr.status !== "archived")
@@ -2164,7 +2163,10 @@ export class PRBabysitter {
       for (const pull of openPulls) {
         let local = await this.storage.getPRByRepoAndNumber(repoSlug, pull.number);
         if (!local) {
-          if (!automationScopeNumbers.has(pull.number) && !includeAllOpenPrs) {
+          // Register only PRs in automation scope — automationScopeNumbers
+          // already honors the repo's ownPrsOnly setting, so a manual sync
+          // never persists pull requests authored by other people.
+          if (!automationScopeNumbers.has(pull.number)) {
             continue;
           }
 

@@ -2083,7 +2083,7 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       }
 
       const fullSweep = options?.fullSweep === true;
-      await babysitter.syncAndBabysitTrackedRepos({ includeAllOpenPrs: true, fullSweep });
+      await babysitter.syncAndBabysitTrackedRepos({ fullSweep });
       await syncStoredIssuesStep({ fullSweep });
       notifyChange();
       return { ok: true as const };
