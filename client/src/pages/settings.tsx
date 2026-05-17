@@ -309,7 +309,7 @@ function SettingsTOC() {
               <button
                 type="button"
                 onClick={() => scrollToSettingsSection(group.id)}
-                className="block w-full rounded px-2 py-1 text-left text-foreground transition-colors hover:bg-muted"
+                className="block w-full rounded px-2 py-1 text-left text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               >
                 {group.label}
               </button>
@@ -319,7 +319,7 @@ function SettingsTOC() {
                 <button
                   type="button"
                   onClick={() => scrollToSettingsSection(item.id)}
-                  className="block w-full rounded px-2 py-1 text-left text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  className="block w-full rounded px-2 py-1 text-left text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 >
                   {item.label}
                 </button>
@@ -1913,7 +1913,7 @@ function StringListRow({
           type="button"
           onClick={addValue}
           disabled={!draft.trim() || disabled}
-          className="border border-border px-2 py-1 text-xs hover:bg-muted disabled:opacity-50"
+          className="border border-border px-2 py-1 text-xs transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50"
         >
           add
         </button>
@@ -1931,7 +1931,7 @@ function StringListRow({
                 onClick={() => removeValue(index)}
                 disabled={disabled}
                 aria-label={`Remove ${value}`}
-                className="text-muted-foreground hover:text-foreground disabled:opacity-50"
+                className="text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50"
               >
                 ×
               </button>

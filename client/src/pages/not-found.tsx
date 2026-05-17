@@ -1,21 +1,40 @@
-import { Card, CardContent } from "@/components/ui/card";
-import { AlertCircle } from "lucide-react";
+import { AlertCircle, ArrowLeft } from "lucide-react";
+import { Link } from "wouter";
+import { AppHeader } from "@/components/AppHeader";
 
 export default function NotFound() {
   return (
-    <div className="min-h-screen w-full flex items-center justify-center bg-gray-50">
-      <Card className="w-full max-w-md mx-4">
-        <CardContent className="pt-6">
-          <div className="flex mb-4 gap-2">
-            <AlertCircle className="h-8 w-8 text-red-500" />
-            <h1 className="text-2xl font-bold text-gray-900">404 Page Not Found</h1>
+    <div className="flex min-h-screen flex-col bg-background text-foreground">
+      <AppHeader active="dashboard" />
+      <main className="flex flex-1 items-center justify-center px-4 py-10">
+        <section
+          className="w-full max-w-md rounded-md border border-border bg-muted/20 px-4 py-5"
+          data-testid="not-found-panel"
+        >
+          <div className="flex items-start gap-3">
+            <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-warning-foreground" aria-hidden="true" />
+            <div className="min-w-0">
+              <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                Not found
+              </div>
+              <h1 className="mt-1 text-lg font-semibold tracking-tight text-foreground">
+                Page not found
+              </h1>
+              <p className="mt-2 text-[12px] leading-5 text-muted-foreground">
+                This route is not available in PatchDeck.
+              </p>
+            </div>
           </div>
 
-          <p className="mt-4 text-sm text-gray-600">
-            Did you forget to add the page to the router?
-          </p>
-        </CardContent>
-      </Card>
+          <Link
+            href="/"
+            className="mt-4 inline-flex cursor-pointer items-center gap-1 rounded-md border border-border px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground transition-colors hover:border-primary/40 hover:bg-muted hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
+            Dashboard
+          </Link>
+        </section>
+      </main>
     </div>
   );
 }

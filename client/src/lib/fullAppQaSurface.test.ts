@@ -257,6 +257,7 @@ function assertHasRoutes(
 
 test("full app QA route matrix is wired through the hash router", async () => {
   const { sourceFile } = await parseProjectFile("client/src/App.tsx");
+  const { sourceFile: notFoundSourceFile } = await parseProjectFile("client/src/pages/not-found.tsx");
 
   assertHasExpression(sourceFile, "hash router", /\buseHashLocation\b/);
   assertHasRoutes(sourceFile, [
@@ -267,6 +268,8 @@ test("full app QA route matrix is wired through the hash router", async () => {
     { label: "logs", path: "/logs", component: "Logs" },
     { label: "not found fallback", component: "NotFound" },
   ]);
+  assertHasExpression(notFoundSourceFile, "shared header", /<AppHeader\s+active="dashboard"/);
+  assertHasStringValue(notFoundSourceFile, "not found panel test id", "not-found-panel");
 });
 
 test("dashboard keeps the QA-tested PR, repo, feedback, and side-panel workflows wired", async () => {

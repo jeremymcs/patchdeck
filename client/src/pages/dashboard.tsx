@@ -147,7 +147,7 @@ function ActivityRow({ item, accent, leadingIcon, timeRef }: {
               target="_blank"
               rel="noreferrer noopener"
               onClick={(event) => event.stopPropagation()}
-              className="inline-flex items-center gap-1 underline decoration-border underline-offset-2 hover:text-foreground"
+              className="inline-flex items-center gap-1 underline decoration-border underline-offset-2 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
             >
               <ExternalLink className="h-3 w-3" />
               GitHub
