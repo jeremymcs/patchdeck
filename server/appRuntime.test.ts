@@ -126,6 +126,42 @@ test("runtime queueBabysit uses repo agent override when configured", async () =
   assert.equal(jobs[0]?.payload.preferredAgent, "codex");
 });
 
+test("runtime exposes the latest PR agent run status", async () => {
+  const storage = new MemStorage();
+  const runtime = createAppRuntime({
+    storage,
+    startBackgroundServices: false,
+    startWatcher: false,
+  });
+  const pr = await seedPR(storage, { status: "processing" });
+
+  await storage.upsertAgentRun({
+    id: "run-1",
+    prId: pr.id,
+    preferredAgent: "claude",
+    resolvedAgent: "claude",
+    status: "running",
+    phase: "run.agent-running",
+    prompt: null,
+    initialHeadSha: null,
+    metadata: null,
+    lastError: null,
+    createdAt: "2026-05-17T10:00:00.000Z",
+    updatedAt: "2026-05-17T10:01:00.000Z",
+  });
+  await storage.addLog(pr.id, "info", "Applying approved feedback", {
+    runId: "run-1",
+    phase: "run.agent-running",
+  });
+
+  const selected = await runtime.getPR(pr.id);
+
+  assert.equal(selected?.currentRun?.status, "running");
+  assert.equal(selected?.currentRun?.phase, "run.agent-running");
+  assert.equal(selected?.currentRun?.agent, "claude");
+  assert.equal(selected?.currentRun?.detail, "Applying approved feedback");
+});
+
 test("runtime setWatchEnabled updates the PR and emits a change event", async () => {
   const storage = new MemStorage();
   const runtime = createAppRuntime({
@@ -969,6 +1005,53 @@ test("syncIssue refreshes worked issue metadata from GitHub", async () => {
   const stored = await storage.getSyncedIssue("owner/repo", 7);
   assert.equal(stored?.isWorked, true, "refresh must preserve the worked marker");
   assert.equal(stored?.payload.title, "Fresh title");
+});
+
+test("runtime exposes queued issue work as current run status", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig({ watchedRepos: ["owner/repo"] });
+  await storage.enqueueBackgroundJob({
+    kind: "work_issue",
+    targetId: "owner/repo#7",
+    dedupeKey: "work_issue:owner/repo#7",
+  });
+  await storage.addLog("owner/repo#7", "info", "Queued manual issue work", {
+    phase: "issue.queued",
+    metadata: { stage: "queued" },
+  });
+
+  const fakeOctokit = {
+    issues: {
+      get: async () => ({
+        data: {
+          number: 7,
+          title: "Fix issue work",
+          body: "body",
+          html_url: "https://github.com/owner/repo/issues/7",
+          user: { login: "alice" },
+          labels: [],
+          assignees: [],
+          comments: 0,
+          created_at: "2026-05-03T17:00:00.000Z",
+          updated_at: "2026-05-16T18:00:00.000Z",
+        },
+      }),
+    },
+    paginate: async () => [],
+  };
+
+  const runtime = createAppRuntime({
+    storage,
+    startBackgroundServices: false,
+    startWatcher: false,
+    buildOctokitFn: async () => fakeOctokit as never,
+  });
+
+  const selected = await runtime.getIssue("owner/repo", 7);
+
+  assert.equal(selected.currentRun?.status, "queued");
+  assert.equal(selected.currentRun?.phase, "issue.queued");
+  assert.equal(selected.currentRun?.detail, "Queued manual issue work");
 });
 
 test("pickWatcherColdStartDelayMs stays within the 15-45s cold-start window", () => {

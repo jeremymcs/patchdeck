@@ -27,6 +27,7 @@ import {
 } from "@/lib/ciHealing";
 import { buildQueueStatusIndex, type QueueStatusView } from "@/lib/activityQueue";
 import { QueueStatusBadge } from "@/components/QueueStatusBadge";
+import { CurrentRunStatusStrip } from "@/components/CurrentRunStatusStrip";
 import { DashboardErrorsPanel } from "@/components/DashboardErrorsPanel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DetailHeader } from "@/components/detail/DetailHeader";
@@ -1592,6 +1593,7 @@ export default function Dashboard() {
                 ) : undefined}
                 banner={(
                   <>
+                    <CurrentRunStatusStrip run={selectedPR.currentRun} testId="selected-pr-current-run" />
                     {isPRDetailReadyToMerge(selectedPR) && (
                       <ReadyToMergeIndicator
                         href={selectedPR.url}
