@@ -507,6 +507,39 @@ test("syncAndBabysitTrackedRepos deprioritizes a repo whose PR list is unchanged
   );
 });
 
+test("syncAndBabysitTrackedRepos sweeps several repos per tick instead of one", async () => {
+  // Goal: PR monitoring must not crawl one-repo-per-tick. A conditional PR-list
+  // GET costs no rate-limit budget for a quiet repo, so a single sweep should
+  // visit multiple repos and keep the round-robin rotation short.
+  const storage = new MemStorage();
+  const repos = ["octo/a", "octo/b", "octo/c"];
+  await storage.updateConfig({ watchedRepos: repos });
+
+  const sweptRepos = new Set<string>();
+  const multiRepoBabysitter = new PRBabysitter(
+    storage,
+    makeWatcherGitHubService({
+      listOpenPullsForRepoConditional: async (_octokit: unknown, repo: { owner: string; repo: string }) => {
+        sweptRepos.add(`${repo.owner}/${repo.repo}`);
+        return { notModified: false as const, etag: null, pulls: [] };
+      },
+    }),
+    {
+      resolveAgent: async () => "codex",
+      ciPollIntervalMs: 0,
+      evaluateFixNecessityWithAgent: async () => ({ needsFix: false, reason: "unused" }),
+      applyFixesWithAgent: async () => ({ code: 0, stdout: "", stderr: "" }),
+      runCommand: async () => ({ code: 0, stdout: "", stderr: "" }),
+    },
+  );
+
+  await multiRepoBabysitter.syncAndBabysitTrackedRepos();
+
+  assert.deepEqual([...sweptRepos].sort(), repos, "one sweep visits every watched repo");
+  const syncedRepos = (await storage.getRepoSyncStates("prs")).map((s) => s.repo).sort();
+  assert.deepEqual(syncedRepos, repos, "every visited repo records a PR sync state");
+});
+
 test("syncAndBabysitTrackedRepos reuses the cached PR list on a conditional 304", async () => {
   const storage = new MemStorage();
   await storage.updateConfig({ watchedRepos: ["octo/example"] });

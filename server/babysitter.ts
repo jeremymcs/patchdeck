@@ -91,6 +91,11 @@ const QUIET_REPO_COOLDOWN_MS = 10 * 60_000;
 // cold-start burst on a repo with hundreds of open PRs; the rest backfill on
 // later sweeps (babysit_pr jobs are dedupe-keyed, so nothing is lost).
 const MAX_BABYSIT_ENQUEUES_PER_SWEEP = 10;
+// Repos visited per non-full sweep. The PR-list fetch is a conditional GET, so
+// a quiet repo costs no rate-limit budget; visiting several per tick keeps the
+// round-robin rotation short instead of one-repo-per-tick. Actual babysit work
+// stays bounded by MAX_BABYSIT_ENQUEUES_PER_SWEEP and maxConcurrentBabysitRuns.
+const MAX_REPOS_PER_SWEEP = 5;
 const APP_NAME = "patchdeck";
 const APP_REPOSITORY_URL = "https://github.com/jeremymcs/patchdeck";
 export const APP_COMMENT_FOOTER = formatAppCommentFooter(APP_NAME, true);
@@ -1974,7 +1979,7 @@ export class PRBabysitter {
             const backoffUntilMs = prSyncBackoffUntilMs.get(repoSlug) ?? 0;
             return backoffUntilMs <= nowMs;
           })
-          .slice(0, 1);
+          .slice(0, MAX_REPOS_PER_SWEEP);
 
     // Cap concurrently in-flight babysit_pr jobs across the whole sweep. Count
     // jobs already queued or leased so the sweep never pushes the total past
