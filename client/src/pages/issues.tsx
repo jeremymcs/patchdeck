@@ -769,6 +769,7 @@ function IssuesPage() {
   const { data: issuesPage, isLoading, isFetching } = issuesQuery;
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [isSyncingRepos, setIsSyncingRepos] = useState(false);
+  const [manualPulledIssues, setManualPulledIssues] = useState<Issue[]>([]);
   useEffect(() => {
     if (issuesQuery.status === "success") {
       writeCachedIssues(issuesQuery.data);
@@ -779,11 +780,14 @@ function IssuesPage() {
   }, [issuesPage?.fetchedAt]);
 
   const issues = useMemo(() => {
-    const all = [issuesPage, ...extraPages].flatMap((page) => page?.items ?? []);
+    const all = [
+      ...manualPulledIssues,
+      ...[issuesPage, ...extraPages].flatMap((page) => page?.items ?? []),
+    ];
     const deduped = new Map<string, Issue>();
     for (const issue of all) deduped.set(issue.id, issue);
     return Array.from(deduped.values()).sort((a, b) => b.number - a.number);
-  }, [issuesPage, extraPages]);
+  }, [issuesPage, extraPages, manualPulledIssues]);
   const latestPage = extraPages[extraPages.length - 1] ?? issuesPage ?? null;
   const canLoadMore = Boolean(latestPage?.hasMore);
   const nextOffset = latestPage?.nextOffset ?? null;
@@ -860,9 +864,21 @@ function IssuesPage() {
   const [selectedRepo, setSelectedRepo] = useState<string>("all");
   const [selectedWorkFilter, setSelectedWorkFilter] = useState<IssueWorkFilter>("all");
   const [issueNumberSearch, setIssueNumberSearch] = useState("");
+  const [manualPullNumber, setManualPullNumber] = useState("");
   const [labelInput, setLabelInput] = useState("");
   const [areErrorsRolledUp, setAreErrorsRolledUp] = useState(false);
   const normalizedIssueNumberSearch = normalizeNumberSearch(issueNumberSearch);
+  const manualPullRepo = selectedRepo !== "all"
+    ? selectedRepo
+    : config?.watchedRepos.length === 1
+      ? config.watchedRepos[0]
+      : null;
+  const manualPullIssueNumber = Number(normalizeNumberSearch(manualPullNumber));
+  const canManualPull = Boolean(manualPullRepo)
+    && Number.isInteger(manualPullIssueNumber)
+    && manualPullIssueNumber > 0
+    && !globalDrainMode;
+  const manualPullRepoHint = manualPullRepo ?? "select a repo first";
   const filteredIssues = useMemo(
     () => issues
       .filter((issue) => selectedRepo === "all" || issue.repo === selectedRepo)
@@ -1198,6 +1214,54 @@ function IssuesPage() {
     },
   });
 
+  const manualPullIssueMutation = useMutation({
+    mutationFn: async ({ repo, number }: { repo: string; number: number }) => {
+      const res = await apiRequest("POST", "/api/issues/sync", { repo, number });
+      return res.json() as Promise<Issue>;
+    },
+    onSuccess: async (issue) => {
+      setManualPullNumber("");
+      setManualPulledIssues((current) => {
+        const next = new Map(current.map((item) => [item.id, item]));
+        next.set(issue.id, issue);
+        return Array.from(next.values());
+      });
+      setSelectedRepo(issue.repo);
+      setSelectedIssueId(issue.id);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["/api/issues"] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/issues/detail", issue.repo, issue.number] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/issues/coverage"] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/logs", issue.id] }),
+      ]);
+      toast({ description: `Pulled issue ${issue.repo}#${issue.number}.` });
+    },
+    onError: (error) => {
+      toast({ variant: "destructive", description: `Could not pull issue: ${error.message}` });
+    },
+  });
+
+  const manualPullPrMutation = useMutation({
+    mutationFn: async ({ repo, number }: { repo: string; number: number }) => {
+      const res = await apiRequest("POST", "/api/prs", {
+        url: `https://github.com/${repo}/pull/${number}`,
+      });
+      return res.json() as Promise<{ id: string; repo: string; number: number }>;
+    },
+    onSuccess: async (pr) => {
+      setManualPullNumber("");
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["/api/prs"] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/prs", pr.id] }),
+        queryClient.invalidateQueries({ queryKey: ["/api/activities"] }),
+      ]);
+      toast({ description: `Pulled PR ${pr.repo}#${pr.number}.` });
+    },
+    onError: (error) => {
+      toast({ variant: "destructive", description: `Could not pull PR: ${error.message}` });
+    },
+  });
+
   const labelMutation = useMutation({
     mutationFn: async ({ issue, add, remove }: { issue: Issue; add?: string[]; remove?: string[] }) => {
       const res = await apiRequest("PATCH", "/api/issues/labels", {
@@ -1379,6 +1443,53 @@ function IssuesPage() {
             </div>
           </div>
           <div data-testid="repo-filter-bar" className="flex flex-col gap-2 border-b border-border px-4 py-2.5">
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (canManualPull && manualPullRepo) {
+                  manualPullIssueMutation.mutate({ repo: manualPullRepo, number: manualPullIssueNumber });
+                }
+              }}
+              className="flex flex-wrap items-start gap-2"
+            >
+              <span className="mt-1 w-14 shrink-0 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                Pull
+              </span>
+              <div className="flex min-w-0 flex-1 flex-wrap gap-1">
+                <label htmlFor="manual-issue-pr-number" className="sr-only">Issue or pull request number</label>
+                <input
+                  id="manual-issue-pr-number"
+                  value={manualPullNumber}
+                  onChange={(event) => setManualPullNumber(event.target.value)}
+                  placeholder={`# for ${manualPullRepoHint}`}
+                  data-testid="input-manual-issue-pr-number"
+                  className="h-7 min-w-[11rem] flex-1 rounded-md border border-border bg-background px-2 font-mono text-[12px] text-foreground placeholder:font-sans placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                />
+                <button
+                  type="submit"
+                  disabled={!canManualPull || manualPullIssueMutation.isPending}
+                  data-testid="button-pull-issue-number"
+                  className="inline-flex h-7 items-center gap-1 rounded-md border border-border px-2 text-[10px] uppercase tracking-wider text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {manualPullIssueMutation.isPending && <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />}
+                  Pull issue
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (canManualPull && manualPullRepo) {
+                      manualPullPrMutation.mutate({ repo: manualPullRepo, number: manualPullIssueNumber });
+                    }
+                  }}
+                  disabled={!canManualPull || manualPullPrMutation.isPending}
+                  data-testid="button-pull-pr-number"
+                  className="inline-flex h-7 items-center gap-1 rounded-md border border-border px-2 text-[10px] uppercase tracking-wider text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {manualPullPrMutation.isPending && <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />}
+                  Pull PR
+                </button>
+              </div>
+            </form>
             <div className="flex flex-wrap items-start gap-2">
               <span className="mt-1 w-14 shrink-0 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
                 Search

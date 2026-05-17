@@ -363,6 +363,9 @@ test("issues page keeps the QA-tested issue monitor and work surface wired", asy
   for (const [label, testId] of [
     ["sync button", "button-sync-issues"],
     ["start visible issue work button", "button-start-visible-issue-work"],
+    ["manual issue or PR number input", "input-manual-issue-pr-number"],
+    ["manual issue pull button", "button-pull-issue-number"],
+    ["manual PR pull button", "button-pull-pr-number"],
     ["issue number search", "issue-number-search"],
     ["work issue button", "button-work-issue"],
     ["evaluate issue button", "button-evaluate-issue"],
@@ -410,6 +413,8 @@ test("issues page keeps the QA-tested issue monitor and work surface wired", asy
   assertHasExpression(sourceFile, "issue work filter helper", /\bmatchesIssueWorkFilter\b/);
   assertHasExpression(sourceFile, "issue start work eligibility", /\bcanStartIssueWork\b/);
   assertHasExpression(sourceFile, "issue start work mutation", /\bstartVisibleWorkMutation\b/);
+  assertHasExpression(sourceFile, "manual issue pull mutation", /\bmanualPullIssueMutation\b/);
+  assertHasExpression(sourceFile, "manual PR pull mutation", /\bmanualPullPrMutation\b/);
   assertHasExpression(sourceFile, "stale issue helper", /\bisStaleIssue\b/);
   assertHasExpression(sourceFile, "issue detail refresh", /\bselectedIssueDetail\b/);
   assertHasExpression(sourceFile, "issue UI polling uses tuning interval", /\bgetUiPollIntervalMs\(config\)/);
@@ -421,6 +426,8 @@ test("issues page keeps the QA-tested issue monitor and work surface wired", asy
   assertHasExpression(sourceFile, "issue pagination load more", /\bloadMoreIssues\b/);
   assertHasExpression(sourceFile, "issue loaded count", /\bloadedIssueCount\b/);
   assertHasStringValue(sourceFile, "issue sync label", "sync");
+  assertHasStringValue(sourceFile, "manual issue pull label", "Pull issue");
+  assertHasStringValue(sourceFile, "manual PR pull label", "Pull PR");
   assertHasStringValue(sourceFile, "issue load more label", "Load more");
   assertHasStringValue(sourceFile, "issue number search placeholder", "Search #");
   assertHasStringValue(sourceFile, "issue body label", "Issue body");
