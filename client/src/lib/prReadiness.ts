@@ -18,8 +18,8 @@ export function isPRSummaryReadyToMerge(
   return pr.status !== "processing"
     && pr.status !== "error"
     && pr.status !== "archived"
-    && pr.testsPassed === true
-    && pr.lintPassed === true
+    && pr.testsPassed !== false
+    && pr.lintPassed !== false
     && isGitHubReadyToMerge(pr);
 }
 
@@ -29,8 +29,8 @@ export function isPRDetailReadyToMerge(
   return pr.status !== "processing"
     && pr.status !== "error"
     && pr.status !== "archived"
-    && pr.testsPassed === true
-    && pr.lintPassed === true
+    && pr.testsPassed !== false
+    && pr.lintPassed !== false
     && isGitHubReadyToMerge(pr)
     && arePRFeedbackItemsResolved(pr.feedbackItems);
 }
@@ -53,22 +53,24 @@ export function buildPRReadinessChecks(
     {
       key: "tests",
       label: "Tests passing",
-      passed: pr.testsPassed === true,
+      passed: pr.testsPassed !== false && isGitHubReadyToMerge(pr),
       detail: pr.testsPassed === true
         ? "Latest test result passed."
         : pr.testsPassed === false
           ? "Latest test result failed."
-          : "No test result synced yet.",
+          : pr.mergeableState === "clean"
+            ? "GitHub reports required checks are passing."
+            : "No test result synced yet.",
     },
     {
       key: "lint",
       label: "Lint passing",
-      passed: pr.lintPassed === true,
+      passed: pr.lintPassed !== false,
       detail: pr.lintPassed === true
         ? "Latest lint result passed."
         : pr.lintPassed === false
           ? "Latest lint result failed."
-          : "No lint result synced yet.",
+          : "No separate lint result synced yet.",
     },
     {
       key: "comments",
