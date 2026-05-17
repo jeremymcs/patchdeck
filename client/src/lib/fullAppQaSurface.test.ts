@@ -286,6 +286,8 @@ test("dashboard keeps the QA-tested PR, repo, feedback, and side-panel workflows
     ["ask agent tab", "tab-ask"],
     ["activity tab", "tab-activity"],
     ["activity panel toggle", "button-toggle-activity-panel"],
+    ["global activity panel", "global-activity-panel"],
+    ["global activity row", "global-activity-row"],
     ["ask input", "input-question"],
     ["ask submit", "button-ask"],
     ["dashboard error pill", "dashboard-error-pill"],
@@ -336,6 +338,8 @@ test("dashboard keeps the QA-tested PR, repo, feedback, and side-panel workflows
   assertHasStringValue(sourceFile, "PR number search placeholder", "Search #");
   assertHasExpression(sourceFile, "issue-linked PR index", /\bbuildIssueLinkedPRIndex\b/);
   assertHasStringValue(sourceFile, "linked issues tab label", /Linked Issues \(/);
+  assertHasStringValue(sourceFile, "global activity heading", "Automation");
+  assertHasStringValue(sourceFile, "global activity empty state", "No automation running or queued.");
   assertHasStringValue(sourceFile, "dashboard sync label", "sync");
   assertHasStringValue(sourceFile, "drain mode action label", "Paused by drain mode");
   assertHasStringValue(sourceFile, "blocked manual copy", "Manual runs are blocked while global automation is paused.");
