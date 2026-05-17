@@ -573,7 +573,7 @@ function formatRunPhaseLabel(phase: string | null | undefined): string {
   if (normalized.includes("agent-running") || normalized.includes("working")) return "Agent running";
   if (normalized.includes("verify") || normalized.includes("ci")) return "Verifying";
   if (normalized.includes("opening_pr")) return "Opening PR";
-  if (normalized.includes("completed") || normalized.includes("done")) return "Completed";
+  if (normalized.includes("completed") || normalized.includes("done")) return "Run finished";
   if (normalized.includes("failed")) return "Failed";
   return phase.replace(/^run\./, "").replace(/[-_.]/g, " ");
 }
