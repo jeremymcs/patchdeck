@@ -1026,11 +1026,10 @@ export default function Dashboard() {
   const handleSyncDashboard = async () => {
     setIsRefreshing(true);
     try {
-      await apiRequest("POST", "/api/repos/sync");
+      await apiRequest("POST", "/api/repos/sync?scope=prs");
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["/api/prs"] }),
         queryClient.invalidateQueries({ queryKey: ["/api/prs/archived"] }),
-        queryClient.invalidateQueries({ queryKey: ["/api/issues"] }),
         queryClient.invalidateQueries({ queryKey: ["/api/activities"] }),
         queryClient.invalidateQueries({ queryKey: ["/api/healing-sessions"] }),
         queryClient.invalidateQueries({ queryKey: ["/api/runtime"] }),

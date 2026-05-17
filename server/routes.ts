@@ -453,7 +453,8 @@ export async function registerRoutes(
   app.post("/api/repos/sync", async (req, res) => {
     try {
       const fullSweep = req.query.fullSweep === "1" || req.query.fullSweep === "true";
-      const result = await runtime.syncRepos({ fullSweep });
+      const scope = z.enum(["all", "prs", "issues"]).default("all").parse(req.query.scope);
+      const result = await runtime.syncRepos({ fullSweep, scope });
       invalidatePrDetailCache();
       res.json(result);
     } catch (error: unknown) {
