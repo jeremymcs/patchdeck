@@ -1151,10 +1151,103 @@ export type OnboardingStatus = {
   repos: RepoOnboardingStatus[];
 };
 
+export type GitHubAuthStatus = {
+  connected: boolean;
+  login: string | null;
+  source: "saved_token" | "env_token" | "gh_auth" | "gh_auth_fallback" | "none";
+  error?: string;
+};
+
 type OnboardingStatusDeps = {
   buildOctokitFn?: typeof buildOctokit;
   resolveGitHubAuthTokenFn?: typeof resolveGitHubAuthToken;
 };
+
+async function probeGitHubAuthToken(
+  token: string,
+  deps: BuildOctokitDeps = {},
+): Promise<{ ok: true; login: string } | { ok: false; error: unknown }> {
+  const client = new Octokit({
+    auth: token,
+    log: octokitLogger,
+    request: {
+      ...(deps.requestFetch ? { fetch: deps.requestFetch } : {}),
+      headers: {
+        "X-GitHub-Api-Version": GITHUB_API_VERSION,
+      },
+    },
+  });
+
+  try {
+    const { data } = await client.rest.users.getAuthenticated();
+    return { ok: true, login: data.login };
+  } catch (error) {
+    return { ok: false, error };
+  }
+}
+
+export async function getGitHubAuthStatus(
+  config: Config,
+  deps: BuildOctokitDeps = {},
+): Promise<GitHubAuthStatus> {
+  const configuredToken = resolveConfiguredGitHubToken(config);
+  if (configuredToken) {
+    const configured = await probeGitHubAuthToken(configuredToken, deps);
+    if (configured.ok) {
+      return { connected: true, login: configured.login, source: "saved_token" };
+    }
+
+    if (shouldFallbackToGhAuth(configured.error)) {
+      const ghToken = await resolveGhAuthToken(deps);
+      if (ghToken && ghToken !== configuredToken) {
+        const gh = await probeGitHubAuthToken(ghToken, deps);
+        if (gh.ok) {
+          return { connected: true, login: gh.login, source: "gh_auth_fallback" };
+        }
+      }
+    }
+
+    return {
+      connected: false,
+      login: null,
+      source: "saved_token",
+      error: configured.error instanceof Error ? configured.error.message : String(configured.error),
+    };
+  }
+
+  const envToken = process.env.GITHUB_TOKEN?.trim();
+  if (envToken) {
+    const env = await probeGitHubAuthToken(envToken, deps);
+    return env.ok
+      ? { connected: true, login: env.login, source: "env_token" }
+      : {
+        connected: false,
+        login: null,
+        source: "env_token",
+        error: env.error instanceof Error ? env.error.message : String(env.error),
+      };
+  }
+
+  const ghToken = await resolveGhAuthToken(deps);
+  if (!ghToken) {
+    return {
+      connected: false,
+      login: null,
+      source: "none",
+      error: "No GitHub token found. Run `gh auth login`, set GITHUB_TOKEN, or add a saved token in settings.",
+    };
+  }
+
+  const gh = await probeGitHubAuthToken(ghToken, deps);
+  return gh.ok
+    ? { connected: true, login: gh.login, source: "gh_auth" }
+    : {
+      connected: false,
+      login: null,
+      source: "gh_auth",
+      error: gh.error instanceof Error ? gh.error.message : String(gh.error),
+    };
+}
 
 export async function checkOnboardingStatus(
   config: Config,

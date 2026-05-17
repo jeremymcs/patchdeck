@@ -58,6 +58,7 @@ import {
   fetchPullSummary,
   formatRepoSlug,
   getDefaultBranchForRepo,
+  getGitHubAuthStatus,
   getLatestSemverTagForRepo,
   GitHubIntegrationError,
   installCodeReviewWorkflow,
@@ -135,6 +136,7 @@ export type AppRuntime = {
   stop(): void;
   subscribe(listener: () => void): () => void;
   getRuntimeSnapshot(): Promise<RuntimeSnapshot>;
+  getGitHubAuthStatus(): ReturnType<typeof getGitHubAuthStatus>;
   setDrainMode(input: DrainModeParams): Promise<RuntimeSnapshot & { drained?: boolean }>;
   listActivities(): Promise<ActivitySnapshot>;
   clearFailedActivities(): Promise<{ cleared: number }>;
@@ -1968,6 +1970,11 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
     },
 
     getRuntimeSnapshot,
+
+    async getGitHubAuthStatus() {
+      const config = await storage.getConfig();
+      return getGitHubAuthStatus(config);
+    },
 
     async listActivities() {
       const [failedJobs, leasedJobs, queuedJobs] = await Promise.all([

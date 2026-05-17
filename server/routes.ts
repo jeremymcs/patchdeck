@@ -799,6 +799,14 @@ export async function registerRoutes(
     res.json(maskConfig(await runtime.getConfig()));
   });
 
+  app.get("/api/github-auth/status", async (_req, res) => {
+    try {
+      res.json(await runtime.getGitHubAuthStatus());
+    } catch (error: unknown) {
+      sendAppAwareError(res, error);
+    }
+  });
+
   app.get("/api/app-update", async (_req, res) => {
     try {
       const currentVersion = process.env.APP_VERSION || "dev";

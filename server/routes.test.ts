@@ -252,6 +252,31 @@ test("GET /api/github-rate-limit reports the current reset time", async () => {
   }
 });
 
+test("GET /api/github-auth/status reports the runtime auth account", async () => {
+  const fakeRuntime = {
+    start: async () => {},
+    stop: () => {},
+    getGitHubAuthStatus: async () => ({
+      connected: true,
+      login: "octocat",
+      source: "gh_auth" as const,
+    }),
+  } as AppRuntime;
+  const harness = await createHarness(undefined, { runtime: fakeRuntime });
+
+  try {
+    const response = await fetch(`${harness.baseUrl}/api/github-auth/status`);
+    assert.equal(response.status, 200);
+
+    const body = await response.json() as { connected: boolean; login: string | null; source: string };
+    assert.equal(body.connected, true);
+    assert.equal(body.login, "octocat");
+    assert.equal(body.source, "gh_auth");
+  } finally {
+    await harness.close();
+  }
+});
+
 test("POST /api/github-tokens/test returns per-token diagnostics", async () => {
   const harness = await createHarness(new MemStorage(), {
     testGitHubTokensFn: async () => ({
@@ -1654,6 +1679,7 @@ test("GET and POST /api/issues proxy the runtime issue monitor and work action",
     },
     listActivities: async () => ({ failed: [], inProgress: [], queued: [], warnings: [], generatedAt: "2026-05-03T00:00:00.000Z" }),
     getRuntimeSnapshot: async () => ({ drainMode: false, drainRequestedAt: null, drainReason: null, activeRuns: 0 }),
+    getGitHubAuthStatus: async () => ({ connected: true, login: "octocat", source: "gh_auth" }),
     setDrainMode: async () => ({ drainMode: false, drainRequestedAt: null, drainReason: null, activeRuns: 0 }),
     clearFailedActivities: async () => ({ cleared: 0 }),
     listRepos: async () => [],
