@@ -91,6 +91,7 @@ const QUIET_REPO_COOLDOWN_MS = 10 * 60_000;
 // cold-start burst on a repo with hundreds of open PRs; the rest backfill on
 // later sweeps (babysit_pr jobs are dedupe-keyed, so nothing is lost).
 const MAX_BABYSIT_ENQUEUES_PER_SWEEP = 10;
+const DEFERRED_BABYSIT_SWEEP_DELAY_MS = 15_000;
 // Repos visited per non-full sweep. The PR-list fetch is a conditional GET, so
 // a quiet repo costs no rate-limit budget; visiting several per tick keeps the
 // round-robin rotation short instead of one-repo-per-tick. Actual babysit work
@@ -1377,6 +1378,29 @@ export class PRBabysitter {
     return this.clock();
   }
 
+  private async scheduleDeferredBabysitSweep(): Promise<void> {
+    if (!this.scheduleBackgroundJob) {
+      return;
+    }
+
+    const availableAt = new Date(this.now().getTime() + DEFERRED_BABYSIT_SWEEP_DELAY_MS);
+    const bucket = Math.floor(availableAt.getTime() / DEFERRED_BABYSIT_SWEEP_DELAY_MS);
+    await this.scheduleBackgroundJob(
+      "sync_watched_repos",
+      `runtime:deferred-babysit:${bucket}`,
+      buildBackgroundJobDedupeKey("sync_watched_repos", `runtime:deferred-babysit:${bucket}`),
+      buildActivityPayload({
+        label: "Backfilling deferred PR work",
+        detail: "Refilling babysitter queue after the active batch drains",
+        targetUrl: null,
+      }),
+      {
+        availableAt,
+        priority: 5,
+      },
+    );
+  }
+
   private isFeedbackSyncCoolingDown(prId: string): boolean {
     const untilMs = this.feedbackSyncCooldownUntilMs.get(prId);
     if (!untilMs) {
@@ -2387,6 +2411,7 @@ export class PRBabysitter {
         }
       }
       if (babysitDeferred > 0) {
+        await this.scheduleDeferredBabysitSweep();
         log.info(
           {
             repo: repoSlug,

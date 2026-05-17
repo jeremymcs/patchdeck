@@ -956,6 +956,9 @@ test("syncAndBabysitTrackedRepos caps in-flight babysit_pr jobs at maxConcurrent
   await babysitter.syncAndBabysitTrackedRepos();
   const afterFirst = await storage.listBackgroundJobs({ kind: "babysit_pr", status: "queued" });
   assert.equal(afterFirst.length, 3, "first sweep enqueues no more than maxConcurrentBabysitRuns");
+  const deferredSweeps = await storage.listBackgroundJobs({ kind: "sync_watched_repos", status: "queued" });
+  assert.equal(deferredSweeps.length, 1, "deferred babysit backlog schedules a follow-up sweep");
+  assert.equal(deferredSweeps[0]?.payload.activityLabel, "Backfilling deferred PR work");
 
   // A second sweep must count the still-queued jobs as in-flight and add none.
   await babysitter.syncAndBabysitTrackedRepos();
