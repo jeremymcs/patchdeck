@@ -57,6 +57,19 @@ export const docsAssessmentSchema = z.object({
 });
 export type DocsAssessment = z.infer<typeof docsAssessmentSchema>;
 
+export const currentRunStatusSchema = z.object({
+  id: z.string(),
+  status: z.enum(["queued", "running", "completed", "failed"]),
+  phase: z.string().nullable(),
+  label: z.string(),
+  detail: z.string().nullable(),
+  agent: z.enum(["codex", "claude"]).nullable(),
+  startedAt: z.string().nullable(),
+  updatedAt: z.string().nullable(),
+  lastError: z.string().nullable(),
+});
+export type CurrentRunStatus = z.infer<typeof currentRunStatusSchema>;
+
 export const prSchema = z.object({
   id: z.string(),
   number: z.number(),
@@ -82,6 +95,7 @@ export const prSchema = z.object({
   lastSyncError: z.string().nullable().default(null),
   watchEnabled: z.boolean().default(true),
   docsAssessment: docsAssessmentSchema.nullable().optional(),
+  currentRun: currentRunStatusSchema.nullable().optional(),
   addedAt: z.string(),
 });
 export type PR = z.infer<typeof prSchema>;
@@ -273,6 +287,7 @@ export const issueSchema = z.object({
   evaluationRecommendedLabels: z.array(z.string()).optional(),
   evaluationUpdatedAt: z.string().nullable().optional(),
   subtasks: z.array(issueSubtaskSchema).nullable().optional(),
+  currentRun: currentRunStatusSchema.nullable().optional(),
 });
 export type Issue = z.infer<typeof issueSchema>;
 

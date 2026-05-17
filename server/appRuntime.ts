@@ -4,6 +4,7 @@ import type {
   ActivitySnapshot,
   BackgroundJob,
   Config,
+  CurrentRunStatus,
   Issue,
   IssueListPage,
   IssueEvaluation,
@@ -564,15 +565,70 @@ function derivePrStageFromLogs(logs: LogEntry[]): PRStage {
   return stage;
 }
 
+function formatRunPhaseLabel(phase: string | null | undefined): string {
+  if (!phase) return "Run active";
+  const normalized = phase.toLowerCase();
+  if (normalized.includes("sync")) return "Syncing GitHub";
+  if (normalized.includes("prompt")) return "Preparing work";
+  if (normalized.includes("agent-running") || normalized.includes("working")) return "Agent running";
+  if (normalized.includes("verify") || normalized.includes("ci")) return "Verifying";
+  if (normalized.includes("opening_pr")) return "Opening PR";
+  if (normalized.includes("completed") || normalized.includes("done")) return "Completed";
+  if (normalized.includes("failed")) return "Failed";
+  return phase.replace(/^run\./, "").replace(/[-_.]/g, " ");
+}
+
+function latestRunLog(logs: LogEntry[], runId: string): LogEntry | undefined {
+  for (let index = logs.length - 1; index >= 0; index -= 1) {
+    const logEntry = logs[index];
+    if (logEntry?.runId === runId) {
+      return logEntry;
+    }
+  }
+  return undefined;
+}
+
+async function deriveCurrentPrRun(pr: PR | PRSummary, storage: IStorage, logs?: LogEntry[]): Promise<CurrentRunStatus | null> {
+  const runs = await storage.listAgentRuns({ prId: pr.id });
+  const latestRun = runs
+    .slice()
+    .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())[0];
+  if (!latestRun) return null;
+
+  const prLogs = logs ?? await storage.getLogs(pr.id);
+  const detailLog = latestRunLog(prLogs, latestRun.id);
+  return {
+    id: latestRun.id,
+    status: latestRun.status,
+    phase: latestRun.phase,
+    label: formatRunPhaseLabel(latestRun.phase),
+    detail: detailLog?.message ?? latestRun.lastError,
+    agent: latestRun.resolvedAgent ?? latestRun.preferredAgent,
+    startedAt: latestRun.createdAt,
+    updatedAt: latestRun.updatedAt,
+    lastError: latestRun.lastError,
+  };
+}
+
 async function attachDerivedPrStage<T extends PR | PRSummary>(pr: T, storage: IStorage): Promise<T> {
+  const withCurrentRun = async (updates: Pick<PR, "prStage">): Promise<T> => ({
+    ...pr,
+    ...updates,
+    currentRun: await deriveCurrentPrRun(pr, storage),
+  });
+
   if (pr.status === "watching") {
-    return { ...pr, prStage: "feedback_synced" };
+    return withCurrentRun({ prStage: "feedback_synced" });
   }
   if (pr.status === "done" || pr.status === "archived") {
-    return { ...pr, prStage: "done" };
+    return withCurrentRun({ prStage: "done" });
   }
   const logs = await storage.getLogs(pr.id);
-  return { ...pr, prStage: derivePrStageFromLogs(logs) };
+  return {
+    ...pr,
+    prStage: derivePrStageFromLogs(logs),
+    currentRun: await deriveCurrentPrRun(pr, storage, logs),
+  };
 }
 
 function issueWorkStageFromLogs(
@@ -598,6 +654,34 @@ function issueWorkStageFromLogs(
   if (fallback === "in_progress") return "working";
   if (fallback === "failed") return "failed";
   return "idle";
+}
+
+function currentRunStatusFromIssueJob(
+  job: BackgroundJob | undefined,
+  logs: LogEntry[],
+  workStage: NonNullable<Issue["workStage"]>,
+): CurrentRunStatus | null {
+  if (!job) return null;
+
+  const latestLog = logs[logs.length - 1];
+  const phase = latestLog?.phase ?? workStage;
+  return {
+    id: job.id,
+    status: job.status === "failed"
+      ? "failed"
+      : job.status === "completed"
+        ? "completed"
+        : job.status === "queued"
+          ? "queued"
+          : "running",
+    phase,
+    label: formatRunPhaseLabel(phase),
+    detail: latestLog?.message ?? job.lastError,
+    agent: null,
+    startedAt: job.createdAt,
+    updatedAt: job.completedAt ?? job.updatedAt,
+    lastError: job.lastError,
+  };
 }
 
 export function issueWorkPrFromLogs(
@@ -1279,6 +1363,7 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       evaluationRecommendedLabels: evaluation?.recommendedLabels ?? [],
       evaluationUpdatedAt: evaluation?.updatedAt ?? null,
       subtasks: subtaskSet?.subtasks ?? null,
+      currentRun: currentRunStatusFromIssueJob(latestJob, workLogs, workStage),
     };
   }
 

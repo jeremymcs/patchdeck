@@ -9,6 +9,7 @@ import { issueListPageSchema, issueSchema, type ActivityItem, type ActivitySnaps
 import { Skeleton } from "@/components/ui/skeleton";
 import { buildQueueStatusIndex, type QueueStatusView } from "@/lib/activityQueue";
 import { QueueStatusBadge } from "@/components/QueueStatusBadge";
+import { CurrentRunStatusStrip } from "@/components/CurrentRunStatusStrip";
 import { ActivityMenu, EMPTY_ACTIVITY_SNAPSHOT } from "@/components/ActivityMenu";
 import { DashboardErrorsPanel } from "@/components/DashboardErrorsPanel";
 import { DetailHeader } from "@/components/detail/DetailHeader";
@@ -1873,6 +1874,7 @@ function IssuesPage() {
                     })()}
                   </>
                 )}
+                banner={<CurrentRunStatusStrip run={selectedIssue.currentRun} testId="selected-issue-current-run" />}
               />
                 );
               })()}

@@ -281,6 +281,7 @@ test("dashboard keeps the QA-tested PR, repo, feedback, and side-panel workflows
     ["PR on issues badge", "pr-on-issues-badge"],
     ["run-now action", "button-apply"],
     ["pause-resume watch action", "button-toggle-watch"],
+    ["selected PR current run", "selected-pr-current-run"],
     ["CI healing panel", "panel-ci-healing"],
     ["ask agent tab", "tab-ask"],
     ["activity tab", "tab-activity"],
@@ -306,6 +307,7 @@ test("dashboard keeps the QA-tested PR, repo, feedback, and side-panel workflows
   assertHasExpression(sourceFile, "feedback manual decisions", /\[\s*["']accept["']\s*,\s*["']reject["']\s*,\s*["']flag["']\s*\]/);
   assertHasExpression(sourceFile, "dashboard error scroll action", /\bscrollToDashboardErrors\b/);
   assertHasExpression(sourceFile, "dashboard errors panel component", /\bDashboardErrorsPanel\b/);
+  assertHasExpression(sourceFile, "PR current run strip", /\bCurrentRunStatusStrip\b/);
 
   for (const [label, endpoint] of [
     ["active PR API", "/api/prs"],
@@ -385,6 +387,7 @@ test("issues page keeps the QA-tested issue monitor and work surface wired", asy
     ["clear issue failures action", "button-clear-issue-failures"],
     ["issue work stage", "issue-work-stage"],
     ["issue work attempt", "issue-work-attempt"],
+    ["selected issue current run", "selected-issue-current-run"],
     ["issue auto work state", "issue-auto-work-state"],
     ["issue evaluation state", "issue-evaluation-state"],
     ["issue evaluation state list", "issue-evaluation-state-list"],
@@ -423,6 +426,7 @@ test("issues page keeps the QA-tested issue monitor and work surface wired", asy
   assertHasExpression(sourceFile, "issue PR mergeability", /\bworkPrMergeable\b/);
   assertHasExpression(sourceFile, "issue queue helper", /\bbuildQueueStatusIndex\b/);
   assertHasExpression(sourceFile, "issue queue badge", /\bQueueStatusBadge\b/);
+  assertHasExpression(sourceFile, "issue current run strip", /\bCurrentRunStatusStrip\b/);
   assertHasExpression(sourceFile, "issue filtered list", /\bfilteredIssues\b/);
   assertHasExpression(sourceFile, "issue pagination load more", /\bloadMoreIssues\b/);
   assertHasExpression(sourceFile, "issue loaded count", /\bloadedIssueCount\b/);
