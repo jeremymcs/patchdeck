@@ -12,6 +12,7 @@ import { QueueStatusBadge } from "@/components/QueueStatusBadge";
 import { CurrentRunStatusStrip } from "@/components/CurrentRunStatusStrip";
 import { ActivityMenu, EMPTY_ACTIVITY_SNAPSHOT } from "@/components/ActivityMenu";
 import { DashboardErrorsPanel } from "@/components/DashboardErrorsPanel";
+import { GlobalActivityPanel } from "@/components/GlobalActivityPanel";
 import { DetailHeader } from "@/components/detail/DetailHeader";
 import { DetailPanel } from "@/components/detail/DetailPanel";
 import { MetaBreadcrumb, type MetaItem } from "@/components/detail/MetaBreadcrumb";
@@ -643,7 +644,19 @@ function IssueLogRow({ entry }: { entry: LogEntry }) {
   );
 }
 
-function IssueLogPanel({ logs, selected, selectedKey }: { logs: LogEntry[]; selected: boolean; selectedKey: string | null }) {
+function IssueLogPanel({
+  logs,
+  selected,
+  selectedKey,
+  activities,
+  queueStatusById,
+}: {
+  logs: LogEntry[];
+  selected: boolean;
+  selectedKey: string | null;
+  activities: ActivitySnapshot;
+  queueStatusById: Map<string, QueueStatusView>;
+}) {
   const [clearedLogIds, setClearedLogIds] = useState<Set<string>>(() => new Set());
   const viewLogs = useMemo(
     () => logs.filter((log) => !clearedLogIds.has(log.id)),
@@ -664,6 +677,7 @@ function IssueLogPanel({ logs, selected, selectedKey }: { logs: LogEntry[]; sele
           Activity
         </div>
       </div>
+      <GlobalActivityPanel activities={activities} queueStatusById={queueStatusById} />
       <div className="flex-1 overflow-y-auto" data-testid="issue-detail-logs">
         {!selected ? (
           <div className="p-4 text-[12px] text-muted-foreground">
@@ -2109,7 +2123,13 @@ function IssuesPage() {
           )}
         </div>
 
-        <IssueLogPanel logs={issueLogs} selected={Boolean(selectedIssue)} selectedKey={selectedIssue?.id ?? null} />
+        <IssueLogPanel
+          logs={issueLogs}
+          selected={Boolean(selectedIssue)}
+          selectedKey={selectedIssue?.id ?? null}
+          activities={activities}
+          queueStatusById={queueStatusById}
+        />
       </div>
     </div>
   );

@@ -29,6 +29,7 @@ import { buildQueueStatusIndex, type QueueStatusView } from "@/lib/activityQueue
 import { QueueStatusBadge } from "@/components/QueueStatusBadge";
 import { CurrentRunStatusStrip } from "@/components/CurrentRunStatusStrip";
 import { DashboardErrorsPanel } from "@/components/DashboardErrorsPanel";
+import { GlobalActivityPanel } from "@/components/GlobalActivityPanel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DetailHeader } from "@/components/detail/DetailHeader";
 import { MetaBreadcrumb, type MetaItem } from "@/components/detail/MetaBreadcrumb";
@@ -753,94 +754,6 @@ function LogPanel({ prId }: { prId: string | null }) {
       </div>
     </div>
   );
-}
-
-function GlobalActivityPanel({
-  activities,
-  queueStatusById,
-}: {
-  activities: ActivitySnapshot;
-  queueStatusById: Map<string, QueueStatusView>;
-}) {
-  const visibleActivities = useMemo(
-    () => [...activities.inProgress, ...activities.queued, ...activities.failed].slice(0, 5),
-    [activities.failed, activities.inProgress, activities.queued],
-  );
-
-  return (
-    <div className="shrink-0 border-b border-border px-3 py-2" data-testid="global-activity-panel">
-      <div className="flex items-center justify-between gap-2">
-        <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Automation</div>
-        <div className="flex shrink-0 items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground">
-          <span><span className="font-mono text-foreground/80">{activities.inProgress.length}</span> running</span>
-          <span><span className="font-mono text-foreground/80">{activities.queued.length}</span> queued</span>
-        </div>
-      </div>
-      {visibleActivities.length === 0 ? (
-        <div className="mt-2 text-[11px] text-muted-foreground">No automation running or queued.</div>
-      ) : (
-        <div className="mt-2 space-y-1">
-          {visibleActivities.map((activity) => (
-            <GlobalActivityRow
-              key={activity.id}
-              activity={activity}
-              queueStatus={queueStatusById.get(activity.targetId) ?? null}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function GlobalActivityRow({
-  activity,
-  queueStatus,
-}: {
-  activity: ActivityItem;
-  queueStatus: QueueStatusView | null;
-}) {
-  const statusClass = activity.status === "failed"
-    ? "border-destructive/50 text-destructive"
-    : activity.status === "in_progress"
-      ? "border-primary/50 text-primary"
-      : "border-border text-muted-foreground";
-  const timeLabel = activity.status === "in_progress"
-    ? formatClock(activity.startedAt) ?? formatClock(activity.updatedAt)
-    : formatClock(activity.availableAt) ?? formatClock(activity.updatedAt);
-  const content = (
-    <div
-      className="min-w-0 rounded-md border border-border/70 bg-background px-2 py-1.5"
-      data-testid="global-activity-row"
-    >
-      <div className="flex min-w-0 items-center gap-2">
-        <span className={`shrink-0 rounded-md border px-1.5 py-0.5 text-[9px] uppercase tracking-wider ${statusClass}`}>
-          {activity.status === "in_progress" ? "running" : activity.status}
-        </span>
-        <span className="min-w-0 flex-1 truncate text-[12px] text-foreground">{activity.label}</span>
-        {timeLabel && <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{timeLabel}</span>}
-      </div>
-      {activity.detail && (
-        <div className="mt-1 truncate text-[11px] text-muted-foreground">{activity.detail}</div>
-      )}
-      <div className="mt-1">
-        <QueueStatusBadge status={queueStatus} />
-      </div>
-      {activity.lastError && (
-        <div className="mt-1 line-clamp-2 text-[11px] text-destructive">{activity.lastError}</div>
-      )}
-    </div>
-  );
-
-  if (activity.targetUrl) {
-    return (
-      <a href={activity.targetUrl} target="_blank" rel="noopener noreferrer" className="block outline-none focus-visible:ring-1 focus-visible:ring-ring">
-        {content}
-      </a>
-    );
-  }
-
-  return content;
 }
 
 function HealingPanel({

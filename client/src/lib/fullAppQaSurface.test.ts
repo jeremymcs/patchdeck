@@ -271,6 +271,7 @@ test("full app QA route matrix is wired through the hash router", async () => {
 
 test("dashboard keeps the QA-tested PR, repo, feedback, and side-panel workflows wired", async () => {
   const { sourceFile } = await parseProjectFile("client/src/pages/prs.tsx");
+  const { sourceFile: globalActivitySourceFile } = await parseProjectFile("client/src/components/GlobalActivityPanel.tsx");
   const { sourceFile: dashboardErrorsSourceFile } = await parseProjectFile("client/src/components/DashboardErrorsPanel.tsx");
 
   for (const [label, testId] of [
@@ -286,8 +287,6 @@ test("dashboard keeps the QA-tested PR, repo, feedback, and side-panel workflows
     ["ask agent tab", "tab-ask"],
     ["activity tab", "tab-activity"],
     ["activity panel toggle", "button-toggle-activity-panel"],
-    ["global activity panel", "global-activity-panel"],
-    ["global activity row", "global-activity-row"],
     ["ask input", "input-question"],
     ["ask submit", "button-ask"],
     ["dashboard error pill", "dashboard-error-pill"],
@@ -338,8 +337,10 @@ test("dashboard keeps the QA-tested PR, repo, feedback, and side-panel workflows
   assertHasStringValue(sourceFile, "PR number search placeholder", "Search #");
   assertHasExpression(sourceFile, "issue-linked PR index", /\bbuildIssueLinkedPRIndex\b/);
   assertHasStringValue(sourceFile, "linked issues tab label", /Linked Issues \(/);
-  assertHasStringValue(sourceFile, "global activity heading", "Automation");
-  assertHasStringValue(sourceFile, "global activity empty state", "No automation running or queued.");
+  assertHasTestId(globalActivitySourceFile, "global activity panel", "global-activity-panel");
+  assertHasTestId(globalActivitySourceFile, "global activity row", "global-activity-row");
+  assertHasStringValue(globalActivitySourceFile, "global activity heading", "Automation");
+  assertHasStringValue(globalActivitySourceFile, "global activity empty state", "No automation running or queued.");
   assertHasStringValue(sourceFile, "dashboard sync label", "sync");
   assertHasStringValue(sourceFile, "drain mode action label", "Paused by drain mode");
   assertHasStringValue(sourceFile, "blocked manual copy", "Manual runs are blocked while global automation is paused.");
@@ -352,6 +353,7 @@ test("dashboard keeps the QA-tested PR, repo, feedback, and side-panel workflows
   assertHasExpression(sourceFile, "dashboard issues drain guard", /enabled: runtimeState !== undefined && !globalDrainMode/);
   assertHasExpression(sourceFile, "dashboard active error count", /\bactiveErrorCount\b/);
   assertHasExpression(sourceFile, "dashboard errors roll-up state", /\bareErrorsRolledUp\b/);
+  assertHasExpression(sourceFile, "global automation panel", /\bGlobalActivityPanel\b/);
 });
 
 test("issues page keeps the QA-tested issue monitor and work surface wired", async () => {
@@ -431,6 +433,7 @@ test("issues page keeps the QA-tested issue monitor and work surface wired", asy
   assertHasExpression(sourceFile, "issue PR mergeability", /\bworkPrMergeable\b/);
   assertHasExpression(sourceFile, "issue queue helper", /\bbuildQueueStatusIndex\b/);
   assertHasExpression(sourceFile, "issue queue badge", /\bQueueStatusBadge\b/);
+  assertHasExpression(sourceFile, "issue activity automation panel", /\bGlobalActivityPanel\b/);
   assertHasExpression(sourceFile, "issue current run strip", /\bCurrentRunStatusStrip\b/);
   assertHasExpression(sourceFile, "issue filtered list", /\bfilteredIssues\b/);
   assertHasExpression(sourceFile, "issue pagination load more", /\bloadMoreIssues\b/);
