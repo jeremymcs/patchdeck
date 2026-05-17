@@ -21,8 +21,9 @@ test("GitHub reply branding can replace the visible app name", () => {
     "Review Bot",
   );
 
-  assert.match(comment, /\*\*Review Bot\*\* dispatched `codex`/);
-  assert.doesNotMatch(comment, /\*\*patchdeck\*\* dispatched/);
+  assert.match(comment, /\*\*Review Bot\*\* started an automated PR update\./);
+  assert.doesNotMatch(comment, /\*\*patchdeck\*\* started/);
+  assert.doesNotMatch(comment, /Fix the failing test\./);
   assert.doesNotMatch(comment, /Posted by/);
 });
 
@@ -34,9 +35,30 @@ test("GitHub reply branding can remove the visible app name", () => {
     "   ",
   );
 
-  assert.match(comment, /\ud83e\udd16 Dispatched `codex`/);
+  assert.match(comment, /^<!-- codefactory-agent-command -->\nStarted an automated PR update\./);
   assert.doesNotMatch(comment, /patchdeck/);
   assert.doesNotMatch(comment, /Posted by/);
+});
+
+test("GitHub agent command comments summarize merge conflicts without exposing the prompt", () => {
+  const comment = formatAgentCommandGitHubComment(
+    "codex",
+    [
+      "A merge from the base branch into the head branch has been started but has conflicts.",
+      "The following files have merge conflicts:",
+      "  - src/example.ts",
+      "",
+      "Your task:",
+      "1) Resolve ALL merge conflicts in the listed files.",
+    ].join("\n"),
+    false,
+    "Review Bot",
+  );
+
+  assert.match(comment, /Merge conflicts were detected/);
+  assert.match(comment, /- `src\/example\.ts`/);
+  assert.doesNotMatch(comment, /Your task:/);
+  assert.doesNotMatch(comment, /Resolve ALL merge conflicts/);
 });
 
 test("GitHub reply branding uses the custom name in linked footers", () => {

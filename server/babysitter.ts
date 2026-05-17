@@ -224,17 +224,17 @@ const defaultBabysitterRuntime: BabysitterRuntime = {
 };
 
 const STATUS_MESSAGES = {
-  accepted: "\u23f3 **Accepted** — this comment requires code changes. Queuing fix...",
-  agentRunning: (agent: CodingAgent) => `\ud83e\uddf0 **Agent running** — \`${agent}\` is working on the fix...`,
-  agentFailed: (agent: CodingAgent, reason?: string) => reason
-    ? `\u274c **Agent failed** — \`${agent}\` exited with an error: ${reason}`
-    : `\u274c **Agent failed** — \`${agent}\` exited with an error.`,
-  agentCompleted: "\u2705 **Agent completed** — verifying changes...",
+  accepted: "\u23f3 **Accepted** — queued for a code change.",
+  agentRunning: (_agent: CodingAgent) => "\ud83e\uddf0 **In progress** — applying the accepted fix.",
+  agentFailed: (_agent: CodingAgent, reason?: string) => reason
+    ? `\u274c **Needs attention** — automatic fix failed: ${reason}`
+    : "\u274c **Needs attention** — automatic fix failed.",
+  agentCompleted: "\u2705 **Verifying** — checking the applied changes.",
   resolved: (headSha: string) => {
     const shortSha = headSha.trim().slice(0, 7);
     return shortSha
       ? `\ud83c\udf89 **Resolved** — addressed in commit \`${shortSha}\`.`
-      : "\ud83c\udf89 **Resolved** — addressed in the latest babysitter run.";
+      : "\ud83c\udf89 **Resolved** — addressed in the latest update.";
   },
 } as const;
 
@@ -1051,8 +1051,8 @@ function buildFeedbackFollowUpBody(
 ): string {
   const shortSha = headSha.trim() ? headSha.trim().slice(0, 7) : "";
   const headline = shortSha
-    ? `Addressed in commit \`${shortSha}\` by the latest babysitter run.`
-    : "Addressed in the latest babysitter run.";
+    ? `Addressed in commit \`${shortSha}\`.`
+    : "Addressed in the latest update.";
 
   const parts = [headline];
 
@@ -1087,29 +1087,57 @@ function buildFeedbackFollowUpBody(
 
 const CODEFACTORY_COMMENT_MARKER = "<!-- codefactory-agent-command -->";
 
-function buildCodeFence(content: string): { open: string; close: string } {
-  let maxRun = 0;
-  const backtickRuns = content.match(/`{3,}/g);
-  if (backtickRuns) {
-    for (const run of backtickRuns) {
-      if (run.length > maxRun) maxRun = run.length;
-    }
-  }
-  const fence = "`".repeat(Math.max(3, maxRun + 1));
-  return { open: `${fence}text`, close: fence };
-}
-
 function isCodeFactoryComment(body: string): boolean {
   return body.includes(CODEFACTORY_COMMENT_MARKER);
 }
 
+function extractConflictFilesFromPrompt(prompt: string): string[] {
+  const lines = prompt.split(/\r?\n/);
+  const start = lines.findIndex((line) => line.trim() === "The following files have merge conflicts:");
+  if (start === -1) {
+    return [];
+  }
+
+  const files: string[] = [];
+  for (const line of lines.slice(start + 1)) {
+    if (!line.startsWith("  - ")) {
+      break;
+    }
+
+    const file = line.slice(4).trim();
+    if (file) {
+      files.push(file);
+    }
+  }
+
+  return files;
+}
+
+function formatPublicAgentCommandDetails(prompt: string): string[] {
+  const conflictFiles = extractConflictFilesFromPrompt(prompt);
+  if (conflictFiles.length > 0) {
+    return [
+      "Merge conflicts were detected while updating this branch from the base branch.",
+      "",
+      "Conflicted files:",
+      ...conflictFiles.map((file) => `- \`${file}\``),
+      "",
+      "An automatic resolution attempt is running. If it cannot complete safely, this PR will be marked for manual follow-up.",
+    ];
+  }
+
+  return [
+    "Accepted review feedback is being applied.",
+    "Progress and final results will be posted in the related review thread(s).",
+  ];
+}
+
 export function formatAgentCommandGitHubComment(
-  agent: CodingAgent,
+  _agent: CodingAgent,
   prompt: string,
   includeRepositoryLinksInGitHubComments: boolean,
   githubCommentAppName: string,
 ): string {
-  const fence = buildCodeFence(prompt);
   const appName = formatAppName(githubCommentAppName, includeRepositoryLinksInGitHubComments);
   const footer = formatIncludedAppCommentFooter(
     includeRepositoryLinksInGitHubComments,
@@ -1118,17 +1146,10 @@ export function formatAgentCommandGitHubComment(
   return [
     CODEFACTORY_COMMENT_MARKER,
     appName
-      ? `\ud83e\udd16 **${appName}** dispatched \`${agent}\` with the following prompt:`
-      : `\ud83e\udd16 Dispatched \`${agent}\` with the following prompt:`,
+      ? `**${appName}** started an automated PR update.`
+      : "Started an automated PR update.",
     "",
-    "<details>",
-    "<summary>Agent prompt (click to expand)</summary>",
-    "",
-    fence.open,
-    prompt,
-    fence.close,
-    "",
-    "</details>",
+    ...formatPublicAgentCommandDetails(prompt),
     ...(footer ? ["", footer] : []),
   ].join("\n");
 }
@@ -4716,13 +4737,13 @@ export class PRBabysitter {
               githubCommentAppName,
             );
             const alertBody = [
-              appName ? `## \u26a0\ufe0f ${appName} CI Alert` : "## \u26a0\ufe0f CI Alert",
+              appName ? `## ${appName} CI needs attention` : "## CI needs attention",
               "",
-              `The babysitter pushed changes (commit \`${headShaForFollowUp.slice(0, 7)}\`), but CI/CD checks are still failing:`,
+              `Changes were pushed in commit \`${headShaForFollowUp.slice(0, 7)}\`, but CI/CD checks are still failing:`,
               "",
               ...ciResult.failures.map((f) => `- **${f.context}**: ${f.description}${f.targetUrl ? ` ([details](${f.targetUrl}))` : ""}`),
               "",
-              "Manual investigation may be required.",
+              "Review the failing checks before merging.",
               ...(footer ? ["", footer] : []),
             ].join("\n");
             await this.github.postPRComment(octokit, parsedPr, alertBody);

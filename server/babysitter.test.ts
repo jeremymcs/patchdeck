@@ -2651,14 +2651,15 @@ test("babysitPR uses a CODEFACTORY_HOME worktree, passes GitHub context, and ver
   assert.deepEqual(postedFollowUps, [
     {
       id: "gh-review-comment-1",
-      body: `Addressed in commit \`def456\` by the latest babysitter run.\n\nRenamed the variable from \`foo\` to \`bar\` as requested.\n\n<!-- codefactory-feedback:gh-review-comment-1 -->\n\n${APP_COMMENT_FOOTER}`,
+      body: `Addressed in commit \`def456\`.\n\nRenamed the variable from \`foo\` to \`bar\` as requested.\n\n<!-- codefactory-feedback:gh-review-comment-1 -->\n\n${APP_COMMENT_FOOTER}`,
     },
   ]);
   assert.equal(postedAgentComments.length, 1);
   assert.match(
     postedAgentComments[0] || "",
-    /\*\*\[patchdeck\]\(https:\/\/github.com\/jeremymcs\/patchdeck\)\*\* dispatched `codex`/,
+    /\*\*\[patchdeck\]\(https:\/\/github.com\/jeremymcs\/patchdeck\)\*\* started an automated PR update\./,
   );
+  assert.doesNotMatch(postedAgentComments[0] || "", /Agent prompt|auditToken=codefactory-feedback/);
   assert.doesNotMatch(postedAgentComments[0] || "", /\*\*CodeFactory\*\*/);
   assert.equal(postedAgentComments[0]?.endsWith(APP_COMMENT_FOOTER), true);
   assert.deepEqual(resolvedThreads, ["PRRT_kwDO_example"]);
@@ -3146,11 +3147,12 @@ test("babysitPR omits repository links in GitHub comments when disabled", async 
     assert.deepEqual(postedFollowUps, [
       {
         id: "gh-review-comment-1",
-        body: "Addressed in commit `def456` by the latest babysitter run.\n\nRenamed the variable from `foo` to `bar` as requested.\n\n<!-- codefactory-feedback:gh-review-comment-1 -->",
+        body: "Addressed in commit `def456`.\n\nRenamed the variable from `foo` to `bar` as requested.\n\n<!-- codefactory-feedback:gh-review-comment-1 -->",
       },
     ]);
     assert.equal(postedAgentComments.length, 1);
-    assert.match(postedAgentComments[0] || "", /\*\*patchdeck\*\* dispatched `codex`/);
+    assert.match(postedAgentComments[0] || "", /\*\*patchdeck\*\* started an automated PR update\./);
+    assert.doesNotMatch(postedAgentComments[0] || "", /Agent prompt|auditToken=codefactory-feedback/);
     assert.doesNotMatch(postedAgentComments[0] || "", /\[patchdeck\]\(https:\/\/github.com\/jeremymcs\/patchdeck\)/);
     assert.equal(postedAgentComments[0]?.includes(APP_COMMENT_FOOTER), false);
   } finally {
@@ -3206,8 +3208,8 @@ test("babysitPR keeps acceptance local and logs best-effort reaction failures", 
       makeFeedbackItem({
         id: "gh-review-comment-3",
         author: "code-factory",
-        body: `Addressed in commit \`def456\` by the latest babysitter run.\n\n${firstItem.auditToken}`,
-        bodyHtml: `<p>Addressed in commit <code>def456</code> by the latest babysitter run.</p><p>${firstItem.auditToken}</p>`,
+        body: `Addressed in commit \`def456\`.\n\n${firstItem.auditToken}`,
+        bodyHtml: `<p>Addressed in commit <code>def456</code>.</p><p>${firstItem.auditToken}</p>`,
         sourceId: "3",
         sourceNodeId: "PRRC_kwDO_followup_1",
         sourceUrl: "https://github.com/octo/example/pull/42#discussion_r3",
@@ -3221,8 +3223,8 @@ test("babysitPR keeps acceptance local and logs best-effort reaction failures", 
       makeFeedbackItem({
         id: "gh-review-comment-4",
         author: "code-factory",
-        body: `Addressed in commit \`def456\` by the latest babysitter run.\n\n${secondItem.auditToken}`,
-        bodyHtml: `<p>Addressed in commit <code>def456</code> by the latest babysitter run.</p><p>${secondItem.auditToken}</p>`,
+        body: `Addressed in commit \`def456\`.\n\n${secondItem.auditToken}`,
+        bodyHtml: `<p>Addressed in commit <code>def456</code>.</p><p>${secondItem.auditToken}</p>`,
         sourceId: "4",
         sourceNodeId: "PRRC_kwDO_followup_2",
         sourceUrl: "https://github.com/octo/example/pull/42#discussion_r4",
@@ -3353,8 +3355,8 @@ test("babysitPR posts progress replies when GitHub progress replies are enabled"
     const followUp = makeFeedbackItem({
       id: "gh-review-comment-2",
       author: "code-factory",
-      body: `Addressed in commit \`def456\` by the latest babysitter run.\n\n${existingItem.auditToken}`,
-      bodyHtml: `<p>Addressed in commit <code>def456</code> by the latest babysitter run.</p><p>${existingItem.auditToken}</p>`,
+      body: `Addressed in commit \`def456\`.\n\n${existingItem.auditToken}`,
+      bodyHtml: `<p>Addressed in commit <code>def456</code>.</p><p>${existingItem.auditToken}</p>`,
       sourceId: "2",
       sourceNodeId: "PRRC_kwDO_followup",
       sourceUrl: "https://github.com/octo/example/pull/42#discussion_r2",
@@ -3420,12 +3422,12 @@ test("babysitPR posts progress replies when GitHub progress replies are enabled"
 
     await babysitter.babysitPR(pr.id, "codex");
 
-    const expectedAcceptedLine = "\u23f3 **Accepted** \u2014 this comment requires code changes. Queuing fix...";
+    const expectedAcceptedLine = "\u23f3 **Accepted** \u2014 queued for a code change.";
     const expectedAcceptedStatus = `${expectedAcceptedLine}\n\n${APP_COMMENT_FOOTER}`;
     const expectedFinalStatusBody = [
       expectedAcceptedLine,
-      "\ud83e\uddf0 **Agent running** \u2014 `codex` is working on the fix...",
-      "\u2705 **Agent completed** \u2014 verifying changes...",
+      "\ud83e\uddf0 **In progress** \u2014 applying the accepted fix.",
+      "\u2705 **Verifying** \u2014 checking the applied changes.",
       "\ud83c\udf89 **Resolved** \u2014 addressed in commit `def456`.",
       "",
       APP_COMMENT_FOOTER,
@@ -3457,7 +3459,7 @@ test("runQueuedBabysitPR recovers an existing status reply after restart", async
   const staleStatusReply = makeFeedbackItem({
     id: "gh-review-comment-77",
     author: "alex-morgan-o",
-    body: "\u23f3 **Accepted** \u2014 this comment requires code changes. Queuing fix...",
+    body: "\u23f3 **Accepted** \u2014 queued for a code change.",
     sourceId: "77",
     sourceNodeId: "PRRC_kwDO_status",
     sourceUrl: "https://github.com/octo/example/pull/42#discussion_r77",
@@ -3579,7 +3581,7 @@ test("runQueuedBabysitPR recovers an existing status reply after restart", async
 
     await babysitter.runQueuedBabysitPR(pr.id, "codex");
 
-    assert.ok(updatedStatusBodies.some((body) => body.includes("**Agent running**")));
+    assert.ok(updatedStatusBodies.some((body) => body.includes("**In progress**")));
     assert.ok(updatedStatusBodies.at(-1)?.includes("**Resolved**"));
     const [run] = await storage.listAgentRuns({ prId: pr.id });
     assert.equal(run?.status, "completed");
@@ -3668,7 +3670,7 @@ test("babysitPR marks feedback failed without posting GitHub status when the age
   }
 });
 
-test("babysitPR includes the agent name in failed GitHub progress replies", async () => {
+test("babysitPR keeps failed GitHub progress replies concise", async () => {
   const storage = new MemStorage();
   await storage.updateConfig({
     autoUpdateDocs: false,
@@ -3749,7 +3751,7 @@ test("babysitPR includes the agent name in failed GitHub progress replies", asyn
     const body = statusReplyRefs.get(existingItem.id)?.body ?? "";
     assert.match(
       body,
-      /\u274c \*\*Agent failed\*\* \u2014 `codex` exited with an error: TypeScript check failed/,
+      /\u274c \*\*Needs attention\*\* \u2014 automatic fix failed: TypeScript check failed/,
     );
   } finally {
     delete process.env.CODEFACTORY_HOME;
@@ -3928,8 +3930,8 @@ test("babysitPR treats footerless status replies as non-actionable", async () =>
   await storage.updateConfig({ autoUpdateDocs: false });
   const statusReply = makeFeedbackItem({
     author: "octocat",
-    body: "\ud83e\uddf0 **Agent running** \u2014 `codex` is working on the fix...",
-    bodyHtml: "<p><strong>Agent running</strong> - <code>codex</code> is working on the fix...</p>",
+    body: "\ud83e\uddf0 **In progress** \u2014 applying the accepted fix.",
+    bodyHtml: "<p><strong>In progress</strong> - applying the accepted fix.</p>",
     decision: null,
     status: "pending",
   });
@@ -5124,8 +5126,8 @@ test("babysitPR continues comment remediation when docs assessment fails", async
   const followUp = makeFeedbackItem({
     id: "gh-review-comment-2",
     author: "code-factory",
-    body: `Addressed in commit \`def456\` by the latest babysitter run.\n\n${existingItem.auditToken}`,
-    bodyHtml: `<p>Addressed in commit <code>def456</code> by the latest babysitter run.</p><p>${existingItem.auditToken}</p>`,
+    body: `Addressed in commit \`def456\`.\n\n${existingItem.auditToken}`,
+    bodyHtml: `<p>Addressed in commit <code>def456</code>.</p><p>${existingItem.auditToken}</p>`,
     sourceId: "2",
     sourceNodeId: "PRRC_kwDO_followup",
     sourceUrl: "https://github.com/alex-morgan-o/lolodex/pull/106#discussion_r2",
@@ -5238,8 +5240,8 @@ test("babysitPR retries accepted in-progress feedback items that still need GitH
   const followUp = makeFeedbackItem({
     id: "gh-review-comment-2",
     author: "code-factory",
-    body: `Addressed in commit \`abc123\` by the latest babysitter run.\n\n${existingItem.auditToken}`,
-    bodyHtml: `<p>Addressed in commit <code>abc123</code> by the latest babysitter run.</p><p>${existingItem.auditToken}</p>`,
+    body: `Addressed in commit \`abc123\`.\n\n${existingItem.auditToken}`,
+    bodyHtml: `<p>Addressed in commit <code>abc123</code>.</p><p>${existingItem.auditToken}</p>`,
     sourceId: "2",
     sourceNodeId: "PRRC_kwDO_followup",
     sourceUrl: "https://github.com/alex-morgan-o/lolodex/pull/106#discussion_r2",
@@ -5318,7 +5320,7 @@ test("babysitPR retries accepted in-progress feedback items that still need GitH
   assert.deepEqual(postedFollowUps, [
     {
       id: "gh-review-comment-1",
-      body: `Addressed in commit \`abc123\` by the latest babysitter run.\n\n<!-- codefactory-feedback:gh-review-comment-1 -->\n\n${APP_COMMENT_FOOTER}`,
+      body: `Addressed in commit \`abc123\`.\n\n<!-- codefactory-feedback:gh-review-comment-1 -->\n\n${APP_COMMENT_FOOTER}`,
     },
   ]);
   assert.deepEqual(resolvedThreads, ["PRRT_kwDO_example"]);
@@ -5372,8 +5374,8 @@ test("resumeInterruptedRuns replays the persisted prompt when the PR head has no
   const followUp = makeFeedbackItem({
     id: "gh-review-comment-2",
     author: "code-factory",
-    body: `Addressed in commit \`def456\` by the latest babysitter run.\n\n${existingItem.auditToken}`,
-    bodyHtml: `<p>Addressed in commit <code>def456</code> by the latest babysitter run.</p><p>${existingItem.auditToken}</p>`,
+    body: `Addressed in commit \`def456\`.\n\n${existingItem.auditToken}`,
+    bodyHtml: `<p>Addressed in commit <code>def456</code>.</p><p>${existingItem.auditToken}</p>`,
     sourceId: "2",
     sourceNodeId: "PRRC_kwDO_followup",
     sourceUrl: "https://github.com/alex-morgan-o/lolodex/pull/106#discussion_r2",
@@ -5480,8 +5482,8 @@ test("resumeInterruptedRuns skips prompt replay when the PR head already moved",
   const followUp = makeFeedbackItem({
     id: "gh-review-comment-2",
     author: "code-factory",
-    body: `Addressed in commit \`moved99\` by the latest babysitter run.\n\n${existingItem.auditToken}`,
-    bodyHtml: `<p>Addressed in commit <code>moved99</code> by the latest babysitter run.</p><p>${existingItem.auditToken}</p>`,
+    body: `Addressed in commit \`moved99\`.\n\n${existingItem.auditToken}`,
+    bodyHtml: `<p>Addressed in commit <code>moved99</code>.</p><p>${existingItem.auditToken}</p>`,
     sourceId: "2",
     sourceNodeId: "PRRC_kwDO_followup",
     sourceUrl: "https://github.com/alex-morgan-o/lolodex/pull/106#discussion_r2",
@@ -6056,8 +6058,8 @@ test("babysitPR resolves lingering review threads without reposting an existing 
   const priorFollowUp = makeFeedbackItem({
     id: "gh-review-comment-2",
     author: "code-factory",
-    body: `Addressed in commit \`abc123\` by the latest babysitter run.\n\n${existingItem.auditToken}`,
-    bodyHtml: `<p>Addressed in commit <code>abc123</code> by the latest babysitter run.</p><p>${existingItem.auditToken}</p>`,
+    body: `Addressed in commit \`abc123\`.\n\n${existingItem.auditToken}`,
+    bodyHtml: `<p>Addressed in commit <code>abc123</code>.</p><p>${existingItem.auditToken}</p>`,
     sourceId: "2",
     sourceNodeId: "PRRC_kwDO_followup",
     sourceUrl: "https://github.com/alex-morgan-o/lolodex/pull/106#discussion_r2",
@@ -6170,8 +6172,8 @@ test("babysitPR reposts GitHub follow-up when an earlier audit trail used the wr
   const priorFollowUp = makeFeedbackItem({
     id: "gh-review-comment-2",
     author: "code-factory",
-    body: `Addressed in commit \`abc123\` by the latest babysitter run.\n\n${existingItem.auditToken}`,
-    bodyHtml: `<p>Addressed in commit <code>abc123</code> by the latest babysitter run.</p><p>${existingItem.auditToken}</p>`,
+    body: `Addressed in commit \`abc123\`.\n\n${existingItem.auditToken}`,
+    bodyHtml: `<p>Addressed in commit <code>abc123</code>.</p><p>${existingItem.auditToken}</p>`,
     sourceId: "2",
     sourceNodeId: "PRRC_kwDO_followup",
     sourceUrl: "https://github.com/alex-morgan-o/lolodex/pull/106#discussion_r2",
@@ -6188,8 +6190,8 @@ test("babysitPR reposts GitHub follow-up when an earlier audit trail used the wr
   const correctedFollowUp = makeFeedbackItem({
     id: "gh-review-comment-3",
     author: "code-factory",
-    body: `Addressed in commit \`abc123\` by the latest babysitter run.\n\n${existingItem.auditToken}`,
-    bodyHtml: `<p>Addressed in commit <code>abc123</code> by the latest babysitter run.</p><p>${existingItem.auditToken}</p>`,
+    body: `Addressed in commit \`abc123\`.\n\n${existingItem.auditToken}`,
+    bodyHtml: `<p>Addressed in commit <code>abc123</code>.</p><p>${existingItem.auditToken}</p>`,
     sourceId: "3",
     sourceNodeId: "PRRC_kwDO_followup_corrected",
     sourceUrl: "https://github.com/alex-morgan-o/lolodex/pull/106#discussion_r3",
@@ -6290,7 +6292,7 @@ test("babysitPR reposts GitHub follow-up when an earlier audit trail used the wr
   assert.deepEqual(postedFollowUps, [
     {
       id: "gh-review-comment-1",
-      body: `Addressed in commit \`abc123\` by the latest babysitter run.\n\n<!-- codefactory-feedback:gh-review-comment-1 -->\n\n${APP_COMMENT_FOOTER}`,
+      body: `Addressed in commit \`abc123\`.\n\n<!-- codefactory-feedback:gh-review-comment-1 -->\n\n${APP_COMMENT_FOOTER}`,
     },
   ]);
   assert.deepEqual(resolvedThreads, ["PRRT_kwDO_example"]);
@@ -6321,6 +6323,7 @@ test("babysitPR resolves merge conflicts when PR is not mergeable", async () => 
   let conflictAgentPrompt = "";
   let fixAgentCalled = false;
   let conflictResolved = false;
+  const postedAgentComments: string[] = [];
   const pullSummary = makePullSummary(pr, { mergeable: false });
   const mergeAttempted = { value: false };
 
@@ -6342,6 +6345,9 @@ test("babysitPR resolves merge conflicts when PR is not mergeable", async () => 
       resolveReviewThread: async () => undefined,
       resolveGitHubAuthToken: async () => "test-token",
       addReactionToComment: async () => {},
+      postPRComment: async (_octokit: unknown, _parsedPr: unknown, body: string) => {
+        postedAgentComments.push(body);
+      },
       postStatusReplyForFeedbackItem: async () => null,
       updateStatusReply: async () => {},
     },
@@ -6386,6 +6392,10 @@ test("babysitPR resolves merge conflicts when PR is not mergeable", async () => 
   assert.equal(fixAgentCalled, false, "Should not run the fix agent when there are no comment/status tasks");
   assert.match(conflictAgentPrompt, /merge conflicts/i);
   assert.match(conflictAgentPrompt, /src\/example\.ts/);
+  assert.equal(postedAgentComments.length, 1);
+  assert.match(postedAgentComments[0] || "", /Merge conflicts were detected/);
+  assert.match(postedAgentComments[0] || "", /- `src\/example\.ts`/);
+  assert.doesNotMatch(postedAgentComments[0] || "", /Resolve ALL merge conflicts|Your task:/);
   assert.ok(logs.some((log) => log.phase === "conflict" && log.message.includes("merge conflicts")));
   assert.ok(logs.some((log) => log.phase === "conflict.agent" && log.message.includes("merge conflict resolution")));
 
@@ -6624,7 +6634,7 @@ test("babysitPR skips conflict resolution when PR is mergeable", async () => {
   const followUp = makeFeedbackItem({
     id: "gh-review-comment-2",
     author: "code-factory",
-    body: `Addressed in commit \`abc123\` by the latest babysitter run.\n\n${existingItem.auditToken}`,
+    body: `Addressed in commit \`abc123\`.\n\n${existingItem.auditToken}`,
     bodyHtml: `<p>Addressed.</p><p>${existingItem.auditToken}</p>`,
     sourceId: "2",
     sourceNodeId: "PRRC_kwDO_followup",
@@ -7617,7 +7627,8 @@ test("babysitPR escalates a healing session when the repaired commit still has t
   assert.equal(attempts.length, 1);
   assert.equal(attempts[0]?.status, "verified");
   assert.ok((attempts[0]?.improvementScore ?? 1) <= 0);
-  assert.ok(postedComments.some((body) => body.includes("[patchdeck](https://github.com/jeremymcs/patchdeck) CI Alert")));
+  assert.ok(postedComments.some((body) => body.includes("[patchdeck](https://github.com/jeremymcs/patchdeck) CI needs attention")));
+  assert.ok(postedComments.some((body) => body.includes("Review the failing checks before merging.")));
   assert.ok(postedComments.every((body) => body.endsWith(APP_COMMENT_FOOTER)));
 
   const updated = await storage.getPR(pr.id);
