@@ -5,8 +5,8 @@ import { preparePrWorktree, removePrWorktree } from "./repoWorkspace";
 import type { IssueSubtask, IssueSubtaskStatus } from "@shared/schema";
 import path from "node:path";
 
-const DEFAULT_GIT_USER_NAME = "PR Babysitter";
-const DEFAULT_GIT_USER_EMAIL = "pr-babysitter@local";
+const DEFAULT_GIT_USER_NAME = "PatchDeck";
+const DEFAULT_GIT_USER_EMAIL = "patchdeck@local";
 
 export type IssueWorkPromptInput = {
   repo: string;

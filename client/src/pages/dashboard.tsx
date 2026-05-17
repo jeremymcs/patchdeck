@@ -11,6 +11,8 @@ import { StatusChip } from "@/components/detail/StatusChip";
 import { EMPTY_ACTIVITY_SNAPSHOT } from "@/components/ActivityMenu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ACTIVITY_POLL_INTERVAL_MS } from "@/lib/polling";
+import { getActivityIdleReason } from "@/lib/activityIdle";
+import { formatActivityDetail, formatActivityLabel } from "@/lib/activityDisplay";
 
 type PRBreakdown = {
   total: number;
@@ -75,6 +77,8 @@ function ActivityRow({ item, accent, leadingIcon, timeRef }: {
       ? (item.startedAt ?? item.updatedAt)
       : item.updatedAt;
   const errorMessage = accent === "destructive" ? item.lastError : null;
+  const label = formatActivityLabel(item.label);
+  const detail = formatActivityDetail(item.detail);
 
   const labelClass = accent === "destructive"
     ? "inline-flex items-center gap-1 truncate text-[12px] font-medium text-destructive"
@@ -115,12 +119,12 @@ function ActivityRow({ item, accent, leadingIcon, timeRef }: {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className={labelClass}>
           {leadingIcon}
-          {item.label}
+          {label}
         </span>
         <span className="font-mono text-[10px] text-muted-foreground">{formatRelative(timestamp)}</span>
       </div>
-      {item.detail && (
-        <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{item.detail}</div>
+      {detail && (
+        <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{detail}</div>
       )}
       {errorMessage && (
         <div
@@ -264,7 +268,7 @@ function RepoCard({ stats }: { stats: RepoStats }) {
             <StatusChip tone="destructive" label={`${prCounts.error} error`} />
           )}
           {prCounts.done > 0 && (
-            <StatusChip tone="success" label={`${prCounts.done} done`} />
+            <StatusChip tone="neutral" label={`${prCounts.done} work finished`} />
           )}
           {prCounts.watching > 0 && (
             <StatusChip tone="neutral" label={`${prCounts.watching} watching`} />
@@ -281,7 +285,13 @@ function RepoCard({ stats }: { stats: RepoStats }) {
   );
 }
 
-function DashboardActivityPanel({ activities }: { activities: ActivitySnapshot }) {
+function DashboardActivityPanel({
+  activities,
+  idleReason,
+}: {
+  activities: ActivitySnapshot;
+  idleReason?: string | null;
+}) {
   return (
     <div className="flex flex-col gap-3">
       <div id="failed-activity" className="scroll-mt-4">
@@ -316,7 +326,7 @@ function DashboardActivityPanel({ activities }: { activities: ActivitySnapshot }
       >
         <div className="max-h-48 overflow-y-auto">
           {activities.inProgress.length === 0 ? (
-            <div className="px-3 py-2 text-[12px] text-muted-foreground">No active jobs.</div>
+            <div className="px-3 py-2 text-[12px] text-muted-foreground">{idleReason ?? "No active jobs."}</div>
           ) : (
             activities.inProgress.slice(0, 8).map((item) => (
               <ActivityRow
@@ -337,7 +347,7 @@ function DashboardActivityPanel({ activities }: { activities: ActivitySnapshot }
       >
         <div className="max-h-48 overflow-y-auto">
           {activities.queued.length === 0 ? (
-            <div className="px-3 py-2 text-[12px] text-muted-foreground">Queue is empty.</div>
+            <div className="px-3 py-2 text-[12px] text-muted-foreground">{idleReason ? "No work is queued." : "Queue is empty."}</div>
           ) : (
             activities.queued.slice(0, 8).map((item) => (
               <ActivityRow key={item.id} item={item} timeRef="queuedAt" />
@@ -388,6 +398,12 @@ export default function Dashboard() {
   const activeJobs = activities.inProgress.length + activities.queued.length;
   const failedJobs = activities.failed.length;
   const failedTotal = failedPRs + failedJobs;
+  const activityIdleReason = getActivityIdleReason({
+    activities,
+    autoEnabled: config ? config.autoPrs !== false || config.autoIssues !== false : undefined,
+    trackedCount: totalPRs + totalIssues,
+    trackedLabel: "item",
+  });
 
   const isLoading = prsLoading || issuesLoading;
 
@@ -487,7 +503,7 @@ export default function Dashboard() {
                 Activity
               </div>
               <div className="mt-3">
-                <DashboardActivityPanel activities={activities} />
+                <DashboardActivityPanel activities={activities} idleReason={activityIdleReason} />
               </div>
             </aside>
           </div>

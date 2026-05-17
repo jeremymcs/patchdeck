@@ -57,15 +57,16 @@ export function toneFailedBgClass(failed: boolean): string {
 export function prStatusTone(pr: Pick<PR, "status">): StatusTone {
   if (pr.status === "error") return "destructive";
   if (pr.status === "processing") return "primary";
-  if (pr.status === "done") return "success";
+  if (pr.status === "archived") return "success";
   return "neutral";
 }
 
-export function issueRowTone(issue: Pick<Issue, "workStatus" | "workPrUrl">): StatusTone {
+export function issueRowTone(issue: Pick<Issue, "workStatus" | "workPrUrl" | "workPrMergeable">): StatusTone {
   if (issue.workStatus === "failed") return "destructive";
   if (issue.workStatus === "in_progress") return "primary";
   if (issue.workStatus === "queued") return "primary";
-  if (issue.workPrUrl) return "success";
+  if (issue.workPrMergeable === true) return "success";
+  if (issue.workPrMergeable === false) return "warning";
   return "neutral";
 }
 
@@ -84,5 +85,5 @@ export function issueEvaluationTone(status: Issue["evaluationStatus"]): StatusTo
 }
 
 export function autoWorkTone(eligible: boolean | undefined): StatusTone {
-  return eligible ? "success" : "neutral";
+  return eligible ? "primary" : "neutral";
 }

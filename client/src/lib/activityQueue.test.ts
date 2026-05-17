@@ -10,7 +10,7 @@ const snapshot: ActivitySnapshot = {
       id: "run-1",
       kind: "babysit_pr",
       status: "in_progress",
-      label: "Babysitting PR #1",
+      label: "Working PR #1",
       detail: null,
       targetId: "pr-1",
       targetUrl: null,

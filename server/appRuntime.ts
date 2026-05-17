@@ -208,7 +208,7 @@ function fallbackJobLabel(job: BackgroundJob): string {
     case "sync_watched_repos":
       return "Sync watched repositories";
     case "babysit_pr":
-      return "Babysitting PR";
+      return "Working PR";
     case "process_release_run":
       return "Processing release";
     case "answer_pr_question":
@@ -234,6 +234,14 @@ type ActivityDescriptionContext = {
   socialChangelogsById: Map<string, SocialChangelog>;
   deploymentHealingSessionsByTarget: Map<string, DeploymentHealingSession>;
 };
+
+function normalizeActivityDescription(description: ActivityDescription): ActivityDescription {
+  return {
+    ...description,
+    label: description.label.replace(/^Babysitting PR\b/, "Working PR"),
+    detail: description.detail?.replace("Refilling babysitter queue", "Refilling PR work queue") ?? null,
+  };
+}
 
 function readJobStringPayload(job: BackgroundJob, key: string): string | null {
   const value = job.payload[key];
@@ -570,7 +578,7 @@ function formatRunPhaseLabel(phase: string | null | undefined): string {
   const normalized = phase.toLowerCase();
   if (normalized.includes("sync")) return "Syncing GitHub";
   if (normalized.includes("prompt")) return "Preparing work";
-  if (normalized.includes("agent-running") || normalized.includes("working")) return "Agent running";
+  if (normalized.includes("agent-running") || normalized.includes("working")) return "Automation running";
   if (normalized.includes("verify") || normalized.includes("ci")) return "Verifying";
   if (normalized.includes("opening_pr")) return "Opening PR";
   if (normalized.includes("completed") || normalized.includes("done")) return "Run finished";
@@ -748,7 +756,7 @@ function buildCliMissingFixSteps(agentLabel: AgentLabel, command: "claude" | "co
     "For nvm installs, add the active Node bin directory to a login-shell startup file such as ~/.zprofile; for example: export PATH=\"$HOME/.nvm/versions/node/<version>/bin:$PATH\".",
     `Verify with \`command -v ${command}\` and \`$SHELL -lc "command -v ${command}"\`.`,
     "Restart patchdeck after installing.",
-    "Rerun the babysitter for this PR.",
+    "Queue PR work again.",
   ];
 }
 
@@ -757,13 +765,13 @@ const AGENT_FIX_STEPS: Record<AgentLabel, Record<AgentUnavailabilityKind, string
     auth: [
       "Run `claude auth login` on this machine.",
       "Restart patchdeck if it was launched before you refreshed credentials.",
-      "Rerun the babysitter for this PR.",
+      "Queue PR work again.",
     ],
     cli_missing: buildCliMissingFixSteps("Claude", "claude"),
     unknown_agent: [
       "Open Settings and choose a supported coding agent.",
       "Restart patchdeck if the agent setting was changed outside the app.",
-      "Rerun the babysitter for this PR.",
+      "Queue PR work again.",
     ],
   },
   Codex: {
@@ -771,13 +779,13 @@ const AGENT_FIX_STEPS: Record<AgentLabel, Record<AgentUnavailabilityKind, string
       "Run `codex login` on this machine.",
       "Check ownership and permissions for ~/.codex, especially ~/.codex/sessions, so patchdeck can access Codex session files.",
       "Restart patchdeck if it was launched before you refreshed credentials.",
-      "Rerun the babysitter for this PR.",
+      "Queue PR work again.",
     ],
     cli_missing: buildCliMissingFixSteps("Codex", "codex"),
     unknown_agent: [
       "Open Settings and choose a supported coding agent.",
       "Restart patchdeck if the agent setting was changed outside the app.",
-      "Rerun the babysitter for this PR.",
+      "Queue PR work again.",
     ],
   },
 };
@@ -1011,7 +1019,7 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
     (error) => {
       log.warn(
         { err: error instanceof Error ? error.message : String(error) },
-        "Repository babysitter watcher failed",
+        "Repository PR watcher failed",
       );
     },
   );
@@ -1805,11 +1813,12 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
 
   const describeActivityJob = (job: BackgroundJob, context: ActivityDescriptionContext): ActivityDescription => {
     const payloadDescription = readActivityPayload(job.payload);
-    if (payloadDescription) {
-      return payloadDescription;
-    }
 
     if (job.kind === "sync_watched_repos") {
+      if (payloadDescription) {
+        return normalizeActivityDescription(payloadDescription);
+      }
+
       return {
         label: "Sync watched repositories",
         detail: null,
@@ -1821,11 +1830,15 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       const pr = context.prsById.get(job.targetId);
       if (pr) {
         return {
-          label: `Babysitting PR #${pr.number}`,
+          label: `Working PR #${pr.number}`,
           detail: `${pr.repo} - ${pr.title}`,
           targetUrl: pr.url,
         };
       }
+    }
+
+    if (payloadDescription) {
+      return normalizeActivityDescription(payloadDescription);
     }
 
     if (job.kind === "answer_pr_question") {
@@ -1932,7 +1945,7 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       id: job.id,
       severity: "warning",
       title: `${failure.agentLabel} ${titleSuffix}`,
-      message: `Babysitter could not run ${failure.agentLabel} for PR #${pr.number} in ${pr.repo} because ${reason}.`,
+      message: `Automation could not run ${failure.agentLabel} for PR #${pr.number} in ${pr.repo} because ${reason}.`,
       fixSteps: failure.fixSteps,
       targetId: job.targetId,
       targetUrl: pr.url,
@@ -1978,7 +1991,7 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       {
         preferredAgent,
         ...buildActivityPayload({
-          label: `Babysitting PR #${pr.number}`,
+          label: `Working PR #${pr.number}`,
           detail: `${pr.repo} - ${pr.title}`,
           targetUrl: pr.url,
         }),
@@ -2406,7 +2419,7 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       });
 
       await storage.addLog(pr.id, "info", `Registered PR #${parsed.number} from ${repoSlug}`);
-      await storage.addLog(pr.id, "info", `Repository ${repoSlug} added to auto-babysit watch list`);
+      await storage.addLog(pr.id, "info", `Repository ${repoSlug} added to automatic PR work watch list`);
 
       if (!config.watchedRepos.includes(repoSlug)) {
         await storage.updateConfig({
@@ -2528,15 +2541,14 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       if (runtime.drainMode) {
         await rejectManualRunDuringDrain(runtime, {
           pr,
-          logMessageBase: "Manual babysitter run blocked because drain mode is enabled",
+          logMessageBase: "Manual PR work blocked because drain mode is enabled",
         });
       }
 
       const config = await storage.getConfig();
       const repoSettings = await storage.getRepoSettings(pr.repo);
       const selectedAgent = resolveRepoCodingAgent(config, repoSettings);
-      await storage.updatePR(pr.id, { status: "processing" });
-      await storage.addLog(pr.id, "info", `Launching autonomous babysitter run using ${selectedAgent}`);
+      await storage.addLog(pr.id, "info", `Queued manual PR work using ${selectedAgent}`);
       await queueBabysitForRepo(pr, config);
 
       const updated = await storage.getPR(pr.id);
@@ -2550,14 +2562,14 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       if (runtime.drainMode) {
         await rejectManualRunDuringDrain(runtime, {
           pr,
-          logMessageBase: "Manual babysitter run blocked because drain mode is enabled",
+          logMessageBase: "Manual PR work blocked because drain mode is enabled",
         });
       }
 
       const config = await storage.getConfig();
       const repoSettings = await storage.getRepoSettings(pr.repo);
       const selectedAgent = resolveRepoCodingAgent(config, repoSettings);
-      await storage.addLog(pr.id, "info", `Manual babysitter trigger using ${selectedAgent}`);
+      await storage.addLog(pr.id, "info", `Queued manual PR work using ${selectedAgent}`);
       await queueBabysitForRepo(pr, config);
 
       const updated = await storage.getPR(pr.id);

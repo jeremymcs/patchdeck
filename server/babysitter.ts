@@ -72,8 +72,8 @@ import {
   shouldResolveReviewConversation,
 } from "./feedbackLifecycle";
 
-const DEFAULT_GIT_USER_NAME = "PR Babysitter";
-const DEFAULT_GIT_USER_EMAIL = "pr-babysitter@local";
+const DEFAULT_GIT_USER_NAME = "PatchDeck";
+const DEFAULT_GIT_USER_EMAIL = "patchdeck@local";
 const AGENT_HEALTH_CACHE_TTL_MS = 60_000;
 const DEPENDENCY_PREFLIGHT_FAILURE_PREFIX = "Dependency preflight failed:";
 const DEPENDENCY_PREFLIGHT_FAILURE_KIND = "dependency_preflight";
@@ -224,17 +224,17 @@ const defaultBabysitterRuntime: BabysitterRuntime = {
 };
 
 const STATUS_MESSAGES = {
-  accepted: "\u23f3 **Accepted** — queued for a code change.",
-  agentRunning: (_agent: CodingAgent) => "\ud83e\uddf0 **In progress** — applying the accepted fix.",
+  accepted: "**Accepted** — queued for a code change.",
+  agentRunning: (_agent: CodingAgent) => "**In progress** — applying the accepted fix.",
   agentFailed: (_agent: CodingAgent, reason?: string) => reason
-    ? `\u274c **Needs attention** — automatic fix failed: ${reason}`
-    : "\u274c **Needs attention** — automatic fix failed.",
-  agentCompleted: "\u2705 **Verifying** — checking the applied changes.",
+    ? `**Needs attention** — automatic fix failed: ${reason}`
+    : "**Needs attention** — automatic fix failed.",
+  agentCompleted: "**Verifying** — checking the applied changes.",
   resolved: (headSha: string) => {
     const shortSha = headSha.trim().slice(0, 7);
     return shortSha
-      ? `\ud83c\udf89 **Resolved** — addressed in commit \`${shortSha}\`.`
-      : "\ud83c\udf89 **Resolved** — addressed in the latest update.";
+      ? `**Resolved** — addressed in commit \`${shortSha}\`.`
+      : "**Resolved** — addressed in the latest update.";
   },
 } as const;
 
@@ -778,7 +778,7 @@ function buildTerminalConflictRepairReason(params: {
     : params.baseRef || "unknown base";
   const files = params.conflictFiles.length > 0 ? params.conflictFiles.join(", ") : "the same conflict paths";
   const suffix = params.lastReason ? ` Last failure: ${params.lastReason}` : "";
-  return `Merge conflict repair failed twice for ${files} at head ${headLabel} against base ${baseLabel}; stopping automatic babysitter runs until the PR head or base changes.${suffix}`;
+  return `Merge conflict repair failed twice for ${files} at head ${headLabel} against base ${baseLabel}; stopping automatic PR work until the PR head or base changes.${suffix}`;
 }
 
 function sameStrings(left: string[], right: string[]): boolean {
@@ -1446,7 +1446,7 @@ export class PRBabysitter {
       {
         ...buildActivityPayload({
           label: "Backfilling deferred PR work",
-          detail: "Refilling babysitter queue after the active batch drains",
+          detail: "Refilling PR work queue after the active batch drains",
           targetUrl: null,
         }),
         deferredBabysitBackfill: true,
@@ -2369,7 +2369,7 @@ export class PRBabysitter {
               status: "error",
               lastChecked,
             });
-            await this.storage.addLog(local.id, "warn", "Dependency preflight previously failed for this PR head; skipping automatic babysitter run until the head changes", {
+            await this.storage.addLog(local.id, "warn", "Dependency preflight previously failed for this PR head; skipping automatic PR work until the head changes", {
               phase: "watcher",
               metadata: {
                 repo: repoSlug,
@@ -2459,7 +2459,7 @@ export class PRBabysitter {
           }
           babysitEnqueues += 1;
           inFlightBabysitJobs += 1;
-          await this.storage.addLog(local.id, "info", "Watcher queued autonomous babysitter run", {
+          await this.storage.addLog(local.id, "info", "Watcher queued automatic PR work", {
             phase: "watcher",
             metadata: { repo: repoSlug },
           });
@@ -2470,14 +2470,14 @@ export class PRBabysitter {
             {
               preferredAgent: currentConfig.codingAgent as CodingAgent,
               ...buildActivityPayload({
-                label: `Babysitting PR #${local.number}`,
+                label: `Working PR #${local.number}`,
                 detail: `${local.repo} - ${local.title}`,
                 targetUrl: local.url,
               }),
             },
           );
         } else {
-          await this.storage.addLog(local.id, "info", "Watcher queued autonomous babysitter run", {
+          await this.storage.addLog(local.id, "info", "Watcher queued automatic PR work", {
             phase: "watcher",
             metadata: { repo: repoSlug },
           });
@@ -2497,7 +2497,7 @@ export class PRBabysitter {
                 ? "concurrency cap"
                 : "per-sweep cap",
           },
-          "Deferred babysit runs to a later sweep to pace GitHub usage",
+          "Deferred PR work to a later sweep to pace GitHub usage",
         );
       }
     }
@@ -2594,7 +2594,7 @@ export class PRBabysitter {
     if (runtimeState.drainMode && !options?.allowDuringDrain) {
       const pr = await this.storage.getPR(prId);
       if (pr) {
-        await this.storage.addLog(pr.id, "warn", "Babysitter run skipped because drain mode is enabled", {
+        await this.storage.addLog(pr.id, "warn", "PR work skipped because drain mode is enabled", {
           phase: "run",
         });
       }
@@ -2609,7 +2609,7 @@ export class PRBabysitter {
         const activeAgeMs = Number.isNaN(activeStartedAtMs)
           ? null
           : Math.max(0, this.now().getTime() - activeStartedAtMs);
-        await this.storage.addLog(pr.id, "warn", "Babysitter run skipped because another run is already in progress", {
+        await this.storage.addLog(pr.id, "warn", "PR work skipped because another run is already in progress", {
           phase: "run",
           metadata: {
             reason: "in_progress",
@@ -3056,7 +3056,7 @@ export class PRBabysitter {
         prStage: "applying",
         lastChecked: new Date().toISOString(),
       });
-      await queueLog(prId, "info", `Babysitter run started using preferred agent ${preferredAgent}${recoveryMode ? " (recovery)" : ""}`, {
+      await queueLog(prId, "info", `PR work started using preferred agent ${preferredAgent}${recoveryMode ? " (recovery)" : ""}`, {
         phase: "run",
         metadata: { preferredAgent, recoveryMode },
       });
@@ -3731,7 +3731,7 @@ export class PRBabysitter {
       }
 
       if (!needsWorktree && !shouldRunCIHealingAgent && followUpTasks.length === 0 && !hasConflicts && failingCheckSnapshots.length === 0) {
-        await queueLog(pr.id, "info", `Babysitter checked PR #${pr.number}; no necessary fixes identified`, {
+        await queueLog(pr.id, "info", `Checked PR #${pr.number}; no necessary fixes identified`, {
           phase: "run",
         });
         await this.storage.updatePR(pr.id, {
@@ -3767,7 +3767,7 @@ export class PRBabysitter {
         await queueLog(
           pr.id,
           "info",
-          `Babysitter preparing fix run with ${effectiveCommentTasks.length} comment task(s), ${statusTasks.length} status task(s), ${hasDocsTask ? 1 : 0} documentation task(s), and ${followUpTasks.length} GitHub follow-up task(s)${docsAssessmentNeeded ? ", with documentation assessment" : ""}${hasConflicts ? ", plus merge conflict resolution" : ""}${shouldRunForcedReplay ? ", with forced prompt replay" : ""} using ${agent}`,
+          `Preparing PR work with ${effectiveCommentTasks.length} comment task(s), ${statusTasks.length} status task(s), ${hasDocsTask ? 1 : 0} documentation task(s), and ${followUpTasks.length} GitHub follow-up task(s)${docsAssessmentNeeded ? ", with documentation assessment" : ""}${hasConflicts ? ", plus merge conflict resolution" : ""}${shouldRunForcedReplay ? ", with forced prompt replay" : ""} using ${agent}`,
           {
             phase: "run",
             metadata: {
@@ -4225,7 +4225,7 @@ export class PRBabysitter {
                 context: "merge conflict resolution",
               });
 
-              await queueLog(pr.id, "info", "Merge conflicts resolved and committed by babysitter", {
+              await queueLog(pr.id, "info", "Merge conflicts resolved and committed by PatchDeck", {
                 phase: "conflict",
               });
             } else {
@@ -4340,7 +4340,7 @@ export class PRBabysitter {
             phase: "verify.git.status",
             context: "agent run",
           });
-          await queueLog(pr.id, "info", "Worktree is clean after babysitter finalization", {
+          await queueLog(pr.id, "info", "Worktree is clean after PR work finalization", {
             phase: "verify.git.status",
           });
 
@@ -4393,7 +4393,7 @@ export class PRBabysitter {
               cwd: worktreePath,
               timeoutMs: 120000,
               phase: "verify.git.push",
-              successMessage: `Pushed babysitter commit to ${remoteName}/${pullSummary.headRef}`,
+              successMessage: `Pushed automation commit to ${remoteName}/${pullSummary.headRef}`,
             });
             if (pushResult.code !== 0) {
               throw new Error(formatGitFailure(`pushing ${remoteName}/${pullSummary.headRef}`, pushResult));
@@ -4405,7 +4405,7 @@ export class PRBabysitter {
               args: ["-C", repoCacheDir, "fetch", remoteName, pullSummary.headRef],
               timeoutMs: 120000,
               phase: "verify.git.fetch-head",
-              successMessage: `Fetched ${remoteName}/${pullSummary.headRef} after babysitter push`,
+              successMessage: `Fetched ${remoteName}/${pullSummary.headRef} after automation push`,
             });
             if (refreshedRemoteFetch.code !== 0) {
               throw new Error(formatGitFailure(`fetching ${remoteName}/${pullSummary.headRef} after push`, refreshedRemoteFetch));
@@ -4417,7 +4417,7 @@ export class PRBabysitter {
               args: ["-C", repoCacheDir, "rev-parse", "FETCH_HEAD"],
               timeoutMs: 5000,
               phase: "verify.git.remote-head",
-              successMessage: "Collected remote PR head SHA after babysitter push",
+              successMessage: "Collected remote PR head SHA after automation push",
             });
             if (refreshedRemoteHead.code !== 0) {
               throw new Error(formatGitFailure("reading remote PR head after push", refreshedRemoteHead));
@@ -4426,7 +4426,7 @@ export class PRBabysitter {
           }
 
           if (localCommitCreated && remoteHeadSha !== localHeadSha) {
-            throw new Error("Babysitter created a local commit but could not verify it on the PR head branch");
+            throw new Error("Automation created a local commit but could not verify it on the PR head branch");
           }
 
           branchMoved = remoteHeadSha !== pullSummary.headSha;
@@ -4509,7 +4509,7 @@ export class PRBabysitter {
         await queueLog(
           pr.id,
           "info",
-          `Babysitter found ${followUpTasks.length} accepted feedback item(s) awaiting GitHub follow-up`,
+          `Found ${followUpTasks.length} accepted feedback item(s) awaiting GitHub follow-up`,
           {
             phase: "run",
             metadata: {
@@ -4865,7 +4865,7 @@ export class PRBabysitter {
         status: "watching",
         lastChecked: new Date().toISOString(),
       });
-      await queueLog(pr.id, "info", "Babysitter run complete", {
+      await queueLog(pr.id, "info", "PR work run complete", {
         phase: "run",
         metadata: { remoteName: remoteNameForLogs, branchMoved },
       });
@@ -4889,7 +4889,7 @@ export class PRBabysitter {
         // agent/processing failure. GitHub errors that happen *after* the
         // app successfully pushed code are warnings, not failures.
         const logLevel = isNonCritical ? "warn" : "error";
-        const logPrefix = isNonCritical ? "Babysitter warning" : "Babysitter error";
+        const logPrefix = isNonCritical ? "PR work warning" : "PR work error";
 
         await queueLog(currentPr.id, logLevel, `${logPrefix}: ${message}`, {
           phase: "run",
@@ -4989,9 +4989,9 @@ export class PRBabysitter {
             : "run.failed",
         lastError: finalMessage,
       });
-      log.warn({ err: finalMessage, prId }, "Babysitter failure");
+      log.warn({ err: finalMessage, prId }, "PR automation failure");
       if (error instanceof Error && error.stack) {
-        log.debug({ stack: error.stack, prId }, "Babysitter failure stack");
+        log.debug({ stack: error.stack, prId }, "PR automation failure stack");
       }
       if (options?.rethrowOnFailure && !isDependencyPreflightFailureMessage(message)) {
         throw rethrowError;

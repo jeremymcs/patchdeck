@@ -23,13 +23,16 @@ export function isFeedbackCollapsedByDefault(status: FeedbackStatus): boolean {
   return isTerminalFeedbackStatus(status) || status === "warning";
 }
 
+export function arePRFeedbackItemsResolved(items: FeedbackItem[]): boolean {
+  return items.every((item) => isTerminalFeedbackStatus(item.status));
+}
+
 /**
- * A PR is ready to merge when it has feedback items and every item
- * has reached a terminal state (resolved or rejected).
+ * Legacy feedback-only helper. Full PR readiness also requires GitHub checks,
+ * mergeability, and a non-running work state.
  */
 export function isPRReadyToMerge(items: FeedbackItem[]): boolean {
-  if (items.length === 0) return false;
-  return items.every((item) => isTerminalFeedbackStatus(item.status));
+  return items.length > 0 && arePRFeedbackItemsResolved(items);
 }
 
 export function countActiveFeedbackStatuses(items: FeedbackItem[]): {

@@ -223,7 +223,7 @@ function AutoModeButton() {
             <label htmlFor="auto-mode-prs" className="flex min-w-0 cursor-pointer flex-col">
               <span className="text-[12px] font-medium text-foreground">Pull requests</span>
               <span className="text-[10px] text-muted-foreground">
-                Watcher runs the babysitter on watched PRs. Per-repo overrides in Settings.
+                Watcher queues safe automation runs on watched PRs. Per-repo overrides live in Settings.
               </span>
             </label>
             <Switch

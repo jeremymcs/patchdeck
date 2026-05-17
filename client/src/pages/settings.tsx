@@ -925,7 +925,7 @@ export default function Settings() {
                             testIdPrefix={`tracked-repo-pr-monitor-${repo.repo.replace("/", "-")}`}
                           />
                           <div className="mt-1 text-[10px] text-muted-foreground">
-                            Manual still syncs PR status; skips auto babysit.
+                            Manual still syncs PR status; skips automatic PR work.
                           </div>
                         </div>
                         <div>
@@ -1202,7 +1202,7 @@ export default function Settings() {
                 <div>
                   <div className="text-sm">Fallback to next coding agent</div>
                   <div className="text-[11px] text-muted-foreground">
-                    If the configured agent cannot start or authenticate, retry the babysitter run with the other local agent.
+                    If the configured agent cannot start or authenticate, retry the automation run with the other local agent.
                   </div>
                 </div>
                 <input
@@ -1301,8 +1301,8 @@ export default function Settings() {
                 disabled={updateConfigMutation.isPending}
               />
               <SettingRow
-                label="Max concurrent babysit runs"
-                description="How many PRs the watcher babysits at once before queueing the rest"
+                label="Max concurrent PR work runs"
+                description="How many PRs can run at once before queueing the rest"
                 value={config?.maxConcurrentBabysitRuns ?? 3}
                 onChange={(v) => updateConfigMutation.mutate({ maxConcurrentBabysitRuns: v })}
                 defaultValue={DEFAULT_SETTING_VALUES.maxConcurrentBabysitRuns}
@@ -1689,7 +1689,7 @@ export default function Settings() {
                 <div>
                   <div className="text-sm">GitHub progress replies</div>
                   <div className="text-[11px] text-muted-foreground">
-                    Post public Accepted/running/completed status replies while the babysitter works on review comments.
+                    Post public Accepted/In progress/Verifying status replies while automation works on review comments.
                   </div>
                 </div>
                 <input

@@ -5,6 +5,7 @@ import {
   formatFeedbackStatusLabel,
   isFeedbackCollapsedByDefault,
   countActiveFeedbackStatuses,
+  arePRFeedbackItemsResolved,
   isPRReadyToMerge,
 } from "./feedbackStatus";
 
@@ -35,6 +36,10 @@ test('isFeedbackCollapsedByDefault("pending") === false', () => {
 });
 
 // isPRReadyToMerge
+test("arePRFeedbackItemsResolved returns true for empty items", () => {
+  assert.equal(arePRFeedbackItemsResolved([]), true);
+});
+
 test("isPRReadyToMerge returns false for empty items", () => {
   assert.equal(isPRReadyToMerge([]), false);
 });

@@ -131,7 +131,7 @@ export function SocialPostGenerator({
 
       {post?.status === "generating" && (
         <div className="mt-2 text-[11px] text-muted-foreground">
-          The agent is composing posts. This can take 30–120 seconds.
+          Automation is composing posts. This can take 30–120 seconds.
         </div>
       )}
 

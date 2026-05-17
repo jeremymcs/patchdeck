@@ -2,7 +2,7 @@ import { memo, useEffect, useMemo, useRef, useState, type MouseEvent, type React
 import { Link } from "wouter";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import * as Collapsible from "@radix-ui/react-collapsible";
-import { AlertTriangle, Bot, ChevronDown, ChevronUp, Loader2, PanelRightClose, PanelRightOpen, Pause, Play, PlayCircle, RefreshCw } from "lucide-react";
+import { AlertTriangle, Bot, CheckCircle2, ChevronDown, ChevronUp, CircleDashed, Loader2, PanelRightClose, PanelRightOpen, Pause, Play, PlayCircle, RefreshCw } from "lucide-react";
 import { queryClient, apiRequest, fetchJson } from "@/lib/queryClient";
 import type { ActivityItem, ActivitySnapshot, Config, FeedbackItem, HealingSession, Issue, IssueListPage, LogEntry, OperatorWarning, PR, PRQuestion, PRSummary, RuntimeState, WatchedRepo } from "@shared/schema";
 import { AppHeader } from "@/components/AppHeader";
@@ -18,6 +18,7 @@ import {
   countActiveFeedbackStatuses,
 } from "@/lib/feedbackStatus";
 import {
+  buildPRReadinessChecks,
   isPRDetailReadyToMerge,
   isPRSummaryReadyToMerge,
 } from "@/lib/prReadiness";
@@ -38,6 +39,8 @@ import { StatusChip } from "@/components/detail/StatusChip";
 import { buildPRStages } from "@/lib/stages";
 import { prStatusTone, toneRailClass } from "@/lib/statusTones";
 import { ACTIVITY_POLL_INTERVAL_MS, getUiPollIntervalMs } from "@/lib/polling";
+import { getActivityIdleReason } from "@/lib/activityIdle";
+import { formatPRWorkState } from "@/lib/statusCopy";
 
 type GitHubRateLimitState = {
   limited: boolean;
@@ -98,8 +101,8 @@ const PR_STATUS_FILTERS: { value: PrStatusFilter; label: string; testId: string 
   { value: "ready", label: "ready to merge", testId: "pr-ready-filter" },
   { value: "ci_failing", label: "ci failing", testId: "pr-ci-failing-filter" },
   { value: "attention", label: "needs attention", testId: "pr-attention-filter" },
-  { value: "processing", label: "processing", testId: "pr-processing-filter" },
-  { value: "done", label: "done", testId: "pr-done-filter" },
+  { value: "processing", label: "running", testId: "pr-processing-filter" },
+  { value: "done", label: "work finished", testId: "pr-done-filter" },
 ];
 
 function FilterChip({
@@ -139,31 +142,6 @@ function buildIssueLinkedPRIndex(issues: Issue[]): Map<string, Issue> {
     index.set(prIssueLinkKey(issue.repo, issue.workPrNumber), issue);
   }
   return index;
-}
-
-function formatStatusLabel(status: PR["status"], prStage?: PR["prStage"]): string {
-  if (status === "processing") {
-    if (prStage === "feedback_synced") return "feedback synced";
-    if (prStage === "triaged") return "triaged";
-    if (prStage === "applying") return "applying fixes";
-    if (prStage === "tests") return "running tests";
-    if (prStage === "done") return "completed";
-    return "autonomous run active";
-  }
-
-  if (status === "done") {
-    return "completed";
-  }
-
-  if (status === "error") {
-    return "attention needed";
-  }
-
-  if (status === "archived") {
-    return "archived";
-  }
-
-  return "watching";
 }
 
 function latestActivityForTarget(activities: ActivityItem[], targetId: string): ActivityItem | undefined {
@@ -355,6 +333,51 @@ function ReadyToMergeIndicator({
   );
 }
 
+function MergeReadinessChecklist({
+  checks,
+  ready,
+}: {
+  checks: ReturnType<typeof buildPRReadinessChecks>;
+  ready: boolean;
+}) {
+  return (
+    <div
+      className={`mt-2 rounded-md border px-3 py-2 text-[11px] ${
+        ready
+          ? "border-success-border bg-success-muted text-success-foreground"
+          : "border-warning-border bg-warning-muted text-warning-foreground"
+      }`}
+      data-testid="pr-merge-readiness-checklist"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="text-[10px] font-medium uppercase tracking-wider">
+          Merge readiness
+        </div>
+        <div className="rounded-md border border-current/40 px-1.5 py-0 text-[10px] uppercase tracking-wider">
+          {ready ? "ready" : "not ready"}
+        </div>
+      </div>
+      <div className="mt-2 grid gap-1 sm:grid-cols-2">
+        {checks.map((check) => (
+          <div key={check.key} className="flex min-w-0 items-start gap-1.5" data-testid="pr-readiness-check">
+            {check.passed ? (
+              <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
+            ) : (
+              <CircleDashed className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            )}
+            <span className="min-w-0">
+              <span className="block text-[11px] font-medium text-foreground">{check.label}</span>
+              <span className="block truncate text-[10px] opacity-80" title={check.detail}>
+                {check.detail}
+              </span>
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function AgentIndicator({ pr }: { pr: PRSummary }) {
   const isProcessing = pr.status === "processing";
 
@@ -472,7 +495,7 @@ const PRRow = memo(function PRRow({
               {pr.repo}
             </a>
             <span>{formatGitHubUsername(pr.author)}</span>
-            <span>{formatStatusLabel(pr.status, pr.prStage)}</span>
+            <span>{formatPRWorkState(pr.status, pr.prStage)}</span>
             <QueueStatusBadge status={queueStatus} />
             {!watchEnabled && <WatchPausedIndicator />}
             <span>{pr.accepted + pr.rejected + pr.flagged} triaged</span>
@@ -896,12 +919,14 @@ function RightPanel({
   queueStatusById,
   isCollapsed,
   onToggleCollapsed,
+  idleReason,
 }: {
   prId: string | null;
   activities: ActivitySnapshot;
   queueStatusById: Map<string, QueueStatusView>;
   isCollapsed: boolean;
   onToggleCollapsed: () => void;
+  idleReason?: string | null;
 }) {
   if (isCollapsed) {
     return (
@@ -940,7 +965,7 @@ function RightPanel({
           <span className="sr-only">Collapse activity</span>
         </button>
       </div>
-      <GlobalActivityPanel activities={activities} queueStatusById={queueStatusById} />
+      <GlobalActivityPanel activities={activities} queueStatusById={queueStatusById} idleReason={idleReason} />
       <div className="flex-1 overflow-hidden">
         <LogPanel prId={prId} />
       </div>
@@ -1249,6 +1274,24 @@ export default function Dashboard() {
     ? selectedFailedActivity?.lastError ?? getPRFeedbackFailureReason(selectedPR) ?? "Automation stopped on this PR. Check the activity log for the full failure context."
     : null;
   const activeErrorCount = activities.failed.length + activities.warnings.length;
+  const eligiblePRCount = prs.filter((pr) =>
+    pr.watchEnabled
+    && pr.status !== "processing"
+    && pr.status !== "archived"
+    && !isPRSummaryReadyToMerge(pr)
+  ).length;
+  const activityIdleReason = getActivityIdleReason({
+    activities,
+    drainMode: globalDrainMode,
+    drainReason: runtimeState?.drainReason ?? null,
+    githubRateLimited: isGitHubThrottled,
+    githubRateLimitResetAt: githubRateLimit?.resetAt ?? null,
+    autoEnabled: config?.autoPrs !== false,
+    trackedCount: prs.length,
+    eligibleCount: eligiblePRCount,
+    trackedLabel: "PR",
+  });
+  const selectedPRReadinessChecks = selectedPR ? buildPRReadinessChecks(selectedPR) : [];
 
   const applyMutation = useMutation({
     mutationFn: async (id: string) => {
@@ -1259,9 +1302,10 @@ export default function Dashboard() {
       queryClient.invalidateQueries({ queryKey: ["/api/prs"] });
       queryClient.invalidateQueries({ queryKey: ["/api/activities"] });
       queryClient.invalidateQueries({ queryKey: ["/api/logs"] });
+      toast({ description: "Queued PR work safely." });
     },
     onError: (error) => {
-      showMutationError("Could not run babysitter", error);
+      showMutationError("Could not queue PR work", error);
     },
   });
 
@@ -1344,6 +1388,13 @@ export default function Dashboard() {
       showMutationError("Could not clear issue failure", error);
     },
   });
+  const selectedPRWorkButtonLabel = (() => {
+    if (globalDrainMode) return DRAIN_PAUSED_LABEL;
+    if (applyMutation.isPending) return "Queuing safely";
+    if (selectedPRQueueStatus?.label === "running" || selectedPR?.status === "processing") return "Running";
+    if (selectedPRQueueStatus) return "Queued safely";
+    return "Queue work";
+  })();
 
   return (
     <div className="flex min-h-screen flex-col lg:h-screen lg:overflow-hidden">
@@ -1407,6 +1458,7 @@ export default function Dashboard() {
               globalDrainMode={globalDrainMode}
               queueStatusById={queueStatusById}
               pollIntervalMs={ACTIVITY_POLL_INTERVAL_MS}
+              idleReason={activityIdleReason}
             />
           </>
         )}
@@ -1426,7 +1478,7 @@ export default function Dashboard() {
       <DashboardDrainBanner runtimeState={runtimeState} />
 
       <div className="flex flex-1 flex-col overflow-hidden lg:flex-row">
-        <div className="flex max-h-[42vh] w-full shrink-0 flex-col overflow-hidden border-b border-border lg:max-h-none lg:w-[32rem] xl:w-[34rem] lg:border-b-0 lg:border-r">
+        <div className="flex max-h-[42vh] w-full shrink-0 flex-col overflow-hidden border-b border-border lg:max-h-none lg:w-[28rem] xl:w-[30rem] lg:border-b-0 lg:border-r">
           <div className="sticky top-0 z-10 flex shrink-0 border-b border-border bg-background">
             <button
               type="button"
@@ -1562,7 +1614,7 @@ export default function Dashboard() {
             <>
               {(() => {
                 const metaItems: MetaItem[] = [
-                  { key: "status", content: <span>status: <span className="text-foreground">{formatStatusLabel(selectedPR.status, selectedPR.prStage)}</span></span> },
+                  { key: "status", content: <span>work: <span className="text-foreground">{formatPRWorkState(selectedPR.status, selectedPR.prStage)}</span></span> },
                   { key: "author", content: <span>author: <span className="text-foreground/80">{formatGitHubUsername(selectedPR.author)}</span></span> },
                   { key: "items", content: <span><span className="font-mono text-foreground">{selectedPR.feedbackItems.length}</span> items</span> },
                 ];
@@ -1601,7 +1653,7 @@ export default function Dashboard() {
                   <>
                     <AgentIndicator pr={selectedPR} />
                     {!selectedPRWatchEnabled && <WatchPausedIndicator />}
-                    <StatusChip tone={prStatusTone(selectedPR)} pulsing={selectedPR.status === "processing"} label={formatStatusLabel(selectedPR.status, selectedPR.prStage)} />
+                    <StatusChip tone={prStatusTone(selectedPR)} pulsing={selectedPR.status === "processing"} label={formatPRWorkState(selectedPR.status, selectedPR.prStage)} />
                   </>
                 )}
                 externalLink={{ href: selectedPR.url, label: `${selectedPR.repo}#${selectedPR.number}` }}
@@ -1645,21 +1697,28 @@ export default function Dashboard() {
                     <button
                       type="button"
                       onClick={() => applyMutation.mutate(selectedPR.id)}
-                      disabled={applyMutation.isPending || selectedPR.status === "processing" || globalDrainMode || isGitHubThrottled}
+                      disabled={applyMutation.isPending || selectedPR.status === "processing" || Boolean(selectedPRQueueStatus) || globalDrainMode || isGitHubThrottled}
                       title={
                         globalDrainMode
                           ? DRAIN_PAUSED_TITLE
                           : isGitHubThrottled
                             ? throttledTitle
-                            : "Run babysitter now"
+                            : "Queue PR work safely"
                       }
                       data-testid="button-apply"
                       className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-primary bg-primary px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
                     >
-                      {applyMutation.isPending || selectedPR.status === "processing" ? (
-                        <><Loader2 className="h-3.5 w-3.5 animate-spin" />{selectedPR.status === "processing" ? "Running" : "Queuing"}</>
+                      {applyMutation.isPending || selectedPR.status === "processing" || selectedPRQueueStatus ? (
+                        <>
+                          {(applyMutation.isPending || selectedPR.status === "processing" || selectedPRQueueStatus?.label === "running") ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <CircleDashed className="h-3.5 w-3.5" />
+                          )}
+                          {selectedPRWorkButtonLabel}
+                        </>
                       ) : (
-                        <><PlayCircle className="h-3.5 w-3.5" />{globalDrainMode ? DRAIN_PAUSED_LABEL : "Run now"}</>
+                        <><PlayCircle className="h-3.5 w-3.5" />{selectedPRWorkButtonLabel}</>
                       )}
                     </button>
                   </>
@@ -1667,11 +1726,15 @@ export default function Dashboard() {
                 banner={(
                   <>
                     <CurrentRunStatusStrip run={selectedPR.currentRun} testId="selected-pr-current-run" />
+                    <MergeReadinessChecklist
+                      checks={selectedPRReadinessChecks}
+                      ready={isPRDetailReadyToMerge(selectedPR)}
+                    />
                     {isPRDetailReadyToMerge(selectedPR) && (
                       <ReadyToMergeIndicator
                         href={selectedPR.url}
                         testId="detail-ready-to-merge"
-                        label="All comments resolved — ready to merge"
+                        label="GitHub ready to merge"
                         hint="Open PR on GitHub →"
                         className="mt-2 gap-2 px-3 py-1.5 text-[12px] tracking-wider"
                         dotClassName="h-2 w-2"
@@ -1736,6 +1799,7 @@ export default function Dashboard() {
           queueStatusById={queueStatusById}
           isCollapsed={isActivityPanelCollapsed}
           onToggleCollapsed={() => setIsActivityPanelCollapsed((current) => !current)}
+          idleReason={activityIdleReason}
         />
       </div>
       <div className="fixed bottom-4 right-4 z-50">

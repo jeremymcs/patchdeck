@@ -31,7 +31,7 @@ export function StageProgressBar({
           const segmentClass = (() => {
             switch (stage.state) {
               case "done":
-                return "bg-success";
+                return "bg-primary/70";
               case "active":
                 return "bg-primary animate-pulse";
               case "failed":
