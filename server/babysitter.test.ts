@@ -964,6 +964,32 @@ test("syncAndBabysitTrackedRepos caps in-flight babysit_pr jobs at maxConcurrent
   await babysitter.syncAndBabysitTrackedRepos();
   const afterSecond = await storage.listBackgroundJobs({ kind: "babysit_pr", status: "queued" });
   assert.equal(afterSecond.length, 3, "already-queued babysit jobs count toward the cap");
+
+  const claimedDeferredSweep = await backgroundJobQueue.claimNext({
+    workerId: "worker-1",
+    leaseMs: 30_000,
+    now: deferredSweeps[0]?.availableAt,
+    kinds: ["sync_watched_repos"],
+  });
+  assert.equal(claimedDeferredSweep?.id, deferredSweeps[0]?.id);
+
+  await babysitter.syncAndBabysitTrackedRepos({ fullSweep: true });
+  const allDeferredJobs = await storage.listBackgroundJobs({ kind: "sync_watched_repos" });
+  const replacementDeferredSweeps = await storage.listBackgroundJobs({
+    kind: "sync_watched_repos",
+    status: "queued",
+  });
+  assert.equal(
+    replacementDeferredSweeps.length,
+    1,
+    `a running deferred sweep leaves the next refill queued when backlog remains: ${JSON.stringify(allDeferredJobs.map((job) => ({
+      id: job.id,
+      targetId: job.targetId,
+      dedupeKey: job.dedupeKey,
+      status: job.status,
+    })))}`,
+  );
+  assert.notEqual(replacementDeferredSweeps[0]?.id, deferredSweeps[0]?.id);
 });
 
 test("syncAndBabysitTrackedRepos enqueues no babysit_pr jobs while the core budget is in the reserve", async () => {

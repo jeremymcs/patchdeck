@@ -92,6 +92,7 @@ const QUIET_REPO_COOLDOWN_MS = 10 * 60_000;
 // later sweeps (babysit_pr jobs are dedupe-keyed, so nothing is lost).
 const MAX_BABYSIT_ENQUEUES_PER_SWEEP = 10;
 const DEFERRED_BABYSIT_SWEEP_DELAY_MS = 15_000;
+const DEFERRED_BABYSIT_TARGET_PREFIX = "runtime:deferred-babysit:";
 // Repos visited per non-full sweep. The PR-list fetch is a conditional GET, so
 // a quiet repo costs no rate-limit budget; visiting several per tick keeps the
 // round-robin rotation short instead of one-repo-per-tick. Actual babysit work
@@ -1352,6 +1353,7 @@ export class PRBabysitter {
   private readonly agentHealthCache = new Map<CodingAgent, { checkedAtMs: number; result: AgentHealthResult }>();
   private readonly feedbackSyncCooldownUntilMs = new Map<string, number>();
   private repoSyncCursor = 0;
+  private deferredBabysitSweepSequence = 0;
   // Per-repo open-PR list snapshot + its etag, kept together so a conditional
   // 304 always has a list to reuse. In-memory only — a restart simply
   // re-fetches once.
@@ -1383,12 +1385,22 @@ export class PRBabysitter {
       return;
     }
 
+    const queuedSweeps = await this.storage.listBackgroundJobs({
+      kind: "sync_watched_repos",
+      status: "queued",
+    });
+    if (queuedSweeps.some((job) => job.targetId.startsWith(DEFERRED_BABYSIT_TARGET_PREFIX))) {
+      return;
+    }
+
     const availableAt = new Date(this.now().getTime() + DEFERRED_BABYSIT_SWEEP_DELAY_MS);
-    const bucket = Math.floor(availableAt.getTime() / DEFERRED_BABYSIT_SWEEP_DELAY_MS);
+    const targetId = `${DEFERRED_BABYSIT_TARGET_PREFIX}${availableAt.getTime()}-${this.deferredBabysitSweepSequence++}`;
     await this.scheduleBackgroundJob(
       "sync_watched_repos",
-      `runtime:deferred-babysit:${bucket}`,
-      buildBackgroundJobDedupeKey("sync_watched_repos", `runtime:deferred-babysit:${bucket}`),
+      targetId,
+      // Deferred babysit refills need their own dedupe key so a running refill
+      // does not suppress the next queued refill while backlog remains.
+      `sync_watched_repos:${targetId}`,
       buildActivityPayload({
         label: "Backfilling deferred PR work",
         detail: "Refilling babysitter queue after the active batch drains",
