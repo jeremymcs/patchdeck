@@ -1297,6 +1297,7 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
     issue: Awaited<ReturnType<typeof fetchIssueSummary>>,
     options: {
       includePrMergeability?: boolean;
+      includeExternalPrLinks?: boolean;
       issueJobs?: BackgroundJob[];
       octokit?: Awaited<ReturnType<typeof buildOctokit>>;
       isWorked?: boolean;
@@ -1322,7 +1323,7 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
     }, evaluation);
     let externalPr: { number: number; url: string; repoFullName: string } | null = null;
     const parsedIssueRepo = parseRepoSlug(issue.repoFullName);
-    const linkedOpenPrs = options.octokit && parsedIssueRepo
+    const linkedOpenPrs = options.includeExternalPrLinks !== false && options.octokit && parsedIssueRepo
       ? await listOpenLinkedPullRequestsForIssue(options.octokit, parsedIssueRepo, issue.number)
       : [];
     if (linkedOpenPrs.length > 0) {
@@ -1492,7 +1493,8 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
 
     const synced = await storage.listSyncedIssues({ repos: config.watchedRepos, limit, offset, includeWorked: true });
     const counts = await storage.listSyncedIssueCounts({ repos: config.watchedRepos, includeWorked: true });
-    const octokit = await buildOctokit(config);
+    const issueAutomationEnabled = config.autoIssues !== false;
+    const octokit = issueAutomationEnabled ? await buildOctokit(config) : null;
     const workJobs = await storage.listBackgroundJobs({ kind: "work_issue" });
     const workJobsByTarget = new Map<string, BackgroundJob[]>();
 
@@ -1509,8 +1511,9 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       markIssueSyncSuccess(targetId, attemptedAt);
       return applyIssueWorkState(issue, {
         issueJobs: workJobsByTarget.get(targetId) ?? [],
-        includePrMergeability: record.isWorked,
-        octokit,
+        includePrMergeability: issueAutomationEnabled && record.isWorked,
+        includeExternalPrLinks: issueAutomationEnabled,
+        octokit: octokit ?? undefined,
         isWorked: record.isWorked,
       });
     }));
@@ -1545,8 +1548,20 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       throw new AppRuntimeError(404, `Repository ${canonical} is not being watched`);
     }
 
-    const octokit = await buildOctokitImpl(config);
     const targetId = formatIssueTargetId(canonical, number);
+    if (config.autoIssues === false) {
+      const cached = await storage.getSyncedIssue(canonical, number);
+      if (!cached) {
+        throw new AppRuntimeError(404, `Issue ${canonical}#${number} has not been synced yet`);
+      }
+      return applyIssueWorkState(cached.payload, {
+        includePrMergeability: false,
+        includeExternalPrLinks: false,
+        isWorked: cached.isWorked,
+      });
+    }
+
+    const octokit = await buildOctokitImpl(config);
     const attemptedAt = markIssueSyncAttempt(targetId);
     try {
       const issue = await fetchIssueSummary(octokit, { ...parsedRepo, number });
