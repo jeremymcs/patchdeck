@@ -389,6 +389,8 @@ test("issues page keeps the QA-tested issue monitor and work surface wired", asy
     ["issue ready to merge list", "issue-ready-to-merge-list"],
     ["issue work in progress list", "issue-work-in-progress-list"],
     ["issue list", "issue-list"],
+    ["load more issues button", "button-load-more-issues"],
+    ["loaded issue count", "issues-loaded-count"],
     ["issue detail logs", "issue-detail-logs"],
   ] satisfies SourceExpectation[]) {
     assertHasTestId(sourceFile, label, testId);
@@ -416,7 +418,10 @@ test("issues page keeps the QA-tested issue monitor and work surface wired", asy
   assertHasExpression(sourceFile, "issue queue helper", /\bbuildQueueStatusIndex\b/);
   assertHasExpression(sourceFile, "issue queue badge", /\bQueueStatusBadge\b/);
   assertHasExpression(sourceFile, "issue filtered list", /\bfilteredIssues\b/);
+  assertHasExpression(sourceFile, "issue pagination load more", /\bloadMoreIssues\b/);
+  assertHasExpression(sourceFile, "issue loaded count", /\bloadedIssueCount\b/);
   assertHasStringValue(sourceFile, "issue sync label", "sync");
+  assertHasStringValue(sourceFile, "issue load more label", "Load more");
   assertHasStringValue(sourceFile, "issue number search placeholder", "Search #");
   assertHasStringValue(sourceFile, "issue body label", "Issue body");
 });

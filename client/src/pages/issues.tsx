@@ -1247,6 +1247,11 @@ function IssuesPage() {
   const staleIssueCount = issues.filter((issue) =>
     (selectedRepo === "all" || issue.repo === selectedRepo) && isStaleIssue(issue)
   ).length;
+  const loadedIssueCount = issues.length;
+  const loadedScopeCount = selectedRepo === "all"
+    ? loadedIssueCount
+    : issues.filter((issue) => issue.repo === selectedRepo).length;
+  const totalScopeCount = selectedRepo === "all" ? totalIssueCount : (repoTotals[selectedRepo] ?? loadedScopeCount);
 
   return (
     <div className="flex min-h-screen flex-col lg:h-screen lg:overflow-hidden">
@@ -1255,7 +1260,16 @@ function IssuesPage() {
         active="issues"
         status={(
           <>
-            <span><span className="font-mono text-foreground">{issues.length}</span> open</span>
+            <span>
+              <span className="font-mono text-foreground">{loadedIssueCount}</span>
+              {totalIssueCount > loadedIssueCount && (
+                <>
+                  <span className="mx-1 text-muted-foreground/70">/</span>
+                  <span className="font-mono text-foreground">{totalIssueCount}</span>
+                </>
+              )}
+              {" "}open
+            </span>
             <span><span className="font-mono text-foreground">{activeIssueCount}</span> active</span>
             {runtime?.drainMode && (
               <span className="rounded-md border border-border px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
@@ -1552,7 +1566,31 @@ function IssuesPage() {
                       ))}
                     </div>
                   ))}
-                  {canLoadMore && <div ref={loadMoreSentinelRef} className="h-8 w-full" data-testid="issues-load-more-sentinel" />}
+                  {canLoadMore ? (
+                    <div ref={loadMoreSentinelRef} className="border-t border-border/60 px-4 py-3" data-testid="issues-load-more-sentinel">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                          Loaded <span className="font-mono text-foreground">{loadedScopeCount}</span>
+                          {" "}of <span className="font-mono text-foreground">{totalScopeCount}</span>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => { void loadMoreIssues(); }}
+                          disabled={isLoadingMore || globalDrainMode}
+                          data-testid="button-load-more-issues"
+                          className="inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-[10px] uppercase tracking-wider text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {isLoadingMore && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />}
+                          Load more
+                        </button>
+                      </div>
+                    </div>
+                  ) : totalIssueCount > loadedIssueCount ? (
+                    <div className="border-t border-border/60 px-4 py-3 text-[11px] uppercase tracking-wider text-muted-foreground" data-testid="issues-loaded-count">
+                      Loaded <span className="font-mono text-foreground">{loadedScopeCount}</span>
+                      {" "}of <span className="font-mono text-foreground">{totalScopeCount}</span>
+                    </div>
+                  ) : null}
                 </>
               )}
             </div>
