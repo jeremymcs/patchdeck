@@ -19,7 +19,7 @@ import { StageProgressBar } from "@/components/detail/StageProgressBar";
 import { StatusChip } from "@/components/detail/StatusChip";
 import { buildIssueStages } from "@/lib/stages";
 import { autoWorkTone, issueEvaluationTone, issueRowTone, issueWorkStatusTone, toneRailClass } from "@/lib/statusTones";
-import { getUiPollIntervalMs } from "@/lib/polling";
+import { ACTIVITY_POLL_INTERVAL_MS, getUiPollIntervalMs } from "@/lib/polling";
 
 const ISSUES_CACHE_KEY = "patchdeck:issues-cache:v2";
 const ISSUES_CACHE_MAX_AGE_MS = 5 * 60 * 1000;
@@ -741,7 +741,7 @@ function IssuesPage() {
   const globalDrainMode = runtime?.drainMode === true;
   const { data: activities = EMPTY_ACTIVITY_SNAPSHOT } = useQuery<ActivitySnapshot>({
     queryKey: ["/api/activities"],
-    refetchInterval: LIVE_POLL_INTERVAL_MS,
+    refetchInterval: ACTIVITY_POLL_INTERVAL_MS,
   });
   const { data: config } = useQuery<Config>({ queryKey: ["/api/config"] });
   const uiPollIntervalMs = getUiPollIntervalMs(config);
@@ -1410,7 +1410,7 @@ function IssuesPage() {
               isClearingFailed={clearFailedActivitiesMutation.isPending}
               globalDrainMode={Boolean(runtime?.drainMode)}
               queueStatusById={queueStatusById}
-              pollIntervalMs={config?.pollIntervalMs}
+              pollIntervalMs={ACTIVITY_POLL_INTERVAL_MS}
             />
           </>
         )}

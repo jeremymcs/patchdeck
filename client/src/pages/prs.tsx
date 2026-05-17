@@ -36,7 +36,7 @@ import { StageProgressBar } from "@/components/detail/StageProgressBar";
 import { StatusChip } from "@/components/detail/StatusChip";
 import { buildPRStages } from "@/lib/stages";
 import { prStatusTone, toneRailClass } from "@/lib/statusTones";
-import { getUiPollIntervalMs } from "@/lib/polling";
+import { ACTIVITY_POLL_INTERVAL_MS, getUiPollIntervalMs } from "@/lib/polling";
 
 type GitHubRateLimitState = {
   limited: boolean;
@@ -1152,7 +1152,7 @@ export default function Dashboard() {
 
   const { data: activities = EMPTY_ACTIVITY_SNAPSHOT } = useQuery<ActivitySnapshot>({
     queryKey: ["/api/activities"],
-    refetchInterval: 3000,
+    refetchInterval: ACTIVITY_POLL_INTERVAL_MS,
   });
   const queueStatusById = useMemo(() => buildQueueStatusIndex(activities), [activities]);
 
@@ -1400,7 +1400,7 @@ export default function Dashboard() {
               isClearingFailed={clearFailedActivitiesMutation.isPending}
               globalDrainMode={globalDrainMode}
               queueStatusById={queueStatusById}
-              pollIntervalMs={config?.pollIntervalMs}
+              pollIntervalMs={ACTIVITY_POLL_INTERVAL_MS}
             />
           </>
         )}

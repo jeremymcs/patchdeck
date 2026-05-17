@@ -2,6 +2,7 @@ import type { Config } from "@shared/schema";
 
 const DEFAULT_UI_POLL_INTERVAL_MS = 600_000;
 const MIN_UI_POLL_INTERVAL_MS = 10_000;
+export const ACTIVITY_POLL_INTERVAL_MS = 3_000;
 
 export function getUiPollIntervalMs(config?: Pick<Config, "pollIntervalMs"> | null): number {
   const configured = config?.pollIntervalMs ?? DEFAULT_UI_POLL_INTERVAL_MS;

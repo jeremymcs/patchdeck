@@ -10,6 +10,7 @@ import { DetailPanel } from "@/components/detail/DetailPanel";
 import { StatusChip } from "@/components/detail/StatusChip";
 import { EMPTY_ACTIVITY_SNAPSHOT } from "@/components/ActivityMenu";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ACTIVITY_POLL_INTERVAL_MS } from "@/lib/polling";
 
 type PRBreakdown = {
   total: number;
@@ -360,6 +361,7 @@ export default function Dashboard() {
   });
   const { data: activities = EMPTY_ACTIVITY_SNAPSHOT } = useQuery<ActivitySnapshot>({
     queryKey: ["/api/activities"],
+    refetchInterval: ACTIVITY_POLL_INTERVAL_MS,
   });
 
   const watchedRepos = config?.watchedRepos ?? [];

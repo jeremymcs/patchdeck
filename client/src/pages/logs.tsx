@@ -6,6 +6,7 @@ import { AppHeader } from "@/components/AppHeader";
 import { UpdateBanner } from "@/components/UpdateBanner";
 import type { ActivitySnapshot } from "@shared/schema";
 import { EMPTY_ACTIVITY_SNAPSHOT } from "@/components/ActivityMenu";
+import { ACTIVITY_POLL_INTERVAL_MS } from "@/lib/polling";
 
 const LEVELS = ["trace", "debug", "info", "warn", "error", "fatal"] as const;
 type Level = (typeof LEVELS)[number];
@@ -114,7 +115,7 @@ export default function Logs() {
   const [clearedRecordSeqs, setClearedRecordSeqs] = useState<Set<number>>(() => new Set());
   const { data: activities = EMPTY_ACTIVITY_SNAPSHOT } = useQuery<ActivitySnapshot>({
     queryKey: ["/api/activities"],
-    refetchInterval: 3000,
+    refetchInterval: ACTIVITY_POLL_INTERVAL_MS,
   });
 
   const recordsRef = useRef<LogRecord[]>([]);
