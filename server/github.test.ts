@@ -1193,6 +1193,33 @@ test("fetchIssueSummary normalizes direct issue metadata", async () => {
   assert.deepEqual(issue.assignees, []);
 });
 
+test("fetchIssueSummary rejects pull requests returned by the issues API", async () => {
+  const octokit = {
+    issues: {
+      get: async () => ({
+        data: {
+          number: 31,
+          title: "Fix via PR",
+          body: null,
+          html_url: "https://github.com/owner/repo/pull/31",
+          user: { login: "bob" },
+          labels: [],
+          assignees: [],
+          comments: 0,
+          created_at: "2026-05-03T17:00:00.000Z",
+          updated_at: "2026-05-03T18:00:00.000Z",
+          pull_request: { url: "https://api.github.com/repos/owner/repo/pulls/31" },
+        },
+      }),
+    },
+  };
+
+  await assert.rejects(
+    () => fetchIssueSummary(octokit as never, { owner: "owner", repo: "repo", number: 31 }),
+    /pull request/i,
+  );
+});
+
 test("addLabelsToIssue sends label names to GitHub issues", async () => {
   const calls: unknown[] = [];
   const octokit = {

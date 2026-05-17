@@ -1555,6 +1555,12 @@ export async function fetchIssueSummary(
   );
 
   const issue = response.data;
+  if (issue.pull_request) {
+    throw new GitHubIntegrationError(
+      `${formatRepoSlug(parsed)}#${parsed.number} is a pull request; add it from the PR monitor instead`,
+      400,
+    );
+  }
   return {
     number: issue.number,
     title: issue.title || `Issue #${issue.number}`,
