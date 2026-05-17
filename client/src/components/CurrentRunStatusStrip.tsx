@@ -1,5 +1,6 @@
 import { Bot, CheckCircle2, CircleDashed, Loader2, XCircle } from "lucide-react";
 import type { CurrentRunStatus } from "@shared/schema";
+import { formatCurrentRunStatus } from "@/lib/statusCopy";
 
 type CurrentRunStatusStripProps = {
   run: CurrentRunStatus | null | undefined;
@@ -38,7 +39,7 @@ export function CurrentRunStatusStrip({ run, testId }: CurrentRunStatusStripProp
     >
       <span className="inline-flex items-center gap-1 text-[10px] font-medium uppercase tracking-wider">
         <StatusIcon status={run.status} />
-        {run.status}
+        {formatCurrentRunStatus(run.status)}
       </span>
       <span className="font-medium text-foreground">{run.label}</span>
       {run.phase && <span className="font-mono text-muted-foreground">{run.phase}</span>}

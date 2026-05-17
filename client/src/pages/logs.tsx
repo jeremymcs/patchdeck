@@ -331,7 +331,7 @@ export default function Logs() {
           </div>
           <div className="max-h-56 overflow-y-auto">
             {activityItems.length === 0 ? (
-              <div className="px-2 py-2 text-[10px] text-muted-foreground">No active activity.</div>
+              <div className="px-2 py-2 text-[10px] text-muted-foreground">No automation running or queued.</div>
             ) : (
               activityItems.map((item) => (
                 <div key={item.id} className="border-b border-border/40 px-2 py-1.5 last:border-b-0">

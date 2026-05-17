@@ -1,6 +1,7 @@
 import type { ActivityItem, ActivitySnapshot } from "@shared/schema";
 import { QueueStatusBadge } from "@/components/QueueStatusBadge";
 import type { QueueStatusView } from "@/lib/activityQueue";
+import { formatActivityDetail, formatActivityLabel } from "@/lib/activityDisplay";
 
 function formatClock(timestamp: string | null): string | null {
   if (!timestamp) {
@@ -13,9 +14,11 @@ function formatClock(timestamp: string | null): string | null {
 export function GlobalActivityPanel({
   activities,
   queueStatusById,
+  idleReason,
 }: {
   activities: ActivitySnapshot;
   queueStatusById: Map<string, QueueStatusView>;
+  idleReason?: string | null;
 }) {
   const visibleActivities = [...activities.inProgress, ...activities.queued, ...activities.failed].slice(0, 5);
 
@@ -29,7 +32,9 @@ export function GlobalActivityPanel({
         </div>
       </div>
       {visibleActivities.length === 0 ? (
-        <div className="mt-2 text-[11px] text-muted-foreground">No automation running or queued.</div>
+        <div className="mt-2 text-[11px] leading-4 text-muted-foreground" data-testid="global-activity-idle-reason">
+          {idleReason ?? "No automation running or queued."}
+        </div>
       ) : (
         <div className="mt-2 space-y-1">
           {visibleActivities.map((activity) => (
@@ -52,6 +57,8 @@ function GlobalActivityRow({
   activity: ActivityItem;
   queueStatus: QueueStatusView | null;
 }) {
+  const label = formatActivityLabel(activity.label);
+  const detail = formatActivityDetail(activity.detail);
   const statusClass = activity.status === "failed"
     ? "border-destructive/50 text-destructive"
     : activity.status === "in_progress"
@@ -69,11 +76,11 @@ function GlobalActivityRow({
         <span className={`shrink-0 rounded-md border px-1.5 py-0.5 text-[9px] uppercase tracking-wider ${statusClass}`}>
           {activity.status === "in_progress" ? "running" : activity.status}
         </span>
-        <span className="min-w-0 flex-1 truncate text-[12px] text-foreground">{activity.label}</span>
+        <span className="min-w-0 flex-1 truncate text-[12px] text-foreground">{label}</span>
         {timeLabel && <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{timeLabel}</span>}
       </div>
-      {activity.detail && (
-        <div className="mt-1 truncate text-[11px] text-muted-foreground">{activity.detail}</div>
+      {detail && (
+        <div className="mt-1 truncate text-[11px] text-muted-foreground">{detail}</div>
       )}
       <div className="mt-1">
         <QueueStatusBadge status={queueStatus} />

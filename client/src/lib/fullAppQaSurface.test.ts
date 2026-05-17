@@ -283,6 +283,7 @@ test("dashboard keeps the QA-tested PR, repo, feedback, and side-panel workflows
     ["run-now action", "button-apply"],
     ["pause-resume watch action", "button-toggle-watch"],
     ["selected PR current run", "selected-pr-current-run"],
+    ["PR merge readiness checklist", "pr-merge-readiness-checklist"],
     ["CI healing panel", "panel-ci-healing"],
     ["ask agent tab", "tab-ask"],
     ["activity tab", "tab-activity"],
@@ -406,6 +407,7 @@ test("issues page keeps the QA-tested issue monitor and work surface wired", asy
     ["load more issues button", "button-load-more-issues"],
     ["loaded issue count", "issues-loaded-count"],
     ["issue detail logs", "issue-detail-logs"],
+    ["issue activity panel toggle", "button-toggle-issue-activity-panel"],
   ] satisfies SourceExpectation[]) {
     assertHasTestId(sourceFile, label, testId);
   }
@@ -439,6 +441,7 @@ test("issues page keeps the QA-tested issue monitor and work surface wired", asy
   assertHasExpression(sourceFile, "issue pagination load more", /\bloadMoreIssues\b/);
   assertHasExpression(sourceFile, "issue loaded count", /\bloadedIssueCount\b/);
   assertHasStringValue(sourceFile, "issue sync label", "sync");
+  assertHasStringValue(sourceFile, "issue queue work label", "Queue work");
   assertHasStringValue(sourceFile, "manual issue pull label", "Pull issue");
   assertHasStringValue(sourceFile, "manual PR pull label", "Pull PR");
   assertHasStringValue(sourceFile, "issue load more label", "Load more");
@@ -565,6 +568,7 @@ test("activity menu keeps the QA-tested trigger, drain note, and poll footer wir
   assertHasTestId(sourceFile, "activity menu trigger", "activity-menu-trigger");
   assertHasTestId(sourceFile, "clear failed activities", "clear-failed-activities");
   assertHasTestId(sourceFile, "activity drain note", "activity-drain-note");
+  assertHasTestId(sourceFile, "activity idle reason", "activity-idle-reason");
   assertHasTestId(sourceFile, "activity poll footer", "activity-poll-footer");
   assertHasStringValue(sourceFile, "queued drain copy", "Queued automation is paused until drain mode is disabled.");
 });

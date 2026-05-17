@@ -108,7 +108,7 @@ const TOOLS: Tool[] = [
     name: "sync_repos",
     description:
       "Force an immediate sync cycle across all watched repositories. " +
-      "Fetches the latest PR feedback from GitHub and runs the babysitter logic.",
+      "Fetches the latest PR feedback from GitHub and runs PR automation.",
     inputSchema: { type: "object", properties: {}, required: [] },
   },
 
@@ -140,7 +140,7 @@ const TOOLS: Tool[] = [
     name: "add_pr",
     description:
       "Register a GitHub pull request with PatchDeck by URL. " +
-      "PatchDeck will start watching the PR and run the babysitter.",
+      "PatchDeck will start watching the PR and queue safe PR work.",
     inputSchema: {
       type: "object",
       properties: {
@@ -205,7 +205,7 @@ const TOOLS: Tool[] = [
   {
     name: "babysit_pr",
     description:
-      "Run a full babysit cycle on a PR: sync feedback → triage → apply fixes → report. " +
+      "Run a full PR work cycle: sync feedback, triage, apply fixes, and report. " +
       "This is the highest-level operation for a single PR.",
     inputSchema: {
       type: "object",

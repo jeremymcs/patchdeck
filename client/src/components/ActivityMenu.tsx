@@ -3,6 +3,7 @@ import type { ActivityItem, ActivitySnapshot, BackgroundJobKind } from "@shared/
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { QueueStatusBadge } from "@/components/QueueStatusBadge";
 import type { QueueStatusView } from "@/lib/activityQueue";
+import { formatActivityDetail, formatActivityLabel } from "@/lib/activityDisplay";
 
 export const EMPTY_ACTIVITY_SNAPSHOT: ActivitySnapshot = {
   failed: [],
@@ -50,6 +51,8 @@ function ActivityKindBadge({ kind }: { kind: BackgroundJobKind }) {
 }
 
 function ActivityRow({ activity, queueStatus }: { activity: ActivityItem; queueStatus: QueueStatusView | null }) {
+  const label = formatActivityLabel(activity.label);
+  const detail = formatActivityDetail(activity.detail);
   const timeLabel = activity.status === "failed"
     ? formatClock(activity.updatedAt)
     : activity.status === "in_progress"
@@ -70,10 +73,10 @@ function ActivityRow({ activity, queueStatus }: { activity: ActivityItem; queueS
       <span className="min-w-0 flex-1">
         <span className="flex min-w-0 items-center gap-1.5">
           <ActivityKindBadge kind={activity.kind} />
-          <span className="min-w-0 truncate text-[12px] leading-4 text-foreground">{activity.label}</span>
+          <span className="min-w-0 truncate text-[12px] leading-4 text-foreground">{label}</span>
         </span>
-        {activity.detail && (
-          <span className="block truncate text-[11px] leading-4 text-muted-foreground">{activity.detail}</span>
+        {detail && (
+          <span className="block truncate text-[11px] leading-4 text-muted-foreground">{detail}</span>
         )}
         <div className="mt-1">
           <QueueStatusBadge status={queueStatus} />
@@ -143,6 +146,7 @@ export function ActivityMenu({
   globalDrainMode,
   queueStatusById,
   pollIntervalMs,
+  idleReason,
 }: {
   activities: ActivitySnapshot;
   onClearFailed: () => void;
@@ -150,6 +154,7 @@ export function ActivityMenu({
   globalDrainMode: boolean;
   queueStatusById: Map<string, QueueStatusView>;
   pollIntervalMs?: number;
+  idleReason?: string | null;
 }) {
   const failedCount = activities.failed.length;
   const inProgressCount = activities.inProgress.length;
@@ -197,16 +202,24 @@ export function ActivityMenu({
         <ActivitySection
           title="In progress"
           items={activities.inProgress}
-          emptyLabel="No activities running right now."
+          emptyLabel="No automation running right now."
           queueStatusById={queueStatusById}
         />
         <div className="border-t border-border" />
         <ActivitySection
           title="Queued"
           items={activities.queued}
-          emptyLabel="Queue is empty."
+          emptyLabel={idleReason ? "No work is queued." : "Queue is empty."}
           queueStatusById={queueStatusById}
         />
+        {idleReason && totalCount === 0 && (
+          <div
+            className="border-t border-border px-2 py-2 text-[11px] leading-4 text-warning-foreground"
+            data-testid="activity-idle-reason"
+          >
+            {idleReason}
+          </div>
+        )}
         {globalDrainMode && queuedCount > 0 && (
           <div
             className="border-t border-border px-2 py-2 text-[11px] text-muted-foreground"

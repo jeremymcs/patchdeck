@@ -880,7 +880,7 @@ test("syncAndBabysitTrackedRepos enqueues babysit_pr jobs when a background sche
   });
   assert.equal(jobs.length, 1);
   assert.equal(jobs[0].payload.preferredAgent, "claude");
-  assert.equal(jobs[0].payload.activityLabel, "Babysitting PR #42");
+  assert.equal(jobs[0].payload.activityLabel, "Working PR #42");
   assert.equal(jobs[0].payload.activityDetail, "octo/example - Example PR");
   assert.equal(jobs[0].payload.activityTargetUrl, pr.url);
 });
@@ -1811,7 +1811,7 @@ test("syncAndBabysitTrackedRepos skips automatic babysits when pr watch is pause
   const logs = await storage.getLogs(pr.id);
   assert.equal(updated?.watchEnabled, false);
   assert.deepEqual(babysitCalls, []);
-  assert.ok(!logs.some((log) => log.message.includes("Watcher queued autonomous babysitter run")));
+  assert.ok(!logs.some((log) => log.message.includes("Watcher queued automatic PR work")));
 });
 
 test("syncAndBabysitTrackedRepos caps feedback sync attempts per tick while automation is paused", async () => {
@@ -2048,7 +2048,7 @@ test("syncAndBabysitTrackedRepos resumes automatic babysits when pr watch is re-
 
   const logs = await storage.getLogs(pr.id);
   assert.deepEqual(babysitCalls, [pr.id]);
-  assert.ok(logs.some((log) => log.message.includes("Watcher queued autonomous babysitter run")));
+  assert.ok(logs.some((log) => log.message.includes("Watcher queued automatic PR work")));
 });
 
 test("syncAndBabysitTrackedRepos pauses automation when the selected agent is unhealthy", async () => {
@@ -2632,7 +2632,7 @@ test("babysitPR uses a CODEFACTORY_HOME worktree, passes GitHub context, and ver
   const updated = await storage.getPR(pr.id);
   const logs = await storage.getLogs(pr.id);
   const runs = await storage.listAgentRuns();
-  const fixRunLog = logs.find((log) => log.phase === "run" && log.message.includes("Babysitter preparing fix run"));
+  const fixRunLog = logs.find((log) => log.phase === "run" && log.message.includes("Preparing PR work"));
 
   assert.equal(updated?.status, "watching");
   assert.equal(updated?.accepted, 1);
@@ -2644,7 +2644,7 @@ test("babysitPR uses a CODEFACTORY_HOME worktree, passes GitHub context, and ver
   assert.ok(fixRunLog);
   assert.equal(
     fixRunLog.message,
-    "Babysitter preparing fix run with 1 comment task(s), 0 status task(s), 0 documentation task(s), and 1 GitHub follow-up task(s) using codex",
+    "Preparing PR work with 1 comment task(s), 0 status task(s), 0 documentation task(s), and 1 GitHub follow-up task(s) using codex",
   );
   assert.equal(fixRunLog.metadata?.followUpTasks, 1);
   assert.equal(fixRunLog.metadata?.docsTasks, 0);
@@ -2666,7 +2666,7 @@ test("babysitPR uses a CODEFACTORY_HOME worktree, passes GitHub context, and ver
   assert.ok(logs.some((log) => log.phase === "worktree" && log.message.includes(`Preparing worktree in ${worktreeRoot}`)));
   assert.ok(logs.some((log) => log.phase === "github.followup" && log.message.includes("GitHub follow-up complete for gh-review-comment-1")));
   assert.ok(logs.some((log) => log.phase === "verify.github" && log.message.includes("GitHub audit trail verified")));
-  assert.ok(logs.some((log) => log.phase === "run" && log.message.includes("Babysitter run complete")));
+  assert.ok(logs.some((log) => log.phase === "run" && log.message.includes("PR work run complete")));
   assert.doesNotMatch(receivedPrompt, /commit and push/i);
   assert.doesNotMatch(receivedPrompt, /git push/i);
   assert.match(receivedPrompt, /If dependencies are missing, install them/i);
@@ -3422,13 +3422,13 @@ test("babysitPR posts progress replies when GitHub progress replies are enabled"
 
     await babysitter.babysitPR(pr.id, "codex");
 
-    const expectedAcceptedLine = "\u23f3 **Accepted** \u2014 queued for a code change.";
+    const expectedAcceptedLine = "**Accepted** \u2014 queued for a code change.";
     const expectedAcceptedStatus = `${expectedAcceptedLine}\n\n${APP_COMMENT_FOOTER}`;
     const expectedFinalStatusBody = [
       expectedAcceptedLine,
-      "\ud83e\uddf0 **In progress** \u2014 applying the accepted fix.",
-      "\u2705 **Verifying** \u2014 checking the applied changes.",
-      "\ud83c\udf89 **Resolved** \u2014 addressed in commit `def456`.",
+      "**In progress** \u2014 applying the accepted fix.",
+      "**Verifying** \u2014 checking the applied changes.",
+      "**Resolved** \u2014 addressed in commit `def456`.",
       "",
       APP_COMMENT_FOOTER,
     ].join("\n");
@@ -3751,7 +3751,7 @@ test("babysitPR keeps failed GitHub progress replies concise", async () => {
     const body = statusReplyRefs.get(existingItem.id)?.body ?? "";
     assert.match(
       body,
-      /\u274c \*\*Needs attention\*\* \u2014 automatic fix failed: TypeScript check failed/,
+      /\*\*Needs attention\*\* \u2014 automatic fix failed: TypeScript check failed/,
     );
   } finally {
     delete process.env.CODEFACTORY_HOME;
@@ -3930,7 +3930,7 @@ test("babysitPR treats footerless status replies as non-actionable", async () =>
   await storage.updateConfig({ autoUpdateDocs: false });
   const statusReply = makeFeedbackItem({
     author: "octocat",
-    body: "\ud83e\uddf0 **In progress** \u2014 applying the accepted fix.",
+    body: "**In progress** \u2014 applying the accepted fix.",
     bodyHtml: "<p><strong>In progress</strong> - applying the accepted fix.</p>",
     decision: null,
     status: "pending",
@@ -6600,7 +6600,7 @@ test("babysitPR pushes a clean base merge when GitHub mergeability is stale", as
   assert.equal(updated?.status, "watching");
   assert.deepEqual(pushedCommands, [["push", "origin", "HEAD:feature/verbose"]]);
   assert.ok(logs.some((log) => log.phase === "conflict" && log.message.includes("Merge completed without conflicts")));
-  assert.ok(logs.some((log) => log.phase === "verify.git.push" && log.message.includes("Pushed babysitter commit")));
+  assert.ok(logs.some((log) => log.phase === "verify.git.push" && log.message.includes("Pushed automation commit")));
 
   delete process.env.CODEFACTORY_HOME;
 });

@@ -1,6 +1,6 @@
 import { Component, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { AlertTriangle, CheckCircle2, CircleDashed, CircleSlash, ExternalLink, Loader2, Plus, RefreshCw, ShieldCheck, Trash2, Wrench, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, CircleDashed, CircleSlash, ExternalLink, Loader2, PanelRightClose, PanelRightOpen, Plus, RefreshCw, ShieldCheck, Trash2, Wrench, X } from "lucide-react";
 import { apiRequest, fetchJson, queryClient } from "@/lib/queryClient";
 import { AppHeader } from "@/components/AppHeader";
 import { UpdateBanner } from "@/components/UpdateBanner";
@@ -19,8 +19,10 @@ import { MetaBreadcrumb, type MetaItem } from "@/components/detail/MetaBreadcrum
 import { StageProgressBar } from "@/components/detail/StageProgressBar";
 import { StatusChip } from "@/components/detail/StatusChip";
 import { buildIssueStages } from "@/lib/stages";
-import { autoWorkTone, issueEvaluationTone, issueRowTone, issueWorkStatusTone, toneRailClass } from "@/lib/statusTones";
+import { issueEvaluationTone, issueRowTone, issueWorkStatusTone, toneRailClass } from "@/lib/statusTones";
 import { ACTIVITY_POLL_INTERVAL_MS, getUiPollIntervalMs } from "@/lib/polling";
+import { getActivityIdleReason } from "@/lib/activityIdle";
+import { autoWorkStateTone, formatIssueAutoWorkState, formatIssueWorkStage } from "@/lib/statusCopy";
 
 const ISSUES_CACHE_KEY = "patchdeck:issues-cache:v2";
 const ISSUES_CACHE_MAX_AGE_MS = 5 * 60 * 1000;
@@ -186,28 +188,12 @@ function canStartIssueWork(issue: Issue): boolean {
     && Boolean(issue.autoWorkEligible);
 }
 
-function formatIssueWorkStage(issue: Issue): string {
-  const stage = issue.workStage ?? (
-    issue.workStatus === "in_progress" ? "working" : issue.workStatus
-  );
-
-  return stage.replace("_", " ");
-}
-
 function formatIssueWorkAttempt(issue: Issue): string | null {
   if (!issue.workJobId) {
     return null;
   }
 
   return `attempt ${issue.workAttemptCount ?? 1}`;
-}
-
-function formatAutoWorkState(issue: Issue): string {
-  if (issue.autoWorkEligible) {
-    return "auto eligible";
-  }
-
-  return issue.autoWorkBlockedReason ?? "manual only";
 }
 
 function formatEvaluationState(issue: Issue): string {
@@ -270,14 +256,14 @@ function issueLifecycleLabel(issue: Issue): string | null {
   }
 
   if (issue.workPrUrl && issue.workPrMergeable === false) {
-    return "re-opened after divergence";
+    return "pr needs attention";
   }
 
   if (issue.workPrUrl) {
-    return "worked, awaiting merge";
+    return null;
   }
 
-  return "worked";
+  return "work finished";
 }
 
 function shouldShowIssueAutomationState(issue: Issue): boolean {
@@ -464,7 +450,7 @@ function IssueRow({
             {verifyState && <VerifyStateBadge state={verifyState} />}
             {lifecycle && (
               <StatusChip
-                tone={lifecycle === "re-opened after divergence" ? "warning" : "success"}
+                tone={lifecycle === "pr needs attention" ? "warning" : "neutral"}
                 label={lifecycle}
                 testId="issue-lifecycle-badge"
               />
@@ -650,12 +636,18 @@ function IssueLogPanel({
   selectedKey,
   activities,
   queueStatusById,
+  idleReason,
+  isCollapsed,
+  onToggleCollapsed,
 }: {
   logs: LogEntry[];
   selected: boolean;
   selectedKey: string | null;
   activities: ActivitySnapshot;
   queueStatusById: Map<string, QueueStatusView>;
+  idleReason?: string | null;
+  isCollapsed: boolean;
+  onToggleCollapsed: () => void;
 }) {
   const [clearedLogIds, setClearedLogIds] = useState<Set<string>>(() => new Set());
   const viewLogs = useMemo(
@@ -667,17 +659,44 @@ function IssueLogPanel({
     setClearedLogIds(new Set());
   }, [selectedKey]);
 
+  if (isCollapsed) {
+    return (
+      <div className="flex h-10 w-full shrink-0 items-center justify-end border-t border-border px-2 lg:h-auto lg:w-10 lg:flex-col lg:justify-start lg:border-l lg:border-t-0 lg:px-0 lg:py-2" data-testid="issue-activity-panel-collapsed">
+        <button
+          type="button"
+          onClick={onToggleCollapsed}
+          data-testid="button-toggle-issue-activity-panel"
+          title="Expand activity"
+          className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        >
+          <PanelRightOpen className="h-3.5 w-3.5" aria-hidden="true" />
+          <span className="sr-only">Expand activity</span>
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="flex min-h-[24rem] w-full shrink-0 flex-col border-t border-border lg:min-h-0 lg:w-80 lg:border-l lg:border-t-0">
-      <div className="flex shrink-0 border-b border-border">
+      <div className="flex shrink-0 items-center border-b border-border">
         <div
           className="flex-1 bg-muted px-3 py-2 text-[11px] uppercase tracking-wider text-foreground shadow-[inset_0_-2px_0_0_hsl(var(--primary))]"
           data-testid="tab-issue-activity"
         >
           Activity
         </div>
+        <button
+          type="button"
+          onClick={onToggleCollapsed}
+          data-testid="button-toggle-issue-activity-panel"
+          title="Collapse activity"
+          className="mr-2 inline-flex h-7 w-7 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        >
+          <PanelRightClose className="h-3.5 w-3.5" aria-hidden="true" />
+          <span className="sr-only">Collapse activity</span>
+        </button>
       </div>
-      <GlobalActivityPanel activities={activities} queueStatusById={queueStatusById} />
+      <GlobalActivityPanel activities={activities} queueStatusById={queueStatusById} idleReason={idleReason} />
       <div className="flex-1 overflow-y-auto" data-testid="issue-detail-logs">
         {!selected ? (
           <div className="p-4 text-[12px] text-muted-foreground">
@@ -915,6 +934,7 @@ function IssuesPage() {
   const [manualPullNumber, setManualPullNumber] = useState("");
   const [labelInput, setLabelInput] = useState("");
   const [areErrorsRolledUp, setAreErrorsRolledUp] = useState(false);
+  const [isActivityPanelCollapsed, setIsActivityPanelCollapsed] = useState(false);
   const normalizedIssueNumberSearch = normalizeNumberSearch(issueNumberSearch);
   const manualPullRepo = selectedRepo !== "all"
     ? selectedRepo
@@ -1059,7 +1079,7 @@ function IssuesPage() {
         queryClient.invalidateQueries({ queryKey: ["/api/activities"] }),
         queryClient.invalidateQueries({ queryKey: ["/api/logs", issue.id] }),
       ]);
-      toast({ description: `Queued work for #${issue.number}.` });
+      toast({ description: `Queued issue work safely for #${issue.number}.` });
     },
     onError: (error) => {
       toast({ variant: "destructive", description: `Could not queue issue work: ${error.message}` });
@@ -1103,7 +1123,7 @@ function IssuesPage() {
         return;
       }
 
-      toast({ description: `Queued work for ${queued.length} issue${queued.length === 1 ? "" : "s"}.` });
+      toast({ description: `Queued issue work safely for ${queued.length} issue${queued.length === 1 ? "" : "s"}.` });
     },
     onError: (error) => {
       toast({ variant: "destructive", description: `Could not start issue work: ${error.message}` });
@@ -1364,6 +1384,17 @@ function IssuesPage() {
     ? loadedIssueCount
     : issues.filter((issue) => issue.repo === selectedRepo).length;
   const totalScopeCount = selectedRepo === "all" ? totalIssueCount : (repoTotals[selectedRepo] ?? loadedScopeCount);
+  const activityIdleReason = getActivityIdleReason({
+    activities,
+    drainMode: globalDrainMode,
+    drainReason: runtime?.drainReason ?? null,
+    githubRateLimited: isGitHubThrottled,
+    githubRateLimitResetAt: githubRateLimit?.resetAt ?? null,
+    autoEnabled: config?.autoIssues !== false,
+    trackedCount: totalScopeCount,
+    eligibleCount: startableVisibleIssues.length,
+    trackedLabel: "issue",
+  });
 
   return (
     <div className="flex min-h-screen flex-col lg:h-screen lg:overflow-hidden">
@@ -1425,6 +1456,7 @@ function IssuesPage() {
               globalDrainMode={Boolean(runtime?.drainMode)}
               queueStatusById={queueStatusById}
               pollIntervalMs={ACTIVITY_POLL_INTERVAL_MS}
+              idleReason={activityIdleReason}
             />
           </>
         )}
@@ -1441,7 +1473,7 @@ function IssuesPage() {
       />
 
       <div className="flex flex-1 flex-col overflow-hidden lg:flex-row">
-        <div className="flex max-h-[42vh] w-full shrink-0 flex-col overflow-hidden border-b border-border lg:max-h-none lg:w-[42rem] lg:border-b-0 lg:border-r">
+        <div className="flex max-h-[42vh] w-full shrink-0 flex-col overflow-hidden border-b border-border lg:max-h-none lg:w-[34rem] xl:w-[36rem] lg:border-b-0 lg:border-r">
           <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-2 text-[11px] uppercase tracking-wider text-muted-foreground">
             <div>
               Watched issues
@@ -1470,13 +1502,13 @@ function IssuesPage() {
                       ? throttledTitle
                       : startableVisibleIssues.length === 0
                         ? "No visible auto-eligible idle issues to start"
-                        : `Start work for ${startableVisibleIssues.length} visible issue${startableVisibleIssues.length === 1 ? "" : "s"}`
+                        : `Queue work for ${startableVisibleIssues.length} visible issue${startableVisibleIssues.length === 1 ? "" : "s"}`
                 }
                 data-testid="button-start-visible-issue-work"
                 className="inline-flex items-center gap-1 rounded-md border border-primary bg-primary px-2 py-0.5 text-[10px] uppercase tracking-wider text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {startVisibleWorkMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Wrench className="h-3 w-3" />}
-                {startVisibleWorkMutation.isPending ? "starting" : `start work (${startableVisibleIssues.length})`}
+                {startVisibleWorkMutation.isPending ? "queuing safely" : `queue work (${startableVisibleIssues.length})`}
               </button>
               <button
                 type="button"
@@ -1610,7 +1642,7 @@ function IssuesPage() {
                   : "border-border text-muted-foreground hover:border-primary/40 hover:text-primary"
               }`}
             >
-              worked ({workedIssueCount})
+              work finished ({workedIssueCount})
             </button>
             <button
               type="button"
@@ -1802,8 +1834,8 @@ function IssuesPage() {
                     {shouldShowIssueAutomationState(selectedIssue) && (
                       <>
                         <StatusChip
-                          tone={autoWorkTone(selectedIssue.autoWorkEligible)}
-                          label={formatAutoWorkState(selectedIssue)}
+                          tone={autoWorkStateTone(selectedIssue.autoWorkEligible)}
+                          label={formatIssueAutoWorkState(selectedIssue)}
                           testId="issue-auto-work-state"
                         />
                         <StatusChip
@@ -1861,13 +1893,13 @@ function IssuesPage() {
                     <button
                       type="button"
                       onClick={() => workMutation.mutate(selectedIssue)}
-                      disabled={workMutation.isPending || isActiveWorkStatus(selectedIssue.workStatus) || Boolean(runtime?.drainMode) || selectedIssueHasExternalPr}
+                      disabled={workMutation.isPending || isActiveWorkStatus(selectedIssue.workStatus) || Boolean(selectedIssueQueueStatus) || Boolean(runtime?.drainMode) || selectedIssueHasExternalPr}
                       title={
                         runtime?.drainMode
                           ? "Manual issue work is paused by drain mode"
                           : selectedIssueHasExternalPr
                             ? "Manual issue work is blocked because this issue already has a linked external PR"
-                            : "Work this issue"
+                            : "Queue this issue for work"
                       }
                       data-testid="button-work-issue"
                       className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-primary bg-primary px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
@@ -1880,7 +1912,7 @@ function IssuesPage() {
                       ) : (
                         <>
                           <Wrench className="h-3.5 w-3.5" />
-                          Work issue
+                          Queue work
                         </>
                       )}
                     </button>
@@ -2129,6 +2161,9 @@ function IssuesPage() {
           selectedKey={selectedIssue?.id ?? null}
           activities={activities}
           queueStatusById={queueStatusById}
+          idleReason={activityIdleReason}
+          isCollapsed={isActivityPanelCollapsed}
+          onToggleCollapsed={() => setIsActivityPanelCollapsed((current) => !current)}
         />
       </div>
     </div>

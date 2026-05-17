@@ -469,6 +469,31 @@ test("POST /api/prs/:id/babysit enqueues a durable babysit_pr job", async () => 
   }
 });
 
+test("POST /api/prs/:id/apply queues PR work without marking it active before lease", async () => {
+  const harness = await createHarness();
+  const pr = await seedPR(harness.storage);
+
+  try {
+    const response = await fetch(`${harness.baseUrl}/api/prs/${pr.id}/apply`, {
+      method: "POST",
+    });
+
+    assert.equal(response.status, 200);
+
+    const updated = await harness.storage.getPR(pr.id);
+    assert.equal(updated?.status, "watching");
+
+    const jobs = await harness.storage.listBackgroundJobs({
+      kind: "babysit_pr",
+      status: "queued",
+    });
+    assert.equal(jobs.length, 1);
+    assert.equal(jobs[0].targetId, pr.id);
+  } finally {
+    await harness.close();
+  }
+});
+
 for (const endpoint of ["apply", "babysit"] as const) {
   test(`POST /api/prs/:id/${endpoint} reports drain reason and records blocked manual attempt`, async () => {
     const harness = await createHarness();
@@ -499,7 +524,7 @@ for (const endpoint of ["apply", "babysit"] as const) {
       assert.ok(logs.some((log) =>
         log.level === "warn"
         && log.phase === "run"
-        && log.message.includes("Manual babysitter run blocked because drain mode is enabled")
+        && log.message.includes("Manual PR work blocked because drain mode is enabled")
         && log.message.includes("codex health check timed out")
       ));
     } finally {
@@ -689,7 +714,7 @@ test("GET /api/activities lists failed, in-progress, and queued jobs", async () 
     assert.equal(body.inProgress[0]?.id, runningJob.id);
     assert.equal(body.inProgress[0]?.kind, "babysit_pr");
     assert.equal(body.inProgress[0]?.status, "in_progress");
-    assert.equal(body.inProgress[0]?.label, "Babysitting PR #77");
+    assert.equal(body.inProgress[0]?.label, "Working PR #77");
     assert.equal(body.inProgress[0]?.detail, "acme/widgets - fix activity menu");
     assert.equal(body.inProgress[0]?.targetId, pr.id);
     assert.equal(body.inProgress[0]?.targetUrl, pr.url);
@@ -752,7 +777,7 @@ test("GET /api/activities batches PR activity metadata", async () => {
     assert.deepEqual(
       body.queued.map((item) => [item.label, item.detail, item.targetUrl]),
       [
-        ["Babysitting PR #77", "acme/widgets - fix activity menu", firstPr.url],
+        ["Working PR #77", "acme/widgets - fix activity menu", firstPr.url],
         ["Answering question for PR #78", "acme/widgets - answer follow-up", secondPr.url],
       ],
     );
@@ -934,7 +959,7 @@ test("GET /api/activities warns when a babysitter job fails from agent authentic
     assert.deepEqual(body.warnings[0]?.fixSteps, [
       "Run `claude auth login` on this machine.",
       "Restart patchdeck if it was launched before you refreshed credentials.",
-      "Rerun the babysitter for this PR.",
+      "Queue PR work again.",
     ]);
     assert.equal(body.warnings[0]?.targetId, pr.id);
     assert.equal(body.warnings[0]?.targetUrl, pr.url);
@@ -991,7 +1016,7 @@ test("GET /api/activities warns when a babysitter job fails from Codex session p
       "Run `codex login` on this machine.",
       "Check ownership and permissions for ~/.codex, especially ~/.codex/sessions, so patchdeck can access Codex session files.",
       "Restart patchdeck if it was launched before you refreshed credentials.",
-      "Rerun the babysitter for this PR.",
+      "Queue PR work again.",
     ]);
   } finally {
     await harness.close();
@@ -1052,7 +1077,7 @@ for (const agent of [
         "For nvm installs, add the active Node bin directory to a login-shell startup file such as ~/.zprofile; for example: export PATH=\"$HOME/.nvm/versions/node/<version>/bin:$PATH\".",
         `Verify with \`command -v ${agent.preferredAgent}\` and \`$SHELL -lc "command -v ${agent.preferredAgent}"\`.`,
         "Restart patchdeck after installing.",
-        "Rerun the babysitter for this PR.",
+        "Queue PR work again.",
       ]);
     } finally {
       await harness.close();

@@ -103,7 +103,7 @@ test("runtime queueBabysit enqueues a babysit job using the configured agent", a
   assert.equal(jobs.length, 1);
   assert.equal(jobs[0]?.targetId, pr.id);
   assert.equal(jobs[0]?.payload.preferredAgent, "claude");
-  assert.equal(jobs[0]?.payload.activityLabel, "Babysitting PR #42");
+  assert.equal(jobs[0]?.payload.activityLabel, "Working PR #42");
   assert.equal(jobs[0]?.payload.activityDetail, "acme/widgets - feat: add widget");
   assert.equal(jobs[0]?.payload.activityTargetUrl, pr.url);
 });

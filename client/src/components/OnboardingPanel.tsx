@@ -123,7 +123,7 @@ export function getOnboardingPanelState(status: OnboardingStatus) {
           ? "Reviewer setup preserved while GitHub checks are temporarily rate limited."
           : `Reviewer Action detected in ${reposWithReview.length} repo${reposWithReview.length === 1 ? "" : "s"}.`
         : accessibleRepos.length > 0
-          ? "Drop a Claude, Codex, or Gemini GitHub Action into a tracked repo so AI review comments appear on every new PR — PatchDeck then babysits the feedback."
+          ? "Drop a code-review GitHub Action into a tracked repo so review comments appear on every new PR. PatchDeck tracks the feedback and queues safe fixes."
           : "Track a repo first, then add a reviewer GitHub Action to it.",
       complete: workflowStepComplete,
     },
@@ -393,7 +393,7 @@ export function OnboardingPanel() {
                   <div className="space-y-2 pt-1">
                     <div className="space-y-2 border border-border bg-muted/40 px-3 py-2">
                       <p className="text-[12px] text-muted-foreground">
-                        These are GitHub Actions that run on every PR and post AI review comments. PatchDeck reads those comments, decides which need code changes, and dispatches its own agent to fix them. Different providers have different strengths — pick whichever fits your stack.
+                        These are GitHub Actions that run on every PR and post review comments. PatchDeck reads those comments, decides which need code changes, and queues safe fixes. Pick whichever review tool fits your stack.
                       </p>
                       <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px]">
                         {REVIEW_PROVIDER_GUIDES.map((provider) => (
@@ -451,7 +451,7 @@ export function OnboardingPanel() {
                   <div className="space-y-2 pt-1">
                     <div className="space-y-2 border border-border bg-muted/40 px-3 py-2">
                       <p className="text-[12px] text-muted-foreground">
-                        These are GitHub Actions that run on every PR and post AI review comments. PatchDeck reads those comments, decides which need code changes, and dispatches its own agent to fix them. Different providers have different strengths — pick whichever fits your stack.
+                        These are GitHub Actions that run on every PR and post review comments. PatchDeck reads those comments, decides which need code changes, and queues safe fixes. Pick whichever review tool fits your stack.
                       </p>
                       <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px]">
                         {REVIEW_PROVIDER_GUIDES.map((provider) => (

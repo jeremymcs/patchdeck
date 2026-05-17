@@ -79,13 +79,13 @@ test("runIssueWorkRepair commits, pushes, and verifies the issue branch", async 
       if (key === "git @/tmp/worktree config --get user.name") {
         return { stdout: "", stderr: "", code: 1 };
       }
-      if (key === "git @/tmp/worktree config user.name PR Babysitter") {
+      if (key === "git @/tmp/worktree config user.name PatchDeck") {
         return { stdout: "", stderr: "", code: 0 };
       }
       if (key === "git @/tmp/worktree config --get user.email") {
         return { stdout: "", stderr: "", code: 1 };
       }
-      if (key === "git @/tmp/worktree config user.email pr-babysitter@local") {
+      if (key === "git @/tmp/worktree config user.email patchdeck@local") {
         return { stdout: "", stderr: "", code: 0 };
       }
       if (key === "git -C /tmp/worktree status --porcelain") {
