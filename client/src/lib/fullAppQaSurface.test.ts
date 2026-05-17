@@ -575,3 +575,21 @@ test("activity menu keeps the QA-tested trigger, drain note, and poll footer wir
   assertHasTestId(sourceFile, "activity poll footer", "activity-poll-footer");
   assertHasStringValue(sourceFile, "queued drain copy", "Queued automation is paused until drain mode is disabled.");
 });
+
+test("mobile layout primitives keep narrow viewport constraints wired", async () => {
+  const { sourceFile: appHeaderSourceFile } = await parseProjectFile("client/src/components/AppHeader.tsx");
+  const { sourceFile: activityMenuSourceFile } = await parseProjectFile("client/src/components/ActivityMenu.tsx");
+  const { sourceFile: detailHeaderSourceFile } = await parseProjectFile("client/src/components/detail/DetailHeader.tsx");
+  const { sourceFile: metaBreadcrumbSourceFile } = await parseProjectFile("client/src/components/detail/MetaBreadcrumb.tsx");
+  const { sourceFile: prsSourceFile } = await parseProjectFile("client/src/pages/prs.tsx");
+  const { sourceFile: issuesSourceFile } = await parseProjectFile("client/src/pages/issues.tsx");
+
+  assertHasStringValue(appHeaderSourceFile, "mobile header tap target", /min-h-8/);
+  assertHasStringValue(activityMenuSourceFile, "mobile activity menu viewport width", /w-\[calc\(100vw-1rem\)\]/);
+  assertHasStringValue(activityMenuSourceFile, "mobile activity menu viewport height", /max-h-\[calc\(100dvh-6rem\)\]/);
+  assertHasStringValue(detailHeaderSourceFile, "mobile detail header stacks actions", /flex-col gap-3 sm:flex-row/);
+  assertHasStringValue(detailHeaderSourceFile, "mobile detail action rail scrolls", /overflow-x-auto/);
+  assertHasStringValue(metaBreadcrumbSourceFile, "mobile metadata avoids word columns", /whitespace-nowrap/);
+  assertHasStringValue(prsSourceFile, "mobile PR activity panel is viewport bounded", /max-h-\[42dvh\]/);
+  assertHasStringValue(issuesSourceFile, "mobile issue activity panel is viewport bounded", /max-h-\[42dvh\]/);
+});

@@ -677,7 +677,7 @@ function IssueLogPanel({
   }
 
   return (
-    <div className="flex min-h-[24rem] w-full shrink-0 flex-col border-t border-border lg:min-h-0 lg:w-80 lg:border-l lg:border-t-0">
+    <div className="flex max-h-[42dvh] min-h-0 w-full shrink-0 flex-col border-t border-border lg:max-h-none lg:min-h-0 lg:w-80 lg:border-l lg:border-t-0">
       <div className="flex shrink-0 items-center border-b border-border">
         <div
           className="flex-1 bg-muted px-3 py-2 text-[11px] uppercase tracking-wider text-foreground shadow-[inset_0_-2px_0_0_hsl(var(--primary))]"

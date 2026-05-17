@@ -164,7 +164,7 @@ export function ActivityMenu({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        className="inline-flex items-center gap-1 border border-border px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+        className="inline-flex min-h-8 items-center gap-1 border border-border px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background sm:min-h-0"
         aria-label="Open activity menu"
         data-testid="activity-menu-trigger"
       >
@@ -172,7 +172,7 @@ export function ActivityMenu({
         <span>activity</span>
         <span className="text-foreground">{totalCount}</span>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-80 p-0">
+      <DropdownMenuContent align="end" className="max-h-[calc(100dvh-6rem)] w-[calc(100vw-1rem)] max-w-sm overflow-y-auto p-0 sm:w-80">
         <div className="border-b border-border px-2 py-2">
           <div className="flex items-center justify-between gap-2">
             <div className="text-[12px] font-medium">Activities</div>
