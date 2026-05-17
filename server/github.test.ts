@@ -16,6 +16,7 @@ import {
   fetchPullCloseState,
   fetchPullSummary,
   formatRepoSlug,
+  getGitHubAuthStatus,
   getLatestSemverTagForRepo,
   listOpenLinkedPullRequestsForIssue,
   listOpenIssuesForRepo,
@@ -72,6 +73,29 @@ function restoreEnvValue(name: string, value: string | undefined): void {
   }
 
   process.env[name] = value;
+}
+
+function fetchAuthenticatedUserByToken(loginsByToken: Record<string, string>): typeof fetch {
+  return (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const headers = input instanceof Request
+      ? input.headers
+      : new Headers(init?.headers);
+    const auth = headers.get("authorization") ?? "";
+    const token = auth.split(/\s+/).pop() ?? "";
+    const login = loginsByToken[token];
+
+    if (!login) {
+      return new Response(JSON.stringify({ message: "Bad credentials" }), {
+        status: 401,
+        headers: { "content-type": "application/json" },
+      });
+    }
+
+    return new Response(JSON.stringify({ login }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }) as typeof fetch;
 }
 
 function makeFeedbackItem(overrides: Partial<FeedbackItem> = {}): FeedbackItem {
@@ -367,6 +391,68 @@ test("resolveGitHubAuthToken falls back to env token after configured tokens", a
   } finally {
     restoreEnvValue("GITHUB_TOKEN", original);
   }
+});
+
+test("getGitHubAuthStatus reports the active saved token account", async () => {
+  await withoutGithubTokenEnv(async () => {
+    const status = await getGitHubAuthStatus(
+      { ...config, githubTokens: ["ghp_saved_token"] },
+      {
+        ignoreCache: true,
+        requestFetch: fetchAuthenticatedUserByToken({
+          ghp_saved_token: "saved-user",
+        }),
+      },
+    );
+
+    assert.deepEqual(status, {
+      connected: true,
+      login: "saved-user",
+      source: "saved_token",
+    });
+  });
+});
+
+test("getGitHubAuthStatus reports gh auth when no configured or env token exists", async () => {
+  await withoutGithubTokenEnv(async () => {
+    const status = await getGitHubAuthStatus(
+      config,
+      {
+        ignoreCache: true,
+        runCommandFn: async () => ({ stdout: "gho_cli_token\n", stderr: "", code: 0 }),
+        requestFetch: fetchAuthenticatedUserByToken({
+          gho_cli_token: "cli-user",
+        }),
+      },
+    );
+
+    assert.deepEqual(status, {
+      connected: true,
+      login: "cli-user",
+      source: "gh_auth",
+    });
+  });
+});
+
+test("getGitHubAuthStatus reports gh auth fallback when the saved token is denied", async () => {
+  await withoutGithubTokenEnv(async () => {
+    const status = await getGitHubAuthStatus(
+      { ...config, githubTokens: ["ghp_stale_token"] },
+      {
+        ignoreCache: true,
+        runCommandFn: async () => ({ stdout: "gho_cli_token\n", stderr: "", code: 0 }),
+        requestFetch: fetchAuthenticatedUserByToken({
+          gho_cli_token: "cli-user",
+        }),
+      },
+    );
+
+    assert.deepEqual(status, {
+      connected: true,
+      login: "cli-user",
+      source: "gh_auth_fallback",
+    });
+  });
 });
 
 test("checkOnboardingStatus reads workflow files with authenticated API content calls", async () => {

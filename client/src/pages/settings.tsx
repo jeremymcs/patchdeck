@@ -87,6 +87,13 @@ type GitHubRateLimitState = {
   lastLimitedAt: string | null;
 };
 
+type GitHubAuthStatus = {
+  connected: boolean;
+  login: string | null;
+  source: "saved_token" | "env_token" | "gh_auth" | "gh_auth_fallback" | "none";
+  error?: string;
+};
+
 type GitHubTokenTestResult = {
   index: number;
   token: string;
@@ -120,6 +127,14 @@ const TOKEN_TEST_STATUS_CLASS: Record<GitHubTokenTestResult["status"], string> =
   ok: "border-success-border bg-success-muted text-success-foreground",
   throttled: "border-warning-border bg-warning-muted text-warning-foreground",
   error: "border-destructive/40 bg-destructive/10 text-destructive",
+};
+
+const GITHUB_AUTH_SOURCE_LABEL: Record<GitHubAuthStatus["source"], string> = {
+  saved_token: "saved token",
+  env_token: "GITHUB_TOKEN",
+  gh_auth: "gh auth",
+  gh_auth_fallback: "gh auth fallback",
+  none: "not configured",
 };
 
 type WatchScope = (typeof WATCH_SCOPE_OPTIONS)[number]["value"];
@@ -421,6 +436,10 @@ export default function Settings() {
     queryKey: ["/api/github-rate-limit"],
     refetchInterval: uiPollIntervalMs,
   });
+  const { data: githubAuthStatus } = useQuery<GitHubAuthStatus>({
+    queryKey: ["/api/github-auth/status"],
+    refetchInterval: uiPollIntervalMs,
+  });
   const drainStatusView = getDrainStatusView(runtimeState, runtimeStateIsError);
   const globalDrainMode = runtimeState?.drainMode === true;
 
@@ -455,6 +474,7 @@ export default function Settings() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/config"] });
       queryClient.invalidateQueries({ queryKey: ["/api/onboarding/status"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/github-auth/status"] });
       toast({ description: "Settings saved." });
     },
     onError: (error) => {
@@ -500,6 +520,7 @@ export default function Settings() {
       return res.json() as Promise<GitHubTokenTestResponse>;
     },
     onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/github-auth/status"] });
       const entries: GitHubTokenTestLogEntry[] = result.results.length === 0
         ? [{ kind: "info", message: "No configured GitHub tokens to test." }]
         : result.results.map((data) => ({ kind: "result", data }));
@@ -1396,6 +1417,25 @@ export default function Settings() {
 
                 <SettingsSubsection id="delivery-github" title="GitHub">
             <div className="flex flex-col gap-4 rounded-md border border-border p-4">
+              <div
+                className="flex flex-col gap-2 border border-border/80 bg-background/40 p-3 sm:flex-row sm:items-center sm:justify-between"
+                data-testid="github-auth-status"
+              >
+                <div className="min-w-0">
+                  <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Active account</div>
+                  <div className="truncate font-mono text-sm">
+                    {githubAuthStatus?.connected && githubAuthStatus.login
+                      ? `@${githubAuthStatus.login}`
+                      : "not connected"}
+                  </div>
+                  {githubAuthStatus?.error ? (
+                    <div className="mt-1 text-[11px] text-destructive">{githubAuthStatus.error}</div>
+                  ) : null}
+                </div>
+                <div className="shrink-0 text-[11px] text-muted-foreground">
+                  source: <span className="font-mono text-foreground">{GITHUB_AUTH_SOURCE_LABEL[githubAuthStatus?.source ?? "none"]}</span>
+                </div>
+              </div>
               <div className="flex flex-col gap-3">
                 <div className="flex items-center justify-between gap-3">
                   <div>

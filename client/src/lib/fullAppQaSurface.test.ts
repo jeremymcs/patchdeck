@@ -449,6 +449,7 @@ test("settings keeps the QA-tested configuration, token, and runtime controls wi
   assertHasQueryKey(sourceFile, "settings config query", "/api/config");
   assertHasQueryKey(sourceFile, "runtime query", "/api/runtime");
   assertHasQueryKey(sourceFile, "repo settings query", "/api/repos/settings");
+  assertHasQueryKey(sourceFile, "GitHub auth status query", "/api/github-auth/status");
   assertHasApiRequest(sourceFile, "config mutation", "PATCH", "/api/config");
   assertHasApiRequest(sourceFile, "drain mutation", "POST", "/api/runtime/drain");
   assertHasApiRequest(sourceFile, "add PR mutation", "POST", "/api/prs");
@@ -496,6 +497,7 @@ test("settings keeps the QA-tested configuration, token, and runtime controls wi
     /testIdPrefix=\{`tracked-repo-issue-work-mode-\$\{repo\.repo\.replace\(\s*["']\/["']\s*,\s*["']-["']\s*\)\}`\}/,
   );
   assertHasExpression(sourceFile, "ordered GitHub tokens", /\bgithubTokens\b/);
+  assertHasTestId(sourceFile, "GitHub auth status", "github-auth-status");
   assertHasExpression(sourceFile, "repo sync drain guard", /disabled=\{syncReposMutation\.isPending \|\| globalDrainMode\}/);
   assertHasStringValue(sourceFile, "repo sync button label", "Sync");
 });
