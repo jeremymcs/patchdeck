@@ -12,6 +12,7 @@ import { QueueStatusBadge } from "@/components/QueueStatusBadge";
 import { CurrentRunStatusStrip } from "@/components/CurrentRunStatusStrip";
 import { ActivityMenu, EMPTY_ACTIVITY_SNAPSHOT } from "@/components/ActivityMenu";
 import { DashboardErrorsPanel } from "@/components/DashboardErrorsPanel";
+import { GlobalActivityPanel } from "@/components/GlobalActivityPanel";
 import { DetailHeader } from "@/components/detail/DetailHeader";
 import { DetailPanel } from "@/components/detail/DetailPanel";
 import { MetaBreadcrumb, type MetaItem } from "@/components/detail/MetaBreadcrumb";
@@ -19,7 +20,7 @@ import { StageProgressBar } from "@/components/detail/StageProgressBar";
 import { StatusChip } from "@/components/detail/StatusChip";
 import { buildIssueStages } from "@/lib/stages";
 import { autoWorkTone, issueEvaluationTone, issueRowTone, issueWorkStatusTone, toneRailClass } from "@/lib/statusTones";
-import { getUiPollIntervalMs } from "@/lib/polling";
+import { ACTIVITY_POLL_INTERVAL_MS, getUiPollIntervalMs } from "@/lib/polling";
 
 const ISSUES_CACHE_KEY = "patchdeck:issues-cache:v2";
 const ISSUES_CACHE_MAX_AGE_MS = 5 * 60 * 1000;
@@ -92,6 +93,11 @@ function formatDateTime(value: string | null | undefined): string {
     hour: "numeric",
     minute: "2-digit",
   });
+}
+
+function formatGitHubUsername(username?: string | null): string {
+  const normalized = username?.trim().replace(/^@/, "");
+  return normalized ? `@${normalized}` : "@unknown";
 }
 
 function formatBodyPreview(body: string | null | undefined): string {
@@ -440,7 +446,7 @@ function IssueRow({
             {issue.repo} <span className="font-mono text-foreground/70">#{issue.number}</span>
           </div>
           <div className="mt-0.5 text-[11px] text-muted-foreground">
-            by {issue.author || "unknown"}
+            by {formatGitHubUsername(issue.author)}
           </div>
           <div className="mt-1 line-clamp-2 text-[12px] leading-5 text-muted-foreground">
             {formatBodyPreview(issue.body)}
@@ -638,7 +644,29 @@ function IssueLogRow({ entry }: { entry: LogEntry }) {
   );
 }
 
-function IssueLogPanel({ logs, selected }: { logs: LogEntry[]; selected: boolean }) {
+function IssueLogPanel({
+  logs,
+  selected,
+  selectedKey,
+  activities,
+  queueStatusById,
+}: {
+  logs: LogEntry[];
+  selected: boolean;
+  selectedKey: string | null;
+  activities: ActivitySnapshot;
+  queueStatusById: Map<string, QueueStatusView>;
+}) {
+  const [clearedLogIds, setClearedLogIds] = useState<Set<string>>(() => new Set());
+  const viewLogs = useMemo(
+    () => logs.filter((log) => !clearedLogIds.has(log.id)),
+    [clearedLogIds, logs],
+  );
+
+  useEffect(() => {
+    setClearedLogIds(new Set());
+  }, [selectedKey]);
+
   return (
     <div className="flex min-h-[24rem] w-full shrink-0 flex-col border-t border-border lg:min-h-0 lg:w-80 lg:border-l lg:border-t-0">
       <div className="flex shrink-0 border-b border-border">
@@ -649,6 +677,7 @@ function IssueLogPanel({ logs, selected }: { logs: LogEntry[]; selected: boolean
           Activity
         </div>
       </div>
+      <GlobalActivityPanel activities={activities} queueStatusById={queueStatusById} />
       <div className="flex-1 overflow-y-auto" data-testid="issue-detail-logs">
         {!selected ? (
           <div className="p-4 text-[12px] text-muted-foreground">
@@ -658,8 +687,26 @@ function IssueLogPanel({ logs, selected }: { logs: LogEntry[]; selected: boolean
           <div className="p-4 text-[12px] text-muted-foreground">
             No workflow logs yet.
           </div>
+        ) : viewLogs.length === 0 ? (
+          <div className="p-4 text-[12px] text-muted-foreground">
+            View cleared. New log entries will appear here.
+          </div>
         ) : (
-          logs.map((entry) => <IssueLogRow key={entry.id} entry={entry} />)
+          <>
+            <div className="flex items-center justify-between gap-2 border-b border-border/60 px-3 py-2">
+              <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                {viewLogs.length} visible
+              </span>
+              <button
+                type="button"
+                onClick={() => setClearedLogIds(new Set(logs.map((log) => log.id)))}
+                className="cursor-pointer rounded-md border border-border bg-transparent px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground transition-colors hover:border-foreground/30 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              >
+                Clear view
+              </button>
+            </div>
+            {viewLogs.map((entry) => <IssueLogRow key={entry.id} entry={entry} />)}
+          </>
         )}
       </div>
     </div>
@@ -708,7 +755,7 @@ function IssuesPage() {
   const globalDrainMode = runtime?.drainMode === true;
   const { data: activities = EMPTY_ACTIVITY_SNAPSHOT } = useQuery<ActivitySnapshot>({
     queryKey: ["/api/activities"],
-    refetchInterval: LIVE_POLL_INTERVAL_MS,
+    refetchInterval: ACTIVITY_POLL_INTERVAL_MS,
   });
   const { data: config } = useQuery<Config>({ queryKey: ["/api/config"] });
   const uiPollIntervalMs = getUiPollIntervalMs(config);
@@ -1377,7 +1424,7 @@ function IssuesPage() {
               isClearingFailed={clearFailedActivitiesMutation.isPending}
               globalDrainMode={Boolean(runtime?.drainMode)}
               queueStatusById={queueStatusById}
-              pollIntervalMs={config?.pollIntervalMs}
+              pollIntervalMs={ACTIVITY_POLL_INTERVAL_MS}
             />
           </>
         )}
@@ -1715,7 +1762,7 @@ function IssuesPage() {
               {(() => {
                 const metaItems: MetaItem[] = [
                   { key: "repo", content: <span>{selectedIssue.repo} <span className="font-mono text-foreground/80">#{selectedIssue.number}</span></span> },
-                  { key: "author", content: <span>author: <span className="text-foreground/80">{selectedIssue.author || "unknown"}</span></span> },
+                  { key: "author", content: <span>author: <span className="text-foreground/80">{formatGitHubUsername(selectedIssue.author)}</span></span> },
                   { key: "comments", content: <span>comments: <span className="font-mono text-foreground/80">{selectedIssue.comments}</span></span> },
                   { key: "updated", content: <span>updated <span className="font-mono">{formatDateTime(selectedIssue.updatedAt)}</span></span> },
                 ];
@@ -2076,7 +2123,13 @@ function IssuesPage() {
           )}
         </div>
 
-        <IssueLogPanel logs={issueLogs} selected={Boolean(selectedIssue)} />
+        <IssueLogPanel
+          logs={issueLogs}
+          selected={Boolean(selectedIssue)}
+          selectedKey={selectedIssue?.id ?? null}
+          activities={activities}
+          queueStatusById={queueStatusById}
+        />
       </div>
     </div>
   );

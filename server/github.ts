@@ -462,7 +462,7 @@ export function buildFeedbackAuditToken(feedbackId: string): string {
 const APP_COMMENT_FOOTER_PATTERN = /Posted by \[[^\]]+\]\(https:\/\/github\.com\/jeremymcs\/patchdeck\)/i;
 const AGENT_COMMAND_COMMENT_MARKER = "<!-- codefactory-agent-command -->";
 const AUDIT_TRAIL_COMMENT_PATTERN = /<!--\s*codefactory-feedback:[^>]+-->/i;
-export const APP_STATUS_COMMENT_PATTERN = /\*\*(?:Accepted|Agent running|Agent failed|Agent completed|Resolved)\*\*\s*(?:[—-]|$)/i;
+export const APP_STATUS_COMMENT_PATTERN = /\*\*(?:Accepted|Agent running|Agent failed|Agent completed|In progress|Needs attention|Verifying|Resolved)\*\*\s*(?:[—-]|$)/i;
 
 function classifyNonActionableAppFeedback(body: string): string | null {
   if (body.includes(AGENT_COMMAND_COMMENT_MARKER)) {

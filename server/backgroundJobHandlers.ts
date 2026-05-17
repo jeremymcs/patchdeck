@@ -124,10 +124,13 @@ export function createBackgroundJobHandlers(params: {
 
   return {
     sync_watched_repos: babysitter
-      ? async () => {
+      ? async (job) => {
         // The routine sweep runs at low priority so it yields core REST
         // budget to interactive routes and active babysitter sessions.
-        await runWithRequestPriority("low", () => babysitter.syncAndBabysitTrackedRepos());
+        const fullSweep = job.payload.deferredBabysitBackfill === true;
+        await runWithRequestPriority("low", () => babysitter.syncAndBabysitTrackedRepos(
+          fullSweep ? { fullSweep: true } : undefined,
+        ));
       }
       : undefined,
 

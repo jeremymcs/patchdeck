@@ -271,6 +271,7 @@ test("full app QA route matrix is wired through the hash router", async () => {
 
 test("dashboard keeps the QA-tested PR, repo, feedback, and side-panel workflows wired", async () => {
   const { sourceFile } = await parseProjectFile("client/src/pages/prs.tsx");
+  const { sourceFile: globalActivitySourceFile } = await parseProjectFile("client/src/components/GlobalActivityPanel.tsx");
   const { sourceFile: dashboardErrorsSourceFile } = await parseProjectFile("client/src/components/DashboardErrorsPanel.tsx");
 
   for (const [label, testId] of [
@@ -336,6 +337,10 @@ test("dashboard keeps the QA-tested PR, repo, feedback, and side-panel workflows
   assertHasStringValue(sourceFile, "PR number search placeholder", "Search #");
   assertHasExpression(sourceFile, "issue-linked PR index", /\bbuildIssueLinkedPRIndex\b/);
   assertHasStringValue(sourceFile, "linked issues tab label", /Linked Issues \(/);
+  assertHasTestId(globalActivitySourceFile, "global activity panel", "global-activity-panel");
+  assertHasTestId(globalActivitySourceFile, "global activity row", "global-activity-row");
+  assertHasStringValue(globalActivitySourceFile, "global activity heading", "Automation");
+  assertHasStringValue(globalActivitySourceFile, "global activity empty state", "No automation running or queued.");
   assertHasStringValue(sourceFile, "dashboard sync label", "sync");
   assertHasStringValue(sourceFile, "drain mode action label", "Paused by drain mode");
   assertHasStringValue(sourceFile, "blocked manual copy", "Manual runs are blocked while global automation is paused.");
@@ -348,6 +353,7 @@ test("dashboard keeps the QA-tested PR, repo, feedback, and side-panel workflows
   assertHasExpression(sourceFile, "dashboard issues drain guard", /enabled: runtimeState !== undefined && !globalDrainMode/);
   assertHasExpression(sourceFile, "dashboard active error count", /\bactiveErrorCount\b/);
   assertHasExpression(sourceFile, "dashboard errors roll-up state", /\bareErrorsRolledUp\b/);
+  assertHasExpression(sourceFile, "global automation panel", /\bGlobalActivityPanel\b/);
 });
 
 test("issues page keeps the QA-tested issue monitor and work surface wired", async () => {
@@ -408,7 +414,7 @@ test("issues page keeps the QA-tested issue monitor and work surface wired", asy
   assertHasExpression(sourceFile, "issue work logs", /\bissueLogs\b/);
   assertHasExpression(sourceFile, "issue body html rendering", /\bbodyHtml\b/);
   assertHasExpression(sourceFile, "issue markdown class", /issue-markdown/);
-  assertHasExpression(sourceFile, "issue author line", /by\s+\{issue\.author\s*\|\|\s*["']unknown["']\}/);
+  assertHasExpression(sourceFile, "issue author line", /by\s+\{formatGitHubUsername\(issue\.author\)\}/);
   assertHasExpression(sourceFile, "issue log metadata chips", /\bgetLogMetadataEntries\b/);
   assertHasExpression(sourceFile, "issue work pr field", /\bworkPrUrl\b/);
   assertHasExpression(sourceFile, "issue work stage field", /\bworkStage\b/);
@@ -427,6 +433,7 @@ test("issues page keeps the QA-tested issue monitor and work surface wired", asy
   assertHasExpression(sourceFile, "issue PR mergeability", /\bworkPrMergeable\b/);
   assertHasExpression(sourceFile, "issue queue helper", /\bbuildQueueStatusIndex\b/);
   assertHasExpression(sourceFile, "issue queue badge", /\bQueueStatusBadge\b/);
+  assertHasExpression(sourceFile, "issue activity automation panel", /\bGlobalActivityPanel\b/);
   assertHasExpression(sourceFile, "issue current run strip", /\bCurrentRunStatusStrip\b/);
   assertHasExpression(sourceFile, "issue filtered list", /\bfilteredIssues\b/);
   assertHasExpression(sourceFile, "issue pagination load more", /\bloadMoreIssues\b/);
@@ -517,6 +524,7 @@ test("logs route keeps the QA-tested filtering, streaming, copy, and download su
   assertHasJsxAttribute(sourceFile, "id", "source filter", "logs-source");
   assertHasJsxAttribute(sourceFile, "type", "search input", "search");
   assertHasStringValue(sourceFile, "follow tail toggle", "follow tail");
+  assertHasStringValue(sourceFile, "clear view action", "clear view");
   assertHasExpression(sourceFile, "copy action", /navigator\.clipboard\.writeText/);
   assertHasExpression(sourceFile, "download action", /patchdeck-logs-/);
 });

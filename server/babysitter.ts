@@ -91,6 +91,8 @@ const QUIET_REPO_COOLDOWN_MS = 10 * 60_000;
 // cold-start burst on a repo with hundreds of open PRs; the rest backfill on
 // later sweeps (babysit_pr jobs are dedupe-keyed, so nothing is lost).
 const MAX_BABYSIT_ENQUEUES_PER_SWEEP = 10;
+const DEFERRED_BABYSIT_SWEEP_DELAY_MS = 15_000;
+const DEFERRED_BABYSIT_TARGET_PREFIX = "runtime:deferred-babysit:";
 // Repos visited per non-full sweep. The PR-list fetch is a conditional GET, so
 // a quiet repo costs no rate-limit budget; visiting several per tick keeps the
 // round-robin rotation short instead of one-repo-per-tick. Actual babysit work
@@ -222,17 +224,17 @@ const defaultBabysitterRuntime: BabysitterRuntime = {
 };
 
 const STATUS_MESSAGES = {
-  accepted: "\u23f3 **Accepted** — this comment requires code changes. Queuing fix...",
-  agentRunning: (agent: CodingAgent) => `\ud83e\uddf0 **Agent running** — \`${agent}\` is working on the fix...`,
-  agentFailed: (agent: CodingAgent, reason?: string) => reason
-    ? `\u274c **Agent failed** — \`${agent}\` exited with an error: ${reason}`
-    : `\u274c **Agent failed** — \`${agent}\` exited with an error.`,
-  agentCompleted: "\u2705 **Agent completed** — verifying changes...",
+  accepted: "\u23f3 **Accepted** — queued for a code change.",
+  agentRunning: (_agent: CodingAgent) => "\ud83e\uddf0 **In progress** — applying the accepted fix.",
+  agentFailed: (_agent: CodingAgent, reason?: string) => reason
+    ? `\u274c **Needs attention** — automatic fix failed: ${reason}`
+    : "\u274c **Needs attention** — automatic fix failed.",
+  agentCompleted: "\u2705 **Verifying** — checking the applied changes.",
   resolved: (headSha: string) => {
     const shortSha = headSha.trim().slice(0, 7);
     return shortSha
       ? `\ud83c\udf89 **Resolved** — addressed in commit \`${shortSha}\`.`
-      : "\ud83c\udf89 **Resolved** — addressed in the latest babysitter run.";
+      : "\ud83c\udf89 **Resolved** — addressed in the latest update.";
   },
 } as const;
 
@@ -1049,8 +1051,8 @@ function buildFeedbackFollowUpBody(
 ): string {
   const shortSha = headSha.trim() ? headSha.trim().slice(0, 7) : "";
   const headline = shortSha
-    ? `Addressed in commit \`${shortSha}\` by the latest babysitter run.`
-    : "Addressed in the latest babysitter run.";
+    ? `Addressed in commit \`${shortSha}\`.`
+    : "Addressed in the latest update.";
 
   const parts = [headline];
 
@@ -1085,29 +1087,57 @@ function buildFeedbackFollowUpBody(
 
 const CODEFACTORY_COMMENT_MARKER = "<!-- codefactory-agent-command -->";
 
-function buildCodeFence(content: string): { open: string; close: string } {
-  let maxRun = 0;
-  const backtickRuns = content.match(/`{3,}/g);
-  if (backtickRuns) {
-    for (const run of backtickRuns) {
-      if (run.length > maxRun) maxRun = run.length;
-    }
-  }
-  const fence = "`".repeat(Math.max(3, maxRun + 1));
-  return { open: `${fence}text`, close: fence };
-}
-
 function isCodeFactoryComment(body: string): boolean {
   return body.includes(CODEFACTORY_COMMENT_MARKER);
 }
 
+function extractConflictFilesFromPrompt(prompt: string): string[] {
+  const lines = prompt.split(/\r?\n/);
+  const start = lines.findIndex((line) => line.trim() === "The following files have merge conflicts:");
+  if (start === -1) {
+    return [];
+  }
+
+  const files: string[] = [];
+  for (const line of lines.slice(start + 1)) {
+    if (!line.startsWith("  - ")) {
+      break;
+    }
+
+    const file = line.slice(4).trim();
+    if (file) {
+      files.push(file);
+    }
+  }
+
+  return files;
+}
+
+function formatPublicAgentCommandDetails(prompt: string): string[] {
+  const conflictFiles = extractConflictFilesFromPrompt(prompt);
+  if (conflictFiles.length > 0) {
+    return [
+      "Merge conflicts were detected while updating this branch from the base branch.",
+      "",
+      "Conflicted files:",
+      ...conflictFiles.map((file) => `- \`${file}\``),
+      "",
+      "An automatic resolution attempt is running. If it cannot complete safely, this PR will be marked for manual follow-up.",
+    ];
+  }
+
+  return [
+    "Accepted review feedback is being applied.",
+    "Progress and final results will be posted in the related review thread(s).",
+  ];
+}
+
 export function formatAgentCommandGitHubComment(
-  agent: CodingAgent,
+  _agent: CodingAgent,
   prompt: string,
   includeRepositoryLinksInGitHubComments: boolean,
   githubCommentAppName: string,
 ): string {
-  const fence = buildCodeFence(prompt);
   const appName = formatAppName(githubCommentAppName, includeRepositoryLinksInGitHubComments);
   const footer = formatIncludedAppCommentFooter(
     includeRepositoryLinksInGitHubComments,
@@ -1116,17 +1146,10 @@ export function formatAgentCommandGitHubComment(
   return [
     CODEFACTORY_COMMENT_MARKER,
     appName
-      ? `\ud83e\udd16 **${appName}** dispatched \`${agent}\` with the following prompt:`
-      : `\ud83e\udd16 Dispatched \`${agent}\` with the following prompt:`,
+      ? `**${appName}** started an automated PR update.`
+      : "Started an automated PR update.",
     "",
-    "<details>",
-    "<summary>Agent prompt (click to expand)</summary>",
-    "",
-    fence.open,
-    prompt,
-    fence.close,
-    "",
-    "</details>",
+    ...formatPublicAgentCommandDetails(prompt),
     ...(footer ? ["", footer] : []),
   ].join("\n");
 }
@@ -1334,6 +1357,27 @@ function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function getBabysitCandidateRank(pr: PR | undefined): number {
+  if (!pr) {
+    return 2;
+  }
+  if (pr.feedbackItems.some((item) => item.decision === "accept" && (item.status === "queued" || item.status === "in_progress"))) {
+    return 0;
+  }
+  if (pr.feedbackItems.some((item) => item.status === "pending")) {
+    return 1;
+  }
+  return 3;
+}
+
+function getLastCheckedSortValue(pr: PR | undefined): number {
+  if (!pr?.lastChecked) {
+    return 0;
+  }
+  const parsed = Date.parse(pr.lastChecked);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 export class PRBabysitter {
   private readonly storage: IStorage;
   private readonly inProgress = new Map<string, {
@@ -1351,6 +1395,7 @@ export class PRBabysitter {
   private readonly agentHealthCache = new Map<CodingAgent, { checkedAtMs: number; result: AgentHealthResult }>();
   private readonly feedbackSyncCooldownUntilMs = new Map<string, number>();
   private repoSyncCursor = 0;
+  private deferredBabysitSweepSequence = 0;
   // Per-repo open-PR list snapshot + its etag, kept together so a conditional
   // 304 always has a list to reuse. In-memory only — a restart simply
   // re-fetches once.
@@ -1375,6 +1420,42 @@ export class PRBabysitter {
 
   private now(): Date {
     return this.clock();
+  }
+
+  private async scheduleDeferredBabysitSweep(): Promise<void> {
+    if (!this.scheduleBackgroundJob) {
+      return;
+    }
+
+    const queuedSweeps = await this.storage.listBackgroundJobs({
+      kind: "sync_watched_repos",
+      status: "queued",
+    });
+    if (queuedSweeps.some((job) => job.targetId.startsWith(DEFERRED_BABYSIT_TARGET_PREFIX))) {
+      return;
+    }
+
+    const availableAt = new Date(this.now().getTime() + DEFERRED_BABYSIT_SWEEP_DELAY_MS);
+    const targetId = `${DEFERRED_BABYSIT_TARGET_PREFIX}${availableAt.getTime()}-${this.deferredBabysitSweepSequence++}`;
+    await this.scheduleBackgroundJob(
+      "sync_watched_repos",
+      targetId,
+      // Deferred babysit refills need their own dedupe key so a running refill
+      // does not suppress the next queued refill while backlog remains.
+      `sync_watched_repos:${targetId}`,
+      {
+        ...buildActivityPayload({
+          label: "Backfilling deferred PR work",
+          detail: "Refilling babysitter queue after the active batch drains",
+          targetUrl: null,
+        }),
+        deferredBabysitBackfill: true,
+      },
+      {
+        availableAt,
+        priority: 5,
+      },
+    );
   }
 
   private isFeedbackSyncCoolingDown(prId: string): boolean {
@@ -2194,8 +2275,24 @@ export class PRBabysitter {
       const babysitBudgetTight = isResourceBudgetBelowReserve("core");
       let babysitEnqueues = 0;
       let babysitDeferred = 0;
-      for (const pull of openPulls) {
-        let local = await this.storage.getPRByRepoAndNumber(repoSlug, pull.number);
+      const localByNumber = new Map(trackedForRepo.map((pr) => [pr.number, pr]));
+      const orderedPulls = [...openPulls].sort((a, b) => {
+        const localA = localByNumber.get(a.number);
+        const localB = localByNumber.get(b.number);
+        const rankDiff = getBabysitCandidateRank(localA) - getBabysitCandidateRank(localB);
+        if (rankDiff !== 0) {
+          return rankDiff;
+        }
+
+        const checkedDiff = getLastCheckedSortValue(localA) - getLastCheckedSortValue(localB);
+        if (checkedDiff !== 0) {
+          return checkedDiff;
+        }
+
+        return b.number - a.number;
+      });
+      for (const pull of orderedPulls) {
+        let local = localByNumber.get(pull.number);
         if (!local) {
           // Register only PRs in automation scope — automationScopeNumbers
           // already honors the repo's ownPrsOnly setting, so a manual sync
@@ -2222,6 +2319,7 @@ export class PRBabysitter {
           });
 
           await this.storage.addLog(local.id, "info", `Auto-registered open PR #${pull.number} from ${repoSlug}`);
+          localByNumber.set(pull.number, local);
         }
 
         if (!automationScopeNumbers.has(pull.number)) {
@@ -2387,6 +2485,7 @@ export class PRBabysitter {
         }
       }
       if (babysitDeferred > 0) {
+        await this.scheduleDeferredBabysitSweep();
         log.info(
           {
             repo: repoSlug,
@@ -4638,13 +4737,13 @@ export class PRBabysitter {
               githubCommentAppName,
             );
             const alertBody = [
-              appName ? `## \u26a0\ufe0f ${appName} CI Alert` : "## \u26a0\ufe0f CI Alert",
+              appName ? `## ${appName} CI needs attention` : "## CI needs attention",
               "",
-              `The babysitter pushed changes (commit \`${headShaForFollowUp.slice(0, 7)}\`), but CI/CD checks are still failing:`,
+              `Changes were pushed in commit \`${headShaForFollowUp.slice(0, 7)}\`, but CI/CD checks are still failing:`,
               "",
               ...ciResult.failures.map((f) => `- **${f.context}**: ${f.description}${f.targetUrl ? ` ([details](${f.targetUrl}))` : ""}`),
               "",
-              "Manual investigation may be required.",
+              "Review the failing checks before merging.",
               ...(footer ? ["", footer] : []),
             ].join("\n");
             await this.github.postPRComment(octokit, parsedPr, alertBody);

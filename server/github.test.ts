@@ -1433,7 +1433,7 @@ test("fetchFeedbackItemsForPR marks patchdeck status and audit comments non-acti
           {
             id: 201,
             node_id: "IC_kwDO_status",
-            body: "**Accepted** - this comment requires code changes. Queuing fix...\n\nPosted by [patchdeck](https://github.com/jeremymcs/patchdeck)",
+            body: "**Accepted** - queued for a code change.\n\nPosted by [patchdeck](https://github.com/jeremymcs/patchdeck)",
             created_at: "2026-03-15T11:00:00Z",
             html_url: "https://github.com/jeremymcs/patchdeck/pull/1#issuecomment-201",
             user: { login: "octocat", type: "User" },
@@ -1449,7 +1449,7 @@ test("fetchFeedbackItemsForPR marks patchdeck status and audit comments non-acti
           {
             id: 204,
             node_id: "IC_kwDO_footerless_status",
-            body: "**Agent running** - patchdeck dispatched `codex` to apply the accepted fix.",
+            body: "**In progress** - applying the accepted fix.",
             created_at: "2026-03-15T11:01:30Z",
             html_url: "https://github.com/jeremymcs/patchdeck/pull/1#issuecomment-204",
             user: { login: "octocat", type: "User" },

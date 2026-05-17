@@ -30,7 +30,7 @@ import type { IStorage } from "./storage";
 import { getDefaultStorage } from "./storage";
 import { PRBabysitter } from "./babysitter";
 import { resolveRepoAgentRuntimeSettings, resolveRepoCodingAgent } from "./agentSettings";
-import { detectAgentUnavailability, type AgentUnavailabilityKind } from "./agentRunner";
+import { commandExists, detectAgentUnavailability, type AgentUnavailabilityKind, type CodingAgent } from "./agentRunner";
 import { applyEvaluationDecision, applyFlagDecision } from "./feedbackLifecycle";
 import { applyManualFeedbackDecision } from "./manualFeedback";
 import { childLogger } from "./logger";
@@ -735,6 +735,11 @@ type AgentAvailabilityFailure = {
   kind: AgentUnavailabilityKind;
   fixSteps: string[];
 };
+
+function parseAgentCliMissingDrainReason(reason: string | null): CodingAgent | null {
+  const match = reason?.match(/^Agent health check failed for (codex|claude): \1 CLI is not installed$/i);
+  return match ? match[1].toLowerCase() as CodingAgent : null;
+}
 
 function buildCliMissingFixSteps(agentLabel: AgentLabel, command: "claude" | "codex"): string[] {
   return [
@@ -1730,11 +1735,27 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
   }
 
   const getRuntimeSnapshot = async (): Promise<RuntimeSnapshot> => {
-    const state = await storage.getRuntimeState();
+    const state = await maybeClearStaleAgentCliDrain(await storage.getRuntimeState());
     return {
       ...state,
       activeRuns: backgroundJobDispatcher.getActiveRunCount(),
     };
+  };
+
+  const maybeClearStaleAgentCliDrain = async (state: RuntimeState): Promise<RuntimeState> => {
+    const agent = parseAgentCliMissingDrainReason(state.drainReason);
+    if (!state.drainMode || !agent || !(await commandExists(agent))) {
+      return state;
+    }
+
+    const updated = await storage.updateRuntimeState({
+      drainMode: false,
+      drainRequestedAt: null,
+      drainReason: null,
+    });
+    log.info({ agent }, "Cleared stale agent CLI drain mode after CLI became available");
+    notifyChange();
+    return updated;
   };
 
   const buildActivityDescriptionContext = async (jobs: BackgroundJob[]): Promise<ActivityDescriptionContext> => {

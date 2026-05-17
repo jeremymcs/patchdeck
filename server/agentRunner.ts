@@ -1,5 +1,6 @@
-import { mkdtemp, readFile, rm } from "fs/promises";
-import { tmpdir } from "os";
+import { access, mkdtemp, readFile, rm } from "fs/promises";
+import { constants as fsConstants } from "fs";
+import { homedir, tmpdir } from "os";
 import path from "path";
 import { spawn } from "child_process";
 
@@ -62,6 +63,14 @@ const AGENT_CLI_MISSING_PATTERNS = [
   "enoent",
 ];
 
+const EXTRA_AGENT_COMMAND_DIRS = [
+  "/opt/homebrew/bin",
+  "/usr/local/bin",
+  path.join(homedir(), ".local", "bin"),
+  path.join(homedir(), ".bun", "bin"),
+  path.join(homedir(), ".cargo", "bin"),
+];
+
 export function detectAgentUnavailability(message: string): AgentUnavailabilityKind | null {
   const lower = message.toLowerCase();
   if (lower.includes("unknown coding agent")) {
@@ -106,6 +115,15 @@ export async function resolveCommandPath(command: string): Promise<string | null
   const pathFromLoginShell = firstOutputLine(shellResult.stdout);
   if (shellResult.code === 0 && pathFromLoginShell) {
     return pathFromLoginShell;
+  }
+
+  if (process.env.PATCHDECK_DISABLE_AGENT_EXTRA_PATHS !== "1") {
+    for (const directory of EXTRA_AGENT_COMMAND_DIRS) {
+      const candidate = path.join(directory, command);
+      if (await canExecute(candidate)) {
+        return candidate;
+      }
+    }
   }
 
   return null;
@@ -432,6 +450,15 @@ function firstOutputLine(output: string): string | null {
     .map((candidate) => candidate.trim())
     .find(Boolean);
   return line ?? null;
+}
+
+async function canExecute(candidate: string): Promise<boolean> {
+  try {
+    await access(candidate, process.platform === "win32" ? undefined : fsConstants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function summarizeHealthFailure(result: CommandResult): string {
