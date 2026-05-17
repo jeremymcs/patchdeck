@@ -36,6 +36,25 @@ async function seedPR(storage: MemStorage, overrides: Partial<NewPR> = {}) {
   });
 }
 
+async function waitForCondition(
+  condition: () => boolean | Promise<boolean>,
+  timeoutMs = 250,
+): Promise<void> {
+  const startedAt = Date.now();
+
+  while (true) {
+    if (await condition()) {
+      return;
+    }
+
+    if (Date.now() - startedAt >= timeoutMs) {
+      throw new Error(`Condition not met within ${timeoutMs}ms`);
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
 test("runtime lists active and archived PRs separately", async () => {
   const storage = new MemStorage();
   const runtime = createAppRuntime({
@@ -236,6 +255,42 @@ test("manual sync runs immediately even when global manual mode is on", async ()
     kind: "sync_watched_repos",
   });
   assert.equal(jobs.length, 0);
+});
+
+test("automatic watcher does not sync issues when issue automation is off", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig({
+    autoPrs: true,
+    autoIssues: false,
+    watchedRepos: ["owner/repo"],
+  });
+  const pr = await seedPR(storage, { repo: "owner/repo", watchEnabled: false });
+
+  let issueListCalls = 0;
+  const fakeOctokit = {
+    issues: {
+      listForRepo: async () => {
+        issueListCalls += 1;
+        return { data: [], headers: {} };
+      },
+    },
+  };
+  const runtime = createAppRuntime({
+    storage,
+    startBackgroundServices: false,
+    startWatcher: false,
+    babysitter: { syncAndBabysitTrackedRepos: async () => {} } as never,
+    buildOctokitFn: async () => fakeOctokit as never,
+  });
+
+  await runtime.setPRWatchEnabled(pr.id, true);
+  await waitForCondition(async () => {
+    const jobs = await storage.listBackgroundJobs({ kind: "sync_watched_repos" });
+    return jobs.length === 1;
+  });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+
+  assert.equal(issueListCalls, 0, "PR-only auto mode must not spend budget on issue sync");
 });
 
 test("runtime release adapter skips merged PRs without a merge commit SHA", () => {

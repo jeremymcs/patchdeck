@@ -899,16 +899,21 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
         return;
       }
 
-      await scheduleBackgroundJob(
-        "sync_watched_repos",
-        "runtime:1",
-        buildBackgroundJobDedupeKey("sync_watched_repos", "runtime:1"),
-      );
-      // The routine issue sweep is low priority — it yields core REST budget
-      // to interactive routes and active babysitter sessions. A manual
-      // syncRepos() stays high priority.
-      await runWithRequestPriority("low", () => syncStoredIssuesStep());
-      await queueAutomaticIssueWorkInternal();
+      if (config.autoPrs !== false) {
+        await scheduleBackgroundJob(
+          "sync_watched_repos",
+          "runtime:1",
+          buildBackgroundJobDedupeKey("sync_watched_repos", "runtime:1"),
+        );
+      }
+
+      if (config.autoIssues !== false) {
+        // The routine issue sweep is low priority — it yields core REST budget
+        // to interactive routes and active babysitter sessions. A manual
+        // syncRepos() stays high priority.
+        await runWithRequestPriority("low", () => syncStoredIssuesStep());
+        await queueAutomaticIssueWorkInternal();
+      }
     },
     (error) => {
       log.warn(
