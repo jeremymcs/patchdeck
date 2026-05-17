@@ -2,7 +2,7 @@ import { memo, useEffect, useMemo, useRef, useState, type MouseEvent, type React
 import { Link } from "wouter";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import * as Collapsible from "@radix-ui/react-collapsible";
-import { AlertTriangle, Bot, ChevronDown, ChevronUp, Loader2, Pause, Play, PlayCircle, RefreshCw } from "lucide-react";
+import { AlertTriangle, Bot, ChevronDown, ChevronUp, Loader2, PanelRightClose, PanelRightOpen, Pause, Play, PlayCircle, RefreshCw } from "lucide-react";
 import { queryClient, apiRequest, fetchJson } from "@/lib/queryClient";
 import type { ActivityItem, ActivitySnapshot, Config, FeedbackItem, HealingSession, Issue, IssueListPage, LogEntry, OperatorWarning, PR, PRQuestion, PRSummary, RuntimeState, WatchedRepo } from "@shared/schema";
 import { AppHeader } from "@/components/AppHeader";
@@ -859,16 +859,51 @@ function PRDescriptionPanel({ pr }: { pr: PR }) {
   );
 }
 
-function RightPanel({ prId }: { prId: string | null }) {
+function RightPanel({
+  prId,
+  isCollapsed,
+  onToggleCollapsed,
+}: {
+  prId: string | null;
+  isCollapsed: boolean;
+  onToggleCollapsed: () => void;
+}) {
+  if (isCollapsed) {
+    return (
+      <div className="flex h-10 w-full shrink-0 items-center justify-end border-t border-border px-2 lg:h-auto lg:w-10 lg:flex-col lg:justify-start lg:border-l lg:border-t-0 lg:px-0 lg:py-2" data-testid="activity-panel-collapsed">
+        <button
+          type="button"
+          onClick={onToggleCollapsed}
+          data-testid="button-toggle-activity-panel"
+          title="Expand activity"
+          className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        >
+          <PanelRightOpen className="h-3.5 w-3.5" aria-hidden="true" />
+          <span className="sr-only">Expand activity</span>
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="flex min-h-[24rem] w-full shrink-0 flex-col border-t border-border lg:min-h-0 lg:w-80 lg:border-l lg:border-t-0">
-      <div className="flex shrink-0 border-b border-border">
+      <div className="flex shrink-0 items-center border-b border-border">
         <div
           className="flex-1 bg-muted px-3 py-2 text-[11px] uppercase tracking-wider text-foreground shadow-[inset_0_-2px_0_0_hsl(var(--primary))]"
           data-testid="tab-activity"
         >
           Activity
         </div>
+        <button
+          type="button"
+          onClick={onToggleCollapsed}
+          data-testid="button-toggle-activity-panel"
+          title="Collapse activity"
+          className="mr-2 inline-flex h-7 w-7 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        >
+          <PanelRightClose className="h-3.5 w-3.5" aria-hidden="true" />
+          <span className="sr-only">Collapse activity</span>
+        </button>
       </div>
       <div className="flex-1 overflow-hidden">
         <LogPanel prId={prId} />
@@ -1023,6 +1058,7 @@ export default function Dashboard() {
   const [areErrorsRolledUp, setAreErrorsRolledUp] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isAskOpen, setIsAskOpen] = useState(false);
+  const [isActivityPanelCollapsed, setIsActivityPanelCollapsed] = useState(false);
 
   const handleSyncDashboard = async () => {
     setIsRefreshing(true);
@@ -1354,7 +1390,7 @@ export default function Dashboard() {
       <DashboardDrainBanner runtimeState={runtimeState} />
 
       <div className="flex flex-1 flex-col overflow-hidden lg:flex-row">
-        <div className="flex max-h-[42vh] w-full shrink-0 flex-col overflow-hidden border-b border-border lg:max-h-none lg:w-[42rem] lg:border-b-0 lg:border-r">
+        <div className="flex max-h-[42vh] w-full shrink-0 flex-col overflow-hidden border-b border-border lg:max-h-none lg:w-[32rem] xl:w-[34rem] lg:border-b-0 lg:border-r">
           <div className="sticky top-0 z-10 flex shrink-0 border-b border-border bg-background">
             <button
               type="button"
@@ -1378,7 +1414,7 @@ export default function Dashboard() {
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
-              Issues ({issueLinkedPRs.length})
+              Linked Issues ({issueLinkedPRs.length})
             </button>
             <button
               type="button"
@@ -1462,7 +1498,7 @@ export default function Dashboard() {
                   : isArchived
                     ? "No archived PRs. Closed PRs are archived automatically."
                     : viewMode === "issues"
-                      ? "No active PRs are linked from Issues yet."
+                      ? "No active PRs are linked from issues yet."
                   : "No PRs tracked yet. Add a repository or PR from Settings."}
               </div>
             ) : (
@@ -1659,6 +1695,8 @@ export default function Dashboard() {
 
         <RightPanel
           prId={selectedPRId}
+          isCollapsed={isActivityPanelCollapsed}
+          onToggleCollapsed={() => setIsActivityPanelCollapsed((current) => !current)}
         />
       </div>
       <div className="fixed bottom-4 right-4 z-50">

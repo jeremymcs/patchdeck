@@ -285,6 +285,7 @@ test("dashboard keeps the QA-tested PR, repo, feedback, and side-panel workflows
     ["CI healing panel", "panel-ci-healing"],
     ["ask agent tab", "tab-ask"],
     ["activity tab", "tab-activity"],
+    ["activity panel toggle", "button-toggle-activity-panel"],
     ["ask input", "input-question"],
     ["ask submit", "button-ask"],
     ["dashboard error pill", "dashboard-error-pill"],
@@ -334,7 +335,7 @@ test("dashboard keeps the QA-tested PR, repo, feedback, and side-panel workflows
   assertHasExpression(sourceFile, "PR number search helper", /\bmatchesNumberSearch\b/);
   assertHasStringValue(sourceFile, "PR number search placeholder", "Search #");
   assertHasExpression(sourceFile, "issue-linked PR index", /\bbuildIssueLinkedPRIndex\b/);
-  assertHasStringValue(sourceFile, "on issues tab label", /Issues \(/);
+  assertHasStringValue(sourceFile, "linked issues tab label", /Linked Issues \(/);
   assertHasStringValue(sourceFile, "dashboard sync label", "sync");
   assertHasStringValue(sourceFile, "drain mode action label", "Paused by drain mode");
   assertHasStringValue(sourceFile, "blocked manual copy", "Manual runs are blocked while global automation is paused.");

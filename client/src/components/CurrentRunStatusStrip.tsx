@@ -13,7 +13,7 @@ function formatRunTime(value: string | null): string | null {
 
 function statusClass(status: CurrentRunStatus["status"]): string {
   if (status === "failed") return "border-destructive/40 bg-destructive/10 text-destructive";
-  if (status === "completed") return "border-success/40 bg-success/10 text-success";
+  if (status === "completed") return "border-warning-border bg-warning-muted text-warning-foreground";
   if (status === "queued") return "border-primary/30 bg-primary/10 text-primary";
   return "border-primary/40 bg-primary/10 text-primary";
 }
