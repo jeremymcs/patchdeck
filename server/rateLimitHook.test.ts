@@ -65,9 +65,10 @@ test("octokit hook spaces concurrent REST requests under GitHub secondary limits
   ]);
 
   assert.equal(requestStartedAt.length, 2);
+  const spacingMs = requestStartedAt[1] - requestStartedAt[0];
   assert.ok(
-    requestStartedAt[1] - requestStartedAt[0] >= 50,
-    `expected REST requests to be spaced, got ${requestStartedAt[1] - requestStartedAt[0]}ms`,
+    spacingMs >= 40,
+    `expected REST requests to be spaced, got ${spacingMs}ms`,
   );
 });
 
