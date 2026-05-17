@@ -822,7 +822,7 @@ function IssuesPage() {
         }
         toast({ description: "Full sweep started." });
       }
-      await apiRequest("POST", fullSweep ? "/api/repos/sync?fullSweep=1" : "/api/repos/sync");
+      await apiRequest("POST", fullSweep ? "/api/repos/sync?scope=issues&fullSweep=1" : "/api/repos/sync?scope=issues");
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["/api/issues"] }),
         queryClient.invalidateQueries({ queryKey: ["/api/issues/coverage"] }),

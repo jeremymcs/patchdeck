@@ -128,6 +128,8 @@ export type DrainModeParams = {
   timeoutMs?: number;
 };
 
+export type RepoSyncScope = "all" | "prs" | "issues";
+
 export type AppRuntime = {
   start(): Promise<void>;
   stop(): void;
@@ -141,7 +143,7 @@ export type AppRuntime = {
   addRepo(repoInput: string): Promise<{ repo: string }>;
   removeRepo(repoInput: string, mode?: "soft" | "hard"): Promise<{ ok: true; repo: string; mode: "soft" | "hard"; removedPrs: number }>;
   updateRepoSettings(repoInput: string, updates: Partial<Omit<WatchedRepo, "repo">>): Promise<WatchedRepo>;
-  syncRepos(options?: { fullSweep?: boolean }): Promise<{ ok: true }>;
+  syncRepos(options?: { fullSweep?: boolean; scope?: RepoSyncScope }): Promise<{ ok: true }>;
   listIssueCoverage(): Promise<IssueCoverage[]>;
   createManualRelease(repoInput: string): Promise<ReleaseRun>;
   listPRs(view?: "active" | "archived"): Promise<PRSummary[]>;
@@ -2123,15 +2125,20 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       return updated;
     },
 
-    async syncRepos(options?: { fullSweep?: boolean }) {
+    async syncRepos(options?: { fullSweep?: boolean; scope?: RepoSyncScope }) {
       const runtimeState = await storage.getRuntimeState();
       if (runtimeState.drainMode) {
         return { ok: true as const };
       }
 
       const fullSweep = options?.fullSweep === true;
-      await babysitter.syncAndBabysitTrackedRepos({ fullSweep });
-      await syncStoredIssuesStep({ fullSweep });
+      const scope = options?.scope ?? "all";
+      if (scope === "all" || scope === "prs") {
+        await babysitter.syncAndBabysitTrackedRepos({ fullSweep });
+      }
+      if (scope === "all" || scope === "issues") {
+        await syncStoredIssuesStep({ fullSweep });
+      }
       notifyChange();
       return { ok: true as const };
     },

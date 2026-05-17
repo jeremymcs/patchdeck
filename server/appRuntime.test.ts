@@ -257,6 +257,46 @@ test("manual sync runs immediately even when global manual mode is on", async ()
   assert.equal(jobs.length, 0);
 });
 
+test("manual sync can target only PRs or only issues", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig({ watchedRepos: ["owner/repo"] });
+
+  let prSyncCalls = 0;
+  let issueListCalls = 0;
+  const fakeOctokit = {
+    issues: {
+      listForRepo: async () => {
+        issueListCalls += 1;
+        return { data: [], headers: {} };
+      },
+    },
+  };
+  const runtime = createAppRuntime({
+    storage,
+    startBackgroundServices: false,
+    startWatcher: false,
+    babysitter: {
+      syncAndBabysitTrackedRepos: async () => {
+        prSyncCalls += 1;
+      },
+    } as never,
+    buildOctokitFn: async () => fakeOctokit as never,
+  });
+
+  await runtime.syncRepos({ scope: "prs" });
+  assert.equal(prSyncCalls, 1);
+  assert.equal(issueListCalls, 0);
+
+  await runtime.syncRepos({ scope: "issues" });
+  assert.equal(prSyncCalls, 1);
+  assert.ok(issueListCalls > 0);
+
+  const issueOnlyCalls = issueListCalls;
+  await runtime.syncRepos();
+  assert.equal(prSyncCalls, 2);
+  assert.ok(issueListCalls > issueOnlyCalls);
+});
+
 test("automatic watcher does not sync issues when issue automation is off", async () => {
   const storage = new MemStorage();
   await storage.updateConfig({
@@ -291,6 +331,114 @@ test("automatic watcher does not sync issues when issue automation is off", asyn
   await new Promise((resolve) => setTimeout(resolve, 20));
 
   assert.equal(issueListCalls, 0, "PR-only auto mode must not spend budget on issue sync");
+});
+
+test("automatic watcher runs issue sync without PR sync when PR automation is off", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig({
+    autoPrs: false,
+    autoIssues: true,
+    watchedRepos: ["owner/repo"],
+  });
+  const pr = await seedPR(storage, { repo: "owner/repo", watchEnabled: false });
+
+  let issueListCalls = 0;
+  const fakeOctokit = {
+    issues: {
+      listForRepo: async () => {
+        issueListCalls += 1;
+        return { data: [], headers: {} };
+      },
+    },
+  };
+  const runtime = createAppRuntime({
+    storage,
+    startBackgroundServices: false,
+    startWatcher: false,
+    babysitter: {
+      syncAndBabysitTrackedRepos: async () => {
+        throw new Error("issue-only auto mode must not sync PRs");
+      },
+    } as never,
+    buildOctokitFn: async () => fakeOctokit as never,
+  });
+
+  await runtime.setPRWatchEnabled(pr.id, true);
+  await waitForCondition(() => issueListCalls > 0);
+
+  const jobs = await storage.listBackgroundJobs({ kind: "sync_watched_repos" });
+  assert.equal(jobs.length, 0, "issue-only auto mode must not queue PR sync");
+});
+
+test("automatic watcher does nothing when PR and issue automation are both off", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig({
+    autoPrs: false,
+    autoIssues: false,
+    watchedRepos: ["owner/repo"],
+  });
+  const pr = await seedPR(storage, { repo: "owner/repo", watchEnabled: false });
+
+  let issueListCalls = 0;
+  const fakeOctokit = {
+    issues: {
+      listForRepo: async () => {
+        issueListCalls += 1;
+        return { data: [], headers: {} };
+      },
+    },
+  };
+  const runtime = createAppRuntime({
+    storage,
+    startBackgroundServices: false,
+    startWatcher: false,
+    babysitter: {
+      syncAndBabysitTrackedRepos: async () => {
+        throw new Error("disabled auto mode must not sync PRs");
+      },
+    } as never,
+    buildOctokitFn: async () => fakeOctokit as never,
+  });
+
+  await runtime.setPRWatchEnabled(pr.id, true);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+
+  assert.equal(issueListCalls, 0);
+  const jobs = await storage.listBackgroundJobs({ kind: "sync_watched_repos" });
+  assert.equal(jobs.length, 0);
+});
+
+test("automatic watcher can run PR and issue automation together", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig({
+    autoPrs: true,
+    autoIssues: true,
+    watchedRepos: ["owner/repo"],
+  });
+  const pr = await seedPR(storage, { repo: "owner/repo", watchEnabled: false });
+
+  let issueListCalls = 0;
+  const fakeOctokit = {
+    issues: {
+      listForRepo: async () => {
+        issueListCalls += 1;
+        return { data: [], headers: {} };
+      },
+    },
+  };
+  const runtime = createAppRuntime({
+    storage,
+    startBackgroundServices: false,
+    startWatcher: false,
+    babysitter: { syncAndBabysitTrackedRepos: async () => {} } as never,
+    buildOctokitFn: async () => fakeOctokit as never,
+  });
+
+  await runtime.setPRWatchEnabled(pr.id, true);
+  await waitForCondition(async () => {
+    const jobs = await storage.listBackgroundJobs({ kind: "sync_watched_repos" });
+    return jobs.length === 1 && issueListCalls > 0;
+  });
 });
 
 test("runtime release adapter skips merged PRs without a merge commit SHA", () => {

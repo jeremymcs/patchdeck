@@ -322,7 +322,7 @@ test("dashboard keeps the QA-tested PR, repo, feedback, and side-panel workflows
 
   assertHasApiRequest(sourceFile, "failed activity clear mutation", "DELETE", "/api/activities/failed");
   assertHasApiRequest(sourceFile, "issue failure clear mutation", "DELETE", "/api/issues/work/failures");
-  assertHasApiRequest(sourceFile, "dashboard sync mutation", "POST", "/api/repos/sync");
+  assertHasApiRequest(sourceFile, "dashboard PR sync mutation", "POST", "/api/repos/sync?scope=prs");
   assertHasApiRequest(sourceFile, "ask agent mutation", "POST", /`\/api\/prs\/\$\{prId\}\/questions`/);
   assertHasTestId(sourceFile, "dashboard drain banner", "dashboard-drain-banner");
   assertHasTestId(sourceFile, "dashboard drain reason", "dashboard-drain-reason");
@@ -357,6 +357,7 @@ test("issues page keeps the QA-tested issue monitor and work surface wired", asy
   assertHasApiRequest(sourceFile, "issue work mutation", "POST", "/api/issues/work");
   assertHasApiRequest(sourceFile, "issue evaluation mutation", "POST", "/api/issues/evaluate");
   assertHasApiRequest(sourceFile, "issue label mutation", "PATCH", "/api/issues/labels");
+  assertHasApiRequest(sourceFile, "issue scoped repo sync", "POST", /\/api\/repos\/sync\?scope=issues/);
   assertHasExpression(sourceFile, "issues drain guard", /enabled: runtime !== undefined && !globalDrainMode/);
   assertHasExpression(sourceFile, "issue detail drain guard", /enabled: Boolean\(selectedIssueFromList\) && !globalDrainMode/);
 
