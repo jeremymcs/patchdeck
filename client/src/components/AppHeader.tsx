@@ -31,7 +31,7 @@ const SECONDARY_NAV_ITEMS: Array<{ section: AppHeaderSection; label: string; hre
 ];
 
 function navLinkClass(selected: boolean) {
-  return `rounded-md border px-2 py-1 text-[11px] uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background ${
+  return `inline-flex min-h-8 items-center rounded-md border px-2 py-1 text-[11px] uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background sm:min-h-0 ${
     selected
       ? "border-primary/40 bg-primary/10 text-primary"
       : "border-transparent text-muted-foreground hover:border-border hover:text-foreground"
@@ -386,7 +386,7 @@ export function AppHeader({
           </div>
         ) : null}
         {actions ? (
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-2 [&_button]:min-h-8 [&_select]:min-h-8 sm:[&_button]:min-h-0 sm:[&_select]:min-h-0">
             {actions}
           </div>
         ) : null}

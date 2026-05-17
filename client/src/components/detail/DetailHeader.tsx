@@ -33,13 +33,13 @@ export function DetailHeader({
 }: DetailHeaderProps) {
   const titleClass = titleMultiline
     ? "line-clamp-2 break-words text-[15px] font-semibold leading-snug tracking-tight"
-    : "truncate text-[15px] font-semibold tracking-tight";
+    : "line-clamp-2 break-words text-[15px] font-semibold leading-snug tracking-tight sm:block sm:truncate";
   const accentClass = accentTone ? ` border-t-2 ${toneHeaderAccentClass(accentTone)}` : "";
   const failedBg = toneFailedBgClass(failed);
 
   return (
     <div className={`shrink-0 border-b border-border px-4 py-3${accentClass}${failedBg ? ` ${failedBg}` : ""}`}>
-      <div className="mb-1 flex items-start justify-between gap-4">
+      <div className="mb-1 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             {statusDot}
@@ -52,10 +52,10 @@ export function DetailHeader({
                 href={externalLink.href}
                 target="_blank"
                 rel="noreferrer noopener"
-                className="inline-flex shrink-0 items-center gap-1 font-mono text-[11px] text-muted-foreground underline decoration-border underline-offset-2 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+                className="inline-flex max-w-full shrink-0 items-center gap-1 font-mono text-[11px] text-muted-foreground underline decoration-border underline-offset-2 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
               >
                 <ExternalLink className="h-3 w-3" aria-hidden="true" />
-                {externalLink.label}
+                <span className="min-w-0 truncate">{externalLink.label}</span>
               </a>
             )}
           </div>
@@ -64,8 +64,10 @@ export function DetailHeader({
           {stageBar && <div className="mt-2">{stageBar}</div>}
         </div>
         {actions && (
-          <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
-            {actions}
+          <div className="-mx-1 flex min-w-0 overflow-x-auto px-1 pb-1 sm:mx-0 sm:shrink-0 sm:flex-wrap sm:justify-end sm:overflow-visible sm:px-0 sm:pb-0 [&>*]:shrink-0">
+            <div className="flex min-w-max items-center gap-2 sm:min-w-0 sm:flex-wrap sm:justify-end [&_button]:min-h-8 sm:[&_button]:min-h-0">
+              {actions}
+            </div>
           </div>
         )}
       </div>
