@@ -959,6 +959,7 @@ test("syncAndBabysitTrackedRepos caps in-flight babysit_pr jobs at maxConcurrent
   const deferredSweeps = await storage.listBackgroundJobs({ kind: "sync_watched_repos", status: "queued" });
   assert.equal(deferredSweeps.length, 1, "deferred babysit backlog schedules a follow-up sweep");
   assert.equal(deferredSweeps[0]?.payload.activityLabel, "Backfilling deferred PR work");
+  assert.equal(deferredSweeps[0]?.payload.deferredBabysitBackfill, true);
 
   // A second sweep must count the still-queued jobs as in-flight and add none.
   await babysitter.syncAndBabysitTrackedRepos();
@@ -990,6 +991,63 @@ test("syncAndBabysitTrackedRepos caps in-flight babysit_pr jobs at maxConcurrent
     })))}`,
   );
   assert.notEqual(replacementDeferredSweeps[0]?.id, deferredSweeps[0]?.id);
+});
+
+test("syncAndBabysitTrackedRepos rotates babysit_pr jobs toward least recently checked PRs", async () => {
+  clearRateLimitStateForTests();
+  const storage = new MemStorage();
+  await storage.updateConfig({ watchedRepos: ["octo/example"], maxConcurrentBabysitRuns: 3 });
+  const backgroundJobQueue = new BackgroundJobQueue(storage);
+  const pulls = Array.from({ length: 5 }, (_, i) => makeOctocatPull(100 + i));
+  const prById = new Map<string, number>();
+
+  for (const { number, lastChecked } of [
+    { number: 100, lastChecked: "2026-05-17T15:00:00.000Z" },
+    { number: 101, lastChecked: "2026-05-17T14:00:00.000Z" },
+    { number: 102, lastChecked: "2026-05-17T13:00:00.000Z" },
+    { number: 103, lastChecked: null },
+    { number: 104, lastChecked: "2026-05-17T12:00:00.000Z" },
+  ]) {
+    const pr = await storage.addPR({
+      number,
+      title: `PR ${number}`,
+      repo: "octo/example",
+      branch: `feature/${number}`,
+      author: "octocat",
+      url: `https://github.com/octo/example/pull/${number}`,
+      status: "watching",
+      feedbackItems: [],
+      accepted: 0,
+      rejected: 0,
+      flagged: 0,
+      testsPassed: null,
+      lintPassed: null,
+      lastChecked,
+    });
+    prById.set(pr.id, pr.number);
+  }
+
+  const babysitter = new PRBabysitter(
+    storage,
+    makeWatcherGitHubService({ listOpenPullsForRepo: async () => pulls }),
+    {
+      resolveAgent: async () => "codex",
+      ciPollIntervalMs: 0,
+      evaluateFixNecessityWithAgent: async () => ({ needsFix: false, reason: "unused" }),
+      applyFixesWithAgent: async () => ({ code: 0, stdout: "", stderr: "" }),
+      runCommand: async () => ({ code: 0, stdout: "", stderr: "" }),
+    },
+    undefined,
+    async (...args) => backgroundJobQueue.enqueue(...args),
+  );
+
+  await babysitter.syncAndBabysitTrackedRepos();
+
+  const jobs = await storage.listBackgroundJobs({ kind: "babysit_pr", status: "queued" });
+  assert.deepEqual(
+    jobs.map((job) => prById.get(job.targetId)),
+    [103, 104, 102],
+  );
 });
 
 test("syncAndBabysitTrackedRepos enqueues no babysit_pr jobs while the core budget is in the reserve", async () => {

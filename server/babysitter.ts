@@ -1336,6 +1336,27 @@ function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function getBabysitCandidateRank(pr: PR | undefined): number {
+  if (!pr) {
+    return 2;
+  }
+  if (pr.feedbackItems.some((item) => item.decision === "accept" && (item.status === "queued" || item.status === "in_progress"))) {
+    return 0;
+  }
+  if (pr.feedbackItems.some((item) => item.status === "pending")) {
+    return 1;
+  }
+  return 3;
+}
+
+function getLastCheckedSortValue(pr: PR | undefined): number {
+  if (!pr?.lastChecked) {
+    return 0;
+  }
+  const parsed = Date.parse(pr.lastChecked);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 export class PRBabysitter {
   private readonly storage: IStorage;
   private readonly inProgress = new Map<string, {
@@ -1401,11 +1422,14 @@ export class PRBabysitter {
       // Deferred babysit refills need their own dedupe key so a running refill
       // does not suppress the next queued refill while backlog remains.
       `sync_watched_repos:${targetId}`,
-      buildActivityPayload({
-        label: "Backfilling deferred PR work",
-        detail: "Refilling babysitter queue after the active batch drains",
-        targetUrl: null,
-      }),
+      {
+        ...buildActivityPayload({
+          label: "Backfilling deferred PR work",
+          detail: "Refilling babysitter queue after the active batch drains",
+          targetUrl: null,
+        }),
+        deferredBabysitBackfill: true,
+      },
       {
         availableAt,
         priority: 5,
@@ -2230,8 +2254,24 @@ export class PRBabysitter {
       const babysitBudgetTight = isResourceBudgetBelowReserve("core");
       let babysitEnqueues = 0;
       let babysitDeferred = 0;
-      for (const pull of openPulls) {
-        let local = await this.storage.getPRByRepoAndNumber(repoSlug, pull.number);
+      const localByNumber = new Map(trackedForRepo.map((pr) => [pr.number, pr]));
+      const orderedPulls = [...openPulls].sort((a, b) => {
+        const localA = localByNumber.get(a.number);
+        const localB = localByNumber.get(b.number);
+        const rankDiff = getBabysitCandidateRank(localA) - getBabysitCandidateRank(localB);
+        if (rankDiff !== 0) {
+          return rankDiff;
+        }
+
+        const checkedDiff = getLastCheckedSortValue(localA) - getLastCheckedSortValue(localB);
+        if (checkedDiff !== 0) {
+          return checkedDiff;
+        }
+
+        return b.number - a.number;
+      });
+      for (const pull of orderedPulls) {
+        let local = localByNumber.get(pull.number);
         if (!local) {
           // Register only PRs in automation scope — automationScopeNumbers
           // already honors the repo's ownPrsOnly setting, so a manual sync
@@ -2258,6 +2298,7 @@ export class PRBabysitter {
           });
 
           await this.storage.addLog(local.id, "info", `Auto-registered open PR #${pull.number} from ${repoSlug}`);
+          localByNumber.set(pull.number, local);
         }
 
         if (!automationScopeNumbers.has(pull.number)) {

@@ -86,21 +86,47 @@ test("sync_watched_repos handler delegates to the babysitter", async () => {
   const storage = new MemStorage();
   const queue = new BackgroundJobQueue(storage);
   const job = await queue.enqueue("sync_watched_repos", "runtime:1", "sync_watched_repos", {});
-  let syncCalls = 0;
+  const syncOptions: unknown[] = [];
 
   const handlers = createBackgroundJobHandlers({
     storage,
     babysitter: {
       runQueuedBabysitPR: async () => undefined,
-      syncAndBabysitTrackedRepos: async () => {
-        syncCalls += 1;
+      syncAndBabysitTrackedRepos: async (options) => {
+        syncOptions.push(options);
       },
     },
   });
 
   await handlers.sync_watched_repos!(job);
 
-  assert.equal(syncCalls, 1);
+  assert.deepEqual(syncOptions, [undefined]);
+});
+
+test("sync_watched_repos handler runs deferred babysit backfills as full sweeps", async () => {
+  const storage = new MemStorage();
+  const queue = new BackgroundJobQueue(storage);
+  const job = await queue.enqueue(
+    "sync_watched_repos",
+    "runtime:deferred-babysit:1",
+    "sync_watched_repos:runtime:deferred-babysit:1",
+    { deferredBabysitBackfill: true },
+  );
+  const syncOptions: unknown[] = [];
+
+  const handlers = createBackgroundJobHandlers({
+    storage,
+    babysitter: {
+      runQueuedBabysitPR: async () => undefined,
+      syncAndBabysitTrackedRepos: async (options) => {
+        syncOptions.push(options);
+      },
+    },
+  });
+
+  await handlers.sync_watched_repos!(job);
+
+  assert.deepEqual(syncOptions, [{ fullSweep: true }]);
 });
 
 test("babysit_pr handler delegates to the babysitter with the queued preferred agent", async () => {
