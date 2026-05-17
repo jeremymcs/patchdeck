@@ -111,6 +111,7 @@ export default function Logs() {
   const [records, setRecords] = useState<LogRecord[]>([]);
   const [sources, setSources] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [clearedRecordSeqs, setClearedRecordSeqs] = useState<Set<number>>(() => new Set());
   const { data: activities = EMPTY_ACTIVITY_SNAPSHOT } = useQuery<ActivitySnapshot>({
     queryKey: ["/api/activities"],
     refetchInterval: 3000,
@@ -187,7 +188,7 @@ export default function Logs() {
   useEffect(() => { setUrlParams({ follow }); }, [follow]);
 
   const filteredRecords = useMemo(() => {
-    let out = records;
+    let out = records.filter((record) => !clearedRecordSeqs.has(record.seq));
     if (level) {
       const minRank = LEVEL_RANK[level];
       out = out.filter((r) => LEVEL_RANK[r.level] >= minRank);
@@ -201,7 +202,7 @@ export default function Logs() {
       );
     }
     return out;
-  }, [records, level, source, searchTerm]);
+  }, [clearedRecordSeqs, records, level, source, searchTerm]);
 
   const activityItems = useMemo(
     () => [...activities.failed, ...activities.inProgress, ...activities.queued]
@@ -216,6 +217,16 @@ export default function Logs() {
     } catch {
       /* ignore */
     }
+  };
+
+  const onClearView = () => {
+    setClearedRecordSeqs((current) => {
+      const next = new Set(current);
+      for (const record of filteredRecords) {
+        next.add(record.seq);
+      }
+      return next;
+    });
   };
 
   const onDownload = () => {
@@ -288,6 +299,14 @@ export default function Logs() {
           className="cursor-pointer rounded-md border border-border bg-transparent px-2.5 py-0.5 font-medium uppercase tracking-wider text-muted-foreground transition-colors hover:border-foreground/30 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
         >
           copy
+        </button>
+        <button
+          type="button"
+          onClick={onClearView}
+          disabled={filteredRecords.length === 0}
+          className="cursor-pointer rounded-md border border-border bg-transparent px-2.5 py-0.5 font-medium uppercase tracking-wider text-muted-foreground transition-colors hover:border-foreground/30 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          clear view
         </button>
         <button
           type="button"

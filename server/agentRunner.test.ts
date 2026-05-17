@@ -244,8 +244,10 @@ test("buildAgentCommandArgs applies model and thinking flags for each agent", ()
 test("resolveAgent does not fall back when fallback is disabled", async () => {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), "fake-agent-bin-"));
   const originalPath = process.env.PATH;
+  const originalDisableExtraPaths = process.env.PATCHDECK_DISABLE_AGENT_EXTRA_PATHS;
 
   try {
+    process.env.PATCHDECK_DISABLE_AGENT_EXTRA_PATHS = "1";
     process.env.PATH = tempRoot;
 
     await assert.rejects(
@@ -254,6 +256,11 @@ test("resolveAgent does not fall back when fallback is disabled", async () => {
     );
   } finally {
     process.env.PATH = originalPath;
+    if (originalDisableExtraPaths === undefined) {
+      delete process.env.PATCHDECK_DISABLE_AGENT_EXTRA_PATHS;
+    } else {
+      process.env.PATCHDECK_DISABLE_AGENT_EXTRA_PATHS = originalDisableExtraPaths;
+    }
     await rm(tempRoot, { recursive: true, force: true });
   }
 });
@@ -269,8 +276,10 @@ test("resolveAgent uses the next coding agent when fallback is enabled", async (
     process.platform === "win32" ? "which.cmd" : "which",
   );
   const originalPath = process.env.PATH;
+  const originalDisableExtraPaths = process.env.PATCHDECK_DISABLE_AGENT_EXTRA_PATHS;
 
   try {
+    process.env.PATCHDECK_DISABLE_AGENT_EXTRA_PATHS = "1";
     await copyFile(process.execPath, fakeCodexPath);
     await chmod(fakeCodexPath, 0o755);
     await writeFile(
@@ -284,6 +293,11 @@ test("resolveAgent uses the next coding agent when fallback is enabled", async (
     assert.equal(await resolveAgent("claude", { allowFallback: true }), "codex");
   } finally {
     process.env.PATH = originalPath;
+    if (originalDisableExtraPaths === undefined) {
+      delete process.env.PATCHDECK_DISABLE_AGENT_EXTRA_PATHS;
+    } else {
+      process.env.PATCHDECK_DISABLE_AGENT_EXTRA_PATHS = originalDisableExtraPaths;
+    }
     await rm(tempRoot, { recursive: true, force: true });
   }
 });

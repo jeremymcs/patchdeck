@@ -94,6 +94,11 @@ function formatDateTime(value: string | null | undefined): string {
   });
 }
 
+function formatGitHubUsername(username?: string | null): string {
+  const normalized = username?.trim().replace(/^@/, "");
+  return normalized ? `@${normalized}` : "@unknown";
+}
+
 function formatBodyPreview(body: string | null | undefined): string {
   if (!body) return "No body provided.";
   const text = body.trim().replace(/\s+/g, " ");
@@ -440,7 +445,7 @@ function IssueRow({
             {issue.repo} <span className="font-mono text-foreground/70">#{issue.number}</span>
           </div>
           <div className="mt-0.5 text-[11px] text-muted-foreground">
-            by {issue.author || "unknown"}
+            by {formatGitHubUsername(issue.author)}
           </div>
           <div className="mt-1 line-clamp-2 text-[12px] leading-5 text-muted-foreground">
             {formatBodyPreview(issue.body)}
@@ -638,7 +643,17 @@ function IssueLogRow({ entry }: { entry: LogEntry }) {
   );
 }
 
-function IssueLogPanel({ logs, selected }: { logs: LogEntry[]; selected: boolean }) {
+function IssueLogPanel({ logs, selected, selectedKey }: { logs: LogEntry[]; selected: boolean; selectedKey: string | null }) {
+  const [clearedLogIds, setClearedLogIds] = useState<Set<string>>(() => new Set());
+  const viewLogs = useMemo(
+    () => logs.filter((log) => !clearedLogIds.has(log.id)),
+    [clearedLogIds, logs],
+  );
+
+  useEffect(() => {
+    setClearedLogIds(new Set());
+  }, [selectedKey]);
+
   return (
     <div className="flex min-h-[24rem] w-full shrink-0 flex-col border-t border-border lg:min-h-0 lg:w-80 lg:border-l lg:border-t-0">
       <div className="flex shrink-0 border-b border-border">
@@ -658,8 +673,26 @@ function IssueLogPanel({ logs, selected }: { logs: LogEntry[]; selected: boolean
           <div className="p-4 text-[12px] text-muted-foreground">
             No workflow logs yet.
           </div>
+        ) : viewLogs.length === 0 ? (
+          <div className="p-4 text-[12px] text-muted-foreground">
+            View cleared. New log entries will appear here.
+          </div>
         ) : (
-          logs.map((entry) => <IssueLogRow key={entry.id} entry={entry} />)
+          <>
+            <div className="flex items-center justify-between gap-2 border-b border-border/60 px-3 py-2">
+              <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                {viewLogs.length} visible
+              </span>
+              <button
+                type="button"
+                onClick={() => setClearedLogIds(new Set(logs.map((log) => log.id)))}
+                className="cursor-pointer rounded-md border border-border bg-transparent px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground transition-colors hover:border-foreground/30 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              >
+                Clear view
+              </button>
+            </div>
+            {viewLogs.map((entry) => <IssueLogRow key={entry.id} entry={entry} />)}
+          </>
         )}
       </div>
     </div>
@@ -1715,7 +1748,7 @@ function IssuesPage() {
               {(() => {
                 const metaItems: MetaItem[] = [
                   { key: "repo", content: <span>{selectedIssue.repo} <span className="font-mono text-foreground/80">#{selectedIssue.number}</span></span> },
-                  { key: "author", content: <span>author: <span className="text-foreground/80">{selectedIssue.author || "unknown"}</span></span> },
+                  { key: "author", content: <span>author: <span className="text-foreground/80">{formatGitHubUsername(selectedIssue.author)}</span></span> },
                   { key: "comments", content: <span>comments: <span className="font-mono text-foreground/80">{selectedIssue.comments}</span></span> },
                   { key: "updated", content: <span>updated <span className="font-mono">{formatDateTime(selectedIssue.updatedAt)}</span></span> },
                 ];
@@ -2076,7 +2109,7 @@ function IssuesPage() {
           )}
         </div>
 
-        <IssueLogPanel logs={issueLogs} selected={Boolean(selectedIssue)} />
+        <IssueLogPanel logs={issueLogs} selected={Boolean(selectedIssue)} selectedKey={selectedIssue?.id ?? null} />
       </div>
     </div>
   );

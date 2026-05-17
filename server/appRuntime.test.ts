@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import type { NewPR } from "@shared/schema";
 import {
@@ -212,6 +215,46 @@ test("runtime setDrainMode logs enable and disable transitions", async () => {
   assert.match(ring, /Drain mode enabled/);
   assert.match(ring, /Agent health check failed for codex/);
   assert.match(ring, /Drain mode disabled/);
+});
+
+test("runtime clears stale CLI-missing drain mode once the agent command is available", async () => {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "fake-runtime-agent-bin-"));
+  const fakeCodexPath = path.join(
+    tempRoot,
+    process.platform === "win32" ? "codex.cmd" : "codex",
+  );
+  const originalPath = process.env.PATH;
+
+  try {
+    await writeFile(
+      fakeCodexPath,
+      process.platform === "win32" ? "@echo off\r\nexit /b 0\r\n" : "#!/bin/sh\nexit 0\n",
+      "utf8",
+    );
+    await chmod(fakeCodexPath, 0o755);
+    process.env.PATH = [tempRoot, "/usr/bin", "/bin"].join(path.delimiter);
+
+    const storage = new MemStorage();
+    const runtime = createAppRuntime({
+      storage,
+      startBackgroundServices: false,
+      startWatcher: false,
+    });
+    await storage.updateRuntimeState({
+      drainMode: true,
+      drainRequestedAt: "2026-05-17T13:57:29.224Z",
+      drainReason: "Agent health check failed for codex: codex CLI is not installed",
+    });
+
+    const snapshot = await runtime.getRuntimeSnapshot();
+
+    assert.equal(snapshot.drainMode, false);
+    assert.equal(snapshot.drainReason, null);
+    assert.equal(snapshot.drainRequestedAt, null);
+  } finally {
+    process.env.PATH = originalPath;
+    await rm(tempRoot, { recursive: true, force: true });
+  }
 });
 
 test("runtime askQuestion persists the question and enqueues a durable job", async () => {

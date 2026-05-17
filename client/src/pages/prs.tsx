@@ -52,6 +52,11 @@ function formatClock(timestamp: string | null): string | null {
   return new Date(timestamp).toLocaleTimeString("en-US", { hour12: false });
 }
 
+function formatGitHubUsername(username?: string | null): string {
+  const normalized = username?.trim().replace(/^@/, "");
+  return normalized ? `@${normalized}` : "@unknown";
+}
+
 function isPRWatchEnabled(pr: Pick<PRSummary, "watchEnabled">): boolean {
   return pr.watchEnabled;
 }
@@ -465,6 +470,7 @@ const PRRow = memo(function PRRow({
             >
               {pr.repo}
             </a>
+            <span>{formatGitHubUsername(pr.author)}</span>
             <span>{formatStatusLabel(pr.status, pr.prStage)}</span>
             <QueueStatusBadge status={queueStatus} />
             {!watchEnabled && <WatchPausedIndicator />}
@@ -646,6 +652,7 @@ function FeedbackRow({
 
 function LogPanel({ prId }: { prId: string | null }) {
   const scrollerRef = useRef<HTMLDivElement>(null);
+  const [clearedLogIds, setClearedLogIds] = useState<Set<string>>(() => new Set());
   const { data: logs = [] } = useQuery<LogEntry[]>({
     queryKey: ["/api/logs", prId ?? "all"],
     queryFn: async () => {
@@ -659,11 +666,18 @@ function LogPanel({ prId }: { prId: string | null }) {
     enabled: Boolean(prId),
     refetchInterval: 1500,
   });
-  const visibleLogs = useMemo(
-    () => logs.length > MAX_VISIBLE_LOGS ? logs.slice(-MAX_VISIBLE_LOGS) : logs,
-    [logs],
+  const viewLogs = useMemo(
+    () => logs.filter((log) => !clearedLogIds.has(log.id)),
+    [clearedLogIds, logs],
   );
-  const hiddenLogCount = logs.length - visibleLogs.length;
+  const visibleLogs = useMemo(
+    () => viewLogs.length > MAX_VISIBLE_LOGS ? viewLogs.slice(-MAX_VISIBLE_LOGS) : viewLogs,
+    [viewLogs],
+  );
+  const hiddenLogCount = viewLogs.length - visibleLogs.length;
+  useEffect(() => {
+    setClearedLogIds(new Set());
+  }, [prId]);
   useEffect(() => {
     const scroller = scrollerRef.current;
     if (!scroller) {
@@ -671,7 +685,7 @@ function LogPanel({ prId }: { prId: string | null }) {
     }
 
     scroller.scrollTop = scroller.scrollHeight;
-  }, [logs.length, prId]);
+  }, [visibleLogs.length, prId]);
 
   return (
     <div className="flex h-full flex-col">
@@ -680,11 +694,27 @@ function LogPanel({ prId }: { prId: string | null }) {
           <div className="p-4 text-[12px] text-muted-foreground">Select a PR to see logs.</div>
         ) : logs.length === 0 ? (
           <div className="p-4 text-[12px] text-muted-foreground">No workflow logs yet.</div>
+        ) : viewLogs.length === 0 ? (
+          <div className="p-4 text-[12px] text-muted-foreground">
+            View cleared. New log entries will appear here.
+          </div>
         ) : (
           <>
+            <div className="flex items-center justify-between gap-2 border-b border-border/60 px-3 py-2">
+              <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                {viewLogs.length} visible
+              </span>
+              <button
+                type="button"
+                onClick={() => setClearedLogIds(new Set(logs.map((log) => log.id)))}
+                className="cursor-pointer rounded-md border border-border bg-transparent px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground transition-colors hover:border-foreground/30 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              >
+                Clear view
+              </button>
+            </div>
             {hiddenLogCount > 0 && (
               <div className="border-b border-border/60 px-3 py-2 text-[10px] uppercase tracking-wider text-muted-foreground">
-                Showing latest {MAX_VISIBLE_LOGS} of {logs.length} entries.
+                Showing latest {MAX_VISIBLE_LOGS} entries.
               </div>
             )}
             {visibleLogs.map((log) => {
@@ -1527,6 +1557,7 @@ export default function Dashboard() {
               {(() => {
                 const metaItems: MetaItem[] = [
                   { key: "status", content: <span>status: <span className="text-foreground">{formatStatusLabel(selectedPR.status, selectedPR.prStage)}</span></span> },
+                  { key: "author", content: <span>author: <span className="text-foreground/80">{formatGitHubUsername(selectedPR.author)}</span></span> },
                   { key: "items", content: <span><span className="font-mono text-foreground">{selectedPR.feedbackItems.length}</span> items</span> },
                 ];
                 if (selectedPRQueueStatus) {

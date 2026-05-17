@@ -408,7 +408,7 @@ test("issues page keeps the QA-tested issue monitor and work surface wired", asy
   assertHasExpression(sourceFile, "issue work logs", /\bissueLogs\b/);
   assertHasExpression(sourceFile, "issue body html rendering", /\bbodyHtml\b/);
   assertHasExpression(sourceFile, "issue markdown class", /issue-markdown/);
-  assertHasExpression(sourceFile, "issue author line", /by\s+\{issue\.author\s*\|\|\s*["']unknown["']\}/);
+  assertHasExpression(sourceFile, "issue author line", /by\s+\{formatGitHubUsername\(issue\.author\)\}/);
   assertHasExpression(sourceFile, "issue log metadata chips", /\bgetLogMetadataEntries\b/);
   assertHasExpression(sourceFile, "issue work pr field", /\bworkPrUrl\b/);
   assertHasExpression(sourceFile, "issue work stage field", /\bworkStage\b/);
@@ -517,6 +517,7 @@ test("logs route keeps the QA-tested filtering, streaming, copy, and download su
   assertHasJsxAttribute(sourceFile, "id", "source filter", "logs-source");
   assertHasJsxAttribute(sourceFile, "type", "search input", "search");
   assertHasStringValue(sourceFile, "follow tail toggle", "follow tail");
+  assertHasStringValue(sourceFile, "clear view action", "clear view");
   assertHasExpression(sourceFile, "copy action", /navigator\.clipboard\.writeText/);
   assertHasExpression(sourceFile, "download action", /patchdeck-logs-/);
 });
