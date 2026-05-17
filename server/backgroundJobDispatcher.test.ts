@@ -219,6 +219,55 @@ test("BackgroundJobDispatcher waitForIdle reflects active queue handlers", async
   }
 });
 
+test("BackgroundJobDispatcher limits concurrent babysit jobs using config", async () => {
+  const storage = new MemStorage();
+  const queue = new BackgroundJobQueue(storage);
+  await storage.updateConfig({ maxConcurrentBabysitRuns: 1 });
+
+  const firstRelease = deferred();
+  const started: string[] = [];
+
+  const firstJob = await queue.enqueue("babysit_pr", "pr-1", "babysit_pr:pr-1", { prId: "pr-1" });
+  const secondJob = await queue.enqueue("babysit_pr", "pr-2", "babysit_pr:pr-2", { prId: "pr-2" });
+  const dispatcher = new BackgroundJobDispatcher({
+    storage,
+    queue,
+    workerId: "dispatcher-1",
+    pollIntervalMs: 5,
+    leaseMs: 30_000,
+    heartbeatIntervalMs: 10,
+    handlers: {
+      babysit_pr: async (job) => {
+        started.push(job.targetId);
+        if (job.targetId === "pr-1") {
+          await firstRelease.promise;
+        }
+      },
+    },
+  });
+
+  try {
+    await dispatcher.start();
+    await waitForCondition(() => started.length === 1);
+    await new Promise((resolve) => setTimeout(resolve, 40));
+
+    assert.deepEqual(started, ["pr-1"]);
+    assert.equal((await storage.getBackgroundJob(firstJob.id))?.status, "leased");
+    assert.equal((await storage.getBackgroundJob(secondJob.id))?.status, "queued");
+
+    firstRelease.resolve();
+    await waitForCondition(() => started.length === 2);
+    assert.equal(await dispatcher.waitForIdle(250), true);
+
+    assert.deepEqual(started, ["pr-1", "pr-2"]);
+    assert.equal((await storage.getBackgroundJob(firstJob.id))?.status, "completed");
+    assert.equal((await storage.getBackgroundJob(secondJob.id))?.status, "completed");
+  } finally {
+    firstRelease.resolve();
+    dispatcher.stop();
+  }
+});
+
 test("BackgroundJobDispatcher reclaims expired leases during operation, not just at startup", async () => {
   const storage = new MemStorage();
   const queue = new BackgroundJobQueue(storage);

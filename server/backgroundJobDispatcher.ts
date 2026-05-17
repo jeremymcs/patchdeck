@@ -151,7 +151,9 @@ export class BackgroundJobDispatcher {
       }
 
       const runtimeState = await this.storage.getRuntimeState();
-      const claimableKinds = runtimeState.drainMode ? this.drainClaimableKinds : this.handledKinds;
+      const claimableKinds = await this.resolveClaimableKinds(
+        runtimeState.drainMode ? this.drainClaimableKinds : this.handledKinds,
+      );
       if (claimableKinds.length === 0) {
         return;
       }
@@ -179,6 +181,24 @@ export class BackgroundJobDispatcher {
         this.schedulePoll(this.pollIntervalMs);
       }
     }
+  }
+
+  private async resolveClaimableKinds(kinds: BackgroundJobKind[]): Promise<BackgroundJobKind[]> {
+    if (!kinds.includes("babysit_pr")) {
+      return kinds;
+    }
+
+    const config = await this.storage.getConfig();
+    const maxConcurrentBabysitRuns = Math.max(1, config.maxConcurrentBabysitRuns);
+    const activeBabysitRuns = Array.from(this.activeJobs.keys())
+      .filter((jobId) => jobId.startsWith("babysit_pr:"))
+      .length;
+
+    if (activeBabysitRuns < maxConcurrentBabysitRuns) {
+      return kinds;
+    }
+
+    return kinds.filter((kind) => kind !== "babysit_pr");
   }
 
   private runJob(job: BackgroundJob): void {
@@ -220,7 +240,7 @@ export class BackgroundJobDispatcher {
         if (heartbeatTimer) {
           clearInterval(heartbeatTimer);
         }
-        this.activeJobs.delete(job.id);
+        this.activeJobs.delete(`${job.kind}:${job.id}`);
       }
     })().catch((error) => {
       this.onError(error);
@@ -230,7 +250,7 @@ export class BackgroundJobDispatcher {
       }
     });
 
-    this.activeJobs.set(job.id, jobPromise);
+    this.activeJobs.set(`${job.kind}:${job.id}`, jobPromise);
   }
 
   private async requeueExpiredAndNotify(): Promise<void> {
