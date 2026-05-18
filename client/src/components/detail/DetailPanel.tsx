@@ -34,7 +34,7 @@ export function DetailPanel({
   return (
     <div className={`mt-3 border ${containerClass}`} data-testid={testId}>
       <div className={`flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2 ${headerStripClass}`}>
-        <div className="text-[10px] uppercase tracking-wider">{title}</div>
+        <div className="text-label uppercase tracking-wider">{title}</div>
         <div className="flex items-center gap-2">
           {chip}
           {action}

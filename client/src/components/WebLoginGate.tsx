@@ -95,7 +95,7 @@ export function WebLoginGate({ children }: WebLoginGateProps) {
   if (!status) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background px-4 text-foreground">
-        <div className="border border-border px-4 py-3 text-xs uppercase text-muted-foreground">
+        <div className="border border-border px-4 py-3 text-body uppercase text-muted-foreground">
           {error ?? "Loading PatchDeck"}
         </div>
       </div>
@@ -113,30 +113,30 @@ export function WebLoginGate({ children }: WebLoginGateProps) {
         onSubmit={submitLogin}
       >
         <div className="mb-5 space-y-1">
-          <p className="text-[10px] uppercase text-muted-foreground">Remote access</p>
-          <h1 className="text-base font-semibold">Sign in to PatchDeck</h1>
+          <p className="text-label uppercase text-muted-foreground">Remote access</p>
+          <h1 className="text-title font-semibold">Sign in to PatchDeck</h1>
         </div>
 
         {!status.loginConfigured ? (
-          <div className="border border-warning-border bg-warning-muted p-3 text-xs text-warning-foreground">
+          <div className="border border-warning-border bg-warning-muted p-3 text-body text-warning-foreground">
             Remote login is not configured on this server.
           </div>
         ) : (
           <>
-            <label className="mb-3 block text-xs">
+            <label className="mb-3 block text-body">
               <span className="mb-1 block text-muted-foreground">Username</span>
               <input
-                className="w-full border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-ring"
+                className="w-full border border-input bg-background px-3 py-2 text-body text-foreground outline-none focus:border-ring"
                 autoComplete="username"
                 value={username}
                 onChange={(event) => setUsername(event.target.value)}
               />
             </label>
 
-            <label className="mb-4 block text-xs">
+            <label className="mb-4 block text-body">
               <span className="mb-1 block text-muted-foreground">Password</span>
               <input
-                className="w-full border border-input bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-ring"
+                className="w-full border border-input bg-background px-3 py-2 text-body text-foreground outline-none focus:border-ring"
                 autoComplete="current-password"
                 type="password"
                 value={password}
@@ -145,13 +145,13 @@ export function WebLoginGate({ children }: WebLoginGateProps) {
             </label>
 
             {error && (
-              <div className="mb-4 border border-destructive bg-background p-3 text-xs text-destructive">
+              <div className="mb-4 border border-destructive bg-background p-3 text-body text-destructive">
                 {error}
               </div>
             )}
 
             <button
-              className="w-full border border-primary bg-primary px-3 py-2 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
+              className="w-full border border-primary bg-primary px-3 py-2 text-body font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
               disabled={submitting}
               type="submit"
             >

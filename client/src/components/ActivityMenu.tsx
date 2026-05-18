@@ -1,9 +1,11 @@
 import { Activity as ActivityIcon } from "lucide-react";
+import { Link } from "wouter";
 import type { ActivityItem, ActivitySnapshot, BackgroundJobKind } from "@shared/schema";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { QueueStatusBadge } from "@/components/QueueStatusBadge";
 import type { QueueStatusView } from "@/lib/activityQueue";
 import { formatActivityDetail, formatActivityLabel } from "@/lib/activityDisplay";
+import { getActivityTargetRoute } from "@/lib/activityTargetRoute";
 
 export const EMPTY_ACTIVITY_SNAPSHOT: ActivitySnapshot = {
   failed: [],
@@ -43,7 +45,7 @@ function ActivityKindBadge({ kind }: { kind: BackgroundJobKind }) {
   const meta = ACTIVITY_KIND_META[kind];
   return (
     <span
-      className={`shrink-0 border px-1 text-[9px] uppercase leading-4 tracking-wider ${meta.className}`}
+      className={`shrink-0 border px-1 text-label uppercase leading-4 tracking-wider ${meta.className}`}
     >
       {meta.label}
     </span>
@@ -53,6 +55,7 @@ function ActivityKindBadge({ kind }: { kind: BackgroundJobKind }) {
 function ActivityRow({ activity, queueStatus }: { activity: ActivityItem; queueStatus: QueueStatusView | null }) {
   const label = formatActivityLabel(activity.label);
   const detail = formatActivityDetail(activity.detail);
+  const targetRoute = getActivityTargetRoute(activity.kind);
   const timeLabel = activity.status === "failed"
     ? formatClock(activity.updatedAt)
     : activity.status === "in_progress"
@@ -73,17 +76,17 @@ function ActivityRow({ activity, queueStatus }: { activity: ActivityItem; queueS
       <span className="min-w-0 flex-1">
         <span className="flex min-w-0 items-center gap-1.5">
           <ActivityKindBadge kind={activity.kind} />
-          <span className="min-w-0 truncate text-[12px] leading-4 text-foreground">{label}</span>
+          <span className="min-w-0 truncate text-body leading-4 text-foreground">{label}</span>
         </span>
         {detail && (
-          <span className="block truncate text-[11px] leading-4 text-muted-foreground">{detail}</span>
+          <span className="block truncate text-label leading-4 text-muted-foreground">{detail}</span>
         )}
         <div className="mt-1">
           <QueueStatusBadge status={queueStatus} />
         </div>
         {activity.status === "failed" && activity.lastError && (
           <span
-            className="block whitespace-pre-wrap break-words text-[11px] leading-4 text-destructive"
+            className="block whitespace-pre-wrap break-words text-label leading-4 text-destructive"
             title={activity.lastError}
           >
             {activity.lastError}
@@ -91,21 +94,19 @@ function ActivityRow({ activity, queueStatus }: { activity: ActivityItem; queueS
         )}
       </span>
       {timeLabel && (
-        <span className="shrink-0 text-[10px] leading-4 text-muted-foreground">{timeLabel}</span>
+        <span className="shrink-0 text-label leading-4 text-muted-foreground">{timeLabel}</span>
       )}
     </div>
   );
 
-  if (activity.targetUrl) {
+  if (targetRoute) {
     return (
-      <a
-        href={activity.targetUrl}
-        target="_blank"
-        rel="noopener noreferrer"
+      <Link
+        href={targetRoute}
         className="block outline-none hover:bg-muted focus:bg-muted focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
       >
         {content}
-      </a>
+      </Link>
     );
   }
 
@@ -125,7 +126,7 @@ function ActivitySection({
 }) {
   return (
     <div className="py-1">
-      <div className="px-2 py-1 text-[10px] uppercase tracking-wider text-muted-foreground">{title}</div>
+      <div className="px-2 py-1 text-label uppercase tracking-wider text-muted-foreground">{title}</div>
       {items.length > 0 ? (
         <div className="max-h-52 overflow-y-auto">
           {items.map((activity) => (
@@ -133,7 +134,7 @@ function ActivitySection({
           ))}
         </div>
       ) : (
-        <div className="px-2 pb-2 text-[11px] text-muted-foreground">{emptyLabel}</div>
+        <div className="px-2 pb-2 text-label text-muted-foreground">{emptyLabel}</div>
       )}
     </div>
   );
@@ -164,7 +165,7 @@ export function ActivityMenu({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        className="inline-flex min-h-8 items-center gap-1 border border-border px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background sm:min-h-0"
+        className="inline-flex min-h-8 items-center gap-1 border border-border px-2 py-0.5 text-label text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background sm:min-h-0"
         aria-label="Open activity menu"
         data-testid="activity-menu-trigger"
       >
@@ -175,20 +176,20 @@ export function ActivityMenu({
       <DropdownMenuContent align="end" className="max-h-[calc(100dvh-6rem)] w-[calc(100vw-1rem)] max-w-sm overflow-y-auto p-0 sm:w-80">
         <div className="border-b border-border px-2 py-2">
           <div className="flex items-center justify-between gap-2">
-            <div className="text-[12px] font-medium">Activities</div>
+            <div className="text-body font-medium">Activities</div>
             {failedCount > 0 && (
               <button
                 type="button"
                 onClick={onClearFailed}
                 disabled={isClearingFailed}
-                className="border border-border px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                className="border border-border px-1.5 py-0.5 text-label uppercase tracking-wider text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 data-testid="clear-failed-activities"
               >
                 {isClearingFailed ? "clearing" : "clear failed"}
               </button>
             )}
           </div>
-          <div className="text-[11px] text-muted-foreground">
+          <div className="text-label text-muted-foreground">
             {failedCount} failed / {inProgressCount} in progress / {queuedCount} queued
           </div>
         </div>
@@ -214,7 +215,7 @@ export function ActivityMenu({
         />
         {idleReason && totalCount === 0 && (
           <div
-            className="border-t border-border px-2 py-2 text-[11px] leading-4 text-warning-foreground"
+            className="border-t border-border px-2 py-2 text-label leading-4 text-warning-foreground"
             data-testid="activity-idle-reason"
           >
             {idleReason}
@@ -222,7 +223,7 @@ export function ActivityMenu({
         )}
         {globalDrainMode && queuedCount > 0 && (
           <div
-            className="border-t border-border px-2 py-2 text-[11px] text-muted-foreground"
+            className="border-t border-border px-2 py-2 text-label text-muted-foreground"
             data-testid="activity-drain-note"
           >
             {QUEUED_DRAIN_COPY}
@@ -230,7 +231,7 @@ export function ActivityMenu({
         )}
         {pollIntervalMs !== undefined && (
           <div
-            className="border-t border-border px-2 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground"
+            className="border-t border-border px-2 py-1.5 text-label uppercase tracking-wider text-muted-foreground"
             data-testid="activity-poll-footer"
           >
             poll <span className="font-mono text-foreground/80">{formatPollLabel(pollIntervalMs)}</span>

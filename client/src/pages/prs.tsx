@@ -121,7 +121,7 @@ function FilterChip({
       type="button"
       onClick={onClick}
       data-testid={testId}
-      className={`rounded-md border px-2 py-0.5 text-[10px] uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background ${
+      className={`rounded-md border px-2 py-0.5 text-label uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background ${
         active
           ? "border-primary bg-primary/10 text-primary"
           : "border-border text-muted-foreground hover:border-primary/40 hover:text-primary"
@@ -205,7 +205,7 @@ const HEALING_TONE_CLASSES: Record<"neutral" | "info" | "warning" | "success" | 
 function FeedbackStatusTag({ status }: { status: FeedbackItem["status"] }) {
   const cls = getFeedbackStatusBadgeClass(status);
   return (
-    <span className={`inline-block border px-1.5 py-0 text-[11px] uppercase tracking-wide ${cls}`}>
+    <span className={`inline-block border px-1.5 py-0 text-label uppercase tracking-wide ${cls}`}>
       {formatFeedbackStatusLabel(status)}
     </span>
   );
@@ -213,7 +213,7 @@ function FeedbackStatusTag({ status }: { status: FeedbackItem["status"] }) {
 
 function WatchPausedIndicator() {
   return (
-    <span className="border border-border px-1.5 py-0 text-[10px] uppercase tracking-wider text-muted-foreground">
+    <span className="border border-border px-1.5 py-0 text-label uppercase tracking-wider text-muted-foreground">
       watch paused
     </span>
   );
@@ -226,12 +226,12 @@ function DashboardDrainBanner({ runtimeState }: { runtimeState: RuntimeState | u
 
   return (
     <div
-      className="shrink-0 border-b border-destructive/40 bg-destructive/10 px-4 py-2 text-[12px]"
+      className="shrink-0 border-b border-destructive/40 bg-destructive/10 px-4 py-2 text-body"
       data-testid="dashboard-drain-banner"
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0">
-          <div className="text-[10px] font-medium uppercase tracking-wider text-destructive">
+          <div className="text-label font-medium uppercase tracking-wider text-destructive">
             {DRAIN_PAUSED_TITLE}
           </div>
           {runtimeState.drainReason ? (
@@ -242,13 +242,13 @@ function DashboardDrainBanner({ runtimeState }: { runtimeState: RuntimeState | u
               {runtimeState.drainReason}
             </div>
           ) : null}
-          <div className="mt-1 text-[11px] text-muted-foreground">
+          <div className="mt-1 text-label text-muted-foreground">
             {MANUAL_RUNS_BLOCKED_COPY}
           </div>
         </div>
         <Link
           href="/settings"
-          className="shrink-0 border border-destructive/50 px-2 py-0.5 text-[10px] uppercase tracking-wider text-destructive transition-colors hover:bg-destructive hover:text-background focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+          className="shrink-0 border border-destructive/50 px-2 py-0.5 text-label uppercase tracking-wider text-destructive transition-colors hover:bg-destructive hover:text-background focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
         >
           Settings
         </Link>
@@ -271,7 +271,7 @@ function OperatorWarningsBanner({ warnings }: { warnings: OperatorWarning[] }) {
         {warnings.map((warning) => (
           <div key={warning.id} data-testid={`operator-warning-${warning.id}`}>
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="text-[12px] font-medium uppercase tracking-wider text-yellow-600">
+              <div className="text-body font-medium uppercase tracking-wider text-yellow-600">
                 {warning.title}
               </div>
               {warning.targetUrl && (
@@ -279,14 +279,14 @@ function OperatorWarningsBanner({ warnings }: { warnings: OperatorWarning[] }) {
                   href={warning.targetUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="border border-yellow-600/60 px-2 py-0.5 text-[10px] uppercase tracking-wider text-yellow-600 transition-colors hover:bg-yellow-600 hover:text-background"
+                  className="border border-yellow-600/60 px-2 py-0.5 text-label uppercase tracking-wider text-yellow-600 transition-colors hover:bg-yellow-600 hover:text-background"
                 >
                   Open PR
                 </a>
               )}
             </div>
-            <div className="mt-1 text-[12px] text-foreground/80">{warning.message}</div>
-            <ol className="mt-2 list-decimal space-y-1 pl-4 text-[11px] text-muted-foreground">
+            <div className="mt-1 text-body text-foreground/80">{warning.message}</div>
+            <ol className="mt-2 list-decimal space-y-1 pl-4 text-label text-muted-foreground">
               {warning.fixSteps.map((step) => (
                 <li key={step}>{step}</li>
               ))}
@@ -342,7 +342,7 @@ function MergeReadinessChecklist({
 }) {
   return (
     <div
-      className={`mt-2 rounded-md border px-3 py-2 text-[11px] ${
+      className={`mt-2 rounded-md border px-3 py-2 text-label ${
         ready
           ? "border-success-border bg-success-muted text-success-foreground"
           : "border-warning-border bg-warning-muted text-warning-foreground"
@@ -350,10 +350,10 @@ function MergeReadinessChecklist({
       data-testid="pr-merge-readiness-checklist"
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="text-[10px] font-medium uppercase tracking-wider">
+        <div className="text-label font-medium uppercase tracking-wider">
           Merge readiness
         </div>
-        <div className="rounded-md border border-current/40 px-1.5 py-0 text-[10px] uppercase tracking-wider">
+        <div className="rounded-md border border-current/40 px-1.5 py-0 text-label uppercase tracking-wider">
           {ready ? "ready" : "not ready"}
         </div>
       </div>
@@ -366,8 +366,8 @@ function MergeReadinessChecklist({
               <CircleDashed className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
             )}
             <span className="min-w-0">
-              <span className="block text-[11px] font-medium text-foreground">{check.label}</span>
-              <span className="block truncate text-[10px] opacity-80" title={check.detail}>
+              <span className="block text-label font-medium text-foreground">{check.label}</span>
+              <span className="block truncate text-label opacity-80" title={check.detail}>
                 {check.detail}
               </span>
             </span>
@@ -389,14 +389,14 @@ function AgentIndicator({ pr }: { pr: PRSummary }) {
     <Tooltip>
       <TooltipTrigger asChild>
         <span
-          className="inline-flex shrink-0 cursor-default items-center gap-1 text-[12px] text-primary"
+          className="inline-flex shrink-0 cursor-default items-center gap-1 text-body text-primary"
           data-testid={`agent-indicator-${pr.id}`}
         >
           <Bot className="h-3.5 w-3.5 animate-pulse" aria-hidden="true" />
         </span>
       </TooltipTrigger>
       <TooltipContent side="top">
-        <p className="text-xs">Agent run active on this PR</p>
+        <p className="text-body">Agent run active on this PR</p>
       </TooltipContent>
     </Tooltip>
   );
@@ -465,13 +465,13 @@ const PRRow = memo(function PRRow({
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-3">
-            <span className="w-12 shrink-0 font-mono text-[12px] text-muted-foreground">#{pr.number}</span>
+            <span className="w-12 shrink-0 font-mono text-body text-muted-foreground">#{pr.number}</span>
             <span className="truncate">{pr.title}</span>
             <AgentIndicator pr={pr} />
             {issueLink && (
               <span
                 data-testid="pr-on-issues-badge"
-                className="shrink-0 rounded-md border border-primary/40 bg-primary/10 px-1.5 py-0 text-[10px] uppercase tracking-wider text-primary"
+                className="shrink-0 rounded-md border border-primary/40 bg-primary/10 px-1.5 py-0 text-label uppercase tracking-wider text-primary"
                 title={`Linked from issue #${issueLink.number}`}
               >
                 issue <span className="font-mono">#{issueLink.number}</span>
@@ -479,12 +479,12 @@ const PRRow = memo(function PRRow({
             )}
           </div>
           {pr.status === "error" && failureMessage && (
-            <div className="mt-2 ml-[3.75rem] border border-destructive/40 bg-destructive/10 px-2 py-1 text-[11px] leading-4 text-destructive">
+            <div className="mt-2 ml-[3.75rem] border border-destructive/40 bg-destructive/10 px-2 py-1 text-label leading-4 text-destructive">
               <span className="font-medium uppercase tracking-wider">Error:</span>{" "}
               <span className="break-words">{failureMessage}</span>
             </div>
           )}
-          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 pl-[3.75rem] text-[11px] text-muted-foreground">
+          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 pl-[3.75rem] text-label text-muted-foreground">
             <a
               href={pr.url}
               target="_blank"
@@ -572,7 +572,7 @@ function FeedbackRow({
               <span className="font-medium">{item.author}</span>
               {trusted && (
                 <span
-                  className="rounded-md border border-success-border bg-success-muted px-1.5 py-0 text-[10px] font-medium uppercase tracking-wider text-success-foreground"
+                  className="rounded-md border border-success-border bg-success-muted px-1.5 py-0 text-label font-medium uppercase tracking-wider text-success-foreground"
                   title={`@${item.author} is in Trusted reviewers — feedback is auto-accepted, agent evaluation skipped.`}
                   data-testid={`feedback-trusted-${item.id}`}
                 >
@@ -580,15 +580,15 @@ function FeedbackRow({
                 </span>
               )}
               {item.file && (
-                <span className="font-mono text-[11px] text-muted-foreground">
+                <span className="font-mono text-label text-muted-foreground">
                   {item.file}{item.line ? `:${item.line}` : ""}
                 </span>
               )}
-              <span className="text-[11px] text-muted-foreground">{item.type.replace("_", " ")}</span>
-              {createdAt && <span className="text-[11px] text-muted-foreground">{createdAt}</span>}
+              <span className="text-label text-muted-foreground">{item.type.replace("_", " ")}</span>
+              {createdAt && <span className="text-label text-muted-foreground">{createdAt}</span>}
             </div>
             {prominentStatusReason && (
-              <div className="mt-1 whitespace-pre-wrap break-words border border-destructive/30 bg-destructive/10 px-2 py-1 text-[11px] leading-4 text-destructive">
+              <div className="mt-1 whitespace-pre-wrap break-words border border-destructive/30 bg-destructive/10 px-2 py-1 text-label leading-4 text-destructive">
                 <span className="font-medium uppercase tracking-wider">Failure reason:</span>{" "}
                 {prominentStatusReason}
               </div>
@@ -603,7 +603,7 @@ function FeedbackRow({
                 data-testid={`retry-${item.id}`}
                 aria-label={`Retry feedback from ${item.author}`}
                 title={globalDrainMode ? DRAIN_PAUSED_TITLE : "Retry feedback item"}
-                className="border border-border px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground transition-colors hover:bg-foreground hover:text-background focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-30"
+                className="border border-border px-2 py-0.5 text-label uppercase tracking-wider text-muted-foreground transition-colors hover:bg-foreground hover:text-background focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-30"
               >
                 {globalDrainMode ? DRAIN_PAUSED_LABEL : "Retry"}
               </button>
@@ -614,7 +614,7 @@ function FeedbackRow({
                 data-testid={`toggle-${item.id}`}
                 aria-label={`${collapsedByDefault ? "Show" : "Hide"} feedback details from ${item.author}`}
                 title="Toggle feedback details"
-                className="border border-border px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground transition-colors hover:bg-foreground hover:text-background focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+                className="border border-border px-2 py-0.5 text-label uppercase tracking-wider text-muted-foreground transition-colors hover:bg-foreground hover:text-background focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
               >
                 Details
               </button>
@@ -635,7 +635,7 @@ function FeedbackRow({
                   data-testid={`override-${decision}-${item.id}`}
                   aria-label={`${decision} feedback from ${item.author}`}
                   aria-pressed={selected}
-                  className={`cursor-pointer rounded-md border px-2 py-0.5 text-[10px] uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background ${
+                  className={`cursor-pointer rounded-md border px-2 py-0.5 text-label uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background ${
                     selected ? selectedClass : "border-border text-muted-foreground hover:bg-muted hover:text-foreground"
                   }`}
                 >
@@ -650,20 +650,20 @@ function FeedbackRow({
         <div className="px-4 pb-3">
           {item.bodyHtml ? (
             <div
-              className="feedback-markdown text-[12px] leading-relaxed"
+              className="feedback-markdown text-body leading-relaxed"
               dangerouslySetInnerHTML={{ __html: item.bodyHtml }}
             />
           ) : (
-            <p className="whitespace-pre-wrap text-[12px] leading-relaxed text-foreground/80">{item.body}</p>
+            <p className="whitespace-pre-wrap text-body leading-relaxed text-foreground/80">{item.body}</p>
           )}
           {item.statusReason && !prominentStatusReason && (
-            <p className="mt-2 whitespace-pre-wrap break-words text-[11px] text-muted-foreground">
+            <p className="mt-2 whitespace-pre-wrap break-words text-label text-muted-foreground">
               <span className="font-medium uppercase tracking-wider text-foreground/70">Status reason:</span>{" "}
               {item.statusReason}
             </p>
           )}
           {item.decisionReason && (
-            <p className="mt-2 whitespace-pre-wrap break-words text-[11px] text-muted-foreground">
+            <p className="mt-2 whitespace-pre-wrap break-words text-label text-muted-foreground">
               <span className="font-medium uppercase tracking-wider text-foreground/70">Decision reason:</span>{" "}
               {item.decisionReason}
             </p>
@@ -715,29 +715,29 @@ function LogPanel({ prId }: { prId: string | null }) {
     <div className="flex h-full flex-col">
       <div ref={scrollerRef} className="flex-1 overflow-y-auto" data-testid="pr-detail-logs">
         {!prId ? (
-          <div className="p-4 text-[12px] text-muted-foreground">Select a PR to see logs.</div>
+          <div className="p-4 text-body text-muted-foreground">Select a PR to see logs.</div>
         ) : logs.length === 0 ? (
-          <div className="p-4 text-[12px] text-muted-foreground">No workflow logs yet.</div>
+          <div className="p-4 text-body text-muted-foreground">No workflow logs yet.</div>
         ) : viewLogs.length === 0 ? (
-          <div className="p-4 text-[12px] text-muted-foreground">
+          <div className="p-4 text-body text-muted-foreground">
             View cleared. New log entries will appear here.
           </div>
         ) : (
           <>
             <div className="flex items-center justify-between gap-2 border-b border-border/60 px-3 py-2">
-              <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              <span className="text-label uppercase tracking-wider text-muted-foreground">
                 {viewLogs.length} visible
               </span>
               <button
                 type="button"
                 onClick={() => setClearedLogIds(new Set(logs.map((log) => log.id)))}
-                className="cursor-pointer rounded-md border border-border bg-transparent px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground transition-colors hover:border-foreground/30 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                className="cursor-pointer rounded-md border border-border bg-transparent px-2 py-0.5 text-label font-medium uppercase tracking-wider text-muted-foreground transition-colors hover:border-foreground/30 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               >
                 Clear view
               </button>
             </div>
             {hiddenLogCount > 0 && (
-              <div className="border-b border-border/60 px-3 py-2 text-[10px] uppercase tracking-wider text-muted-foreground">
+              <div className="border-b border-border/60 px-3 py-2 text-label uppercase tracking-wider text-muted-foreground">
                 Showing latest {MAX_VISIBLE_LOGS} entries.
               </div>
             )}
@@ -748,7 +748,7 @@ function LogPanel({ prId }: { prId: string | null }) {
 
               return (
                 <div key={log.id} className="border-b border-border/60 px-3 py-2 last:border-b-0" data-testid={`log-${log.id}`}>
-                  <div className="flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground">
+                  <div className="flex flex-wrap items-center gap-2 text-label uppercase tracking-wider text-muted-foreground">
                     <span className={
                       log.level === "error" ? "text-destructive" :
                       log.level === "warn" ? "text-warning-foreground" :
@@ -761,11 +761,11 @@ function LogPanel({ prId }: { prId: string | null }) {
                     {log.runId && <span className="normal-case text-foreground/45">run {log.runId.slice(0, 8)}</span>}
                     <span>{formatClock(log.timestamp)}</span>
                   </div>
-                  <div className={`mt-1 break-words text-[12px] ${log.level === "error" ? "text-destructive" : "text-foreground/75"}`}>
+                  <div className={`mt-1 break-words text-body ${log.level === "error" ? "text-destructive" : "text-foreground/75"}`}>
                     {log.message}
                   </div>
                   {metadataText && (
-                    <pre className="mt-1 whitespace-pre-wrap break-all text-[10px] text-muted-foreground">
+                    <pre className="mt-1 whitespace-pre-wrap break-all text-label text-muted-foreground">
                       {metadataText}
                     </pre>
                   )}
@@ -799,17 +799,17 @@ function HealingPanel({
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">CI healing</div>
+          <div className="text-label font-medium uppercase tracking-wider text-muted-foreground">CI healing</div>
           <div className="mt-1 flex flex-wrap items-center gap-2">
             {view ? (
               <>
-                <span className={`inline-flex rounded-md border px-1.5 py-0.5 text-[11px] font-medium uppercase tracking-wider ${toneClass}`}>
+                <span className={`inline-flex rounded-md border px-1.5 py-0.5 text-label font-medium uppercase tracking-wider ${toneClass}`}>
                   {view.stateLabel}
                 </span>
-                <span className="text-[11px] text-muted-foreground">{view.attemptSummary}</span>
+                <span className="text-label text-muted-foreground">{view.attemptSummary}</span>
               </>
             ) : (
-              <span className="text-[11px] text-muted-foreground">
+              <span className="text-label text-muted-foreground">
                 {config?.autoHealCI === false
                   ? "Automatic CI healing is disabled in settings."
                   : "No healing session yet for this PR."}
@@ -818,7 +818,7 @@ function HealingPanel({
           </div>
         </div>
         {session && (
-          <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
+          <span className="shrink-0 font-mono text-label text-muted-foreground">
             head {session.currentHeadSha.slice(0, 7)}
           </span>
         )}
@@ -826,21 +826,21 @@ function HealingPanel({
 
       {view ? (
         <>
-          <div className="mt-2 grid gap-1 text-[11px]">
+          <div className="mt-2 grid gap-1 text-label">
             {view.reasonSummary && (
               <div>
-                <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Reason</span>
+                <span className="text-label uppercase tracking-wider text-muted-foreground">Reason</span>
                 <span className="ml-2 text-foreground/80">{view.reasonSummary}</span>
               </div>
             )}
             <div className="text-muted-foreground">{view.statusHint}</div>
             <div>
-              <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Attempts</span>
+              <span className="text-label uppercase tracking-wider text-muted-foreground">Attempts</span>
               <span className="ml-2 font-mono text-foreground/80">{view.attemptSummary}</span>
               {session?.latestFingerprint && (
                 <>
                   <span className="mx-1.5 text-border" aria-hidden="true">·</span>
-                  <span className="text-[10px] uppercase tracking-wider text-muted-foreground">fingerprint</span>
+                  <span className="text-label uppercase tracking-wider text-muted-foreground">fingerprint</span>
                   <span className="ml-1.5 font-mono text-foreground/80">{session.latestFingerprint}</span>
                 </>
               )}
@@ -855,7 +855,7 @@ function HealingPanel({
                     type="button"
                     disabled
                     title={action.hint}
-                    className={`rounded-md border px-2 py-0.5 text-[10px] uppercase tracking-wider transition-colors ${
+                    className={`rounded-md border px-2 py-0.5 text-label uppercase tracking-wider transition-colors ${
                       action.available
                         ? "border-border text-foreground/70 hover:bg-muted"
                         : "border-border text-muted-foreground/60"
@@ -865,7 +865,7 @@ function HealingPanel({
                   </button>
                 ))}
               </div>
-              <div className="mt-1 text-[10px] text-muted-foreground">
+              <div className="mt-1 text-label text-muted-foreground">
                 Operator controls are read-only until healing action endpoints are added.
               </div>
             </>
@@ -873,7 +873,7 @@ function HealingPanel({
         </>
       ) : (
         config?.autoHealCI !== false && (
-          <div className="mt-2 text-[11px] text-muted-foreground">
+          <div className="mt-2 text-label text-muted-foreground">
             The watcher will create a healing session when a failing check is classified as healable.
           </div>
         )
@@ -893,7 +893,7 @@ function PRDescriptionPanel({ pr }: { pr: PR }) {
         aria-expanded={isOpen}
         className="flex w-full items-center justify-between gap-2 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
       >
-        <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Description</div>
+        <div className="text-label font-medium uppercase tracking-wider text-muted-foreground">Description</div>
         {isOpen ? <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />}
       </button>
       {isOpen && (
@@ -904,7 +904,7 @@ function PRDescriptionPanel({ pr }: { pr: PR }) {
             dangerouslySetInnerHTML={{ __html: pr.bodyHtml }}
           />
         ) : (
-          <pre className="mt-2 whitespace-pre-wrap break-words border border-border/60 bg-background p-4 text-[12px] leading-6 text-muted-foreground">
+          <pre className="mt-2 whitespace-pre-wrap break-words border border-border/60 bg-background p-4 text-body leading-6 text-muted-foreground">
             {pr.body?.trim() || "No description provided."}
           </pre>
         )
@@ -949,7 +949,7 @@ function RightPanel({
     <div className="flex max-h-[42dvh] min-h-0 w-full shrink-0 flex-col border-t border-border lg:max-h-none lg:min-h-0 lg:w-80 lg:border-l lg:border-t-0">
       <div className="flex shrink-0 items-center border-b border-border">
         <div
-          className="flex-1 bg-muted px-3 py-2 text-[11px] uppercase tracking-wider text-foreground shadow-[inset_0_-2px_0_0_hsl(var(--primary))]"
+          className="flex-1 bg-muted px-3 py-2 text-label uppercase tracking-wider text-foreground shadow-[inset_0_-2px_0_0_hsl(var(--primary))]"
           data-testid="tab-activity"
         >
           Activity
@@ -1001,12 +1001,12 @@ function QAPanel({ prId, globalDrainMode }: { prId: string; globalDrainMode: boo
 
   return (
     <div className="flex h-full flex-col">
-      <div className="border-b border-border px-4 py-2 text-[11px] uppercase tracking-wider text-muted-foreground">
+      <div className="border-b border-border px-4 py-2 text-label uppercase tracking-wider text-muted-foreground">
         Ask Agent
       </div>
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-3">
         {questions.length === 0 ? (
-          <span className="text-[12px] text-muted-foreground">
+          <span className="text-body text-muted-foreground">
             {globalDrainMode
               ? ASK_DRAIN_COPY
               : "Ask questions about this PR — the agent will read activity logs, feedback, and status to answer."}
@@ -1014,24 +1014,24 @@ function QAPanel({ prId, globalDrainMode }: { prId: string; globalDrainMode: boo
         ) : (
           questions.map((q) => (
             <div key={q.id} className="space-y-1.5" data-testid={`question-${q.id}`}>
-              <div className="text-[12px]">
+              <div className="text-body">
                 <span className="font-medium text-foreground/90">Q: </span>
                 <span className="text-foreground/80">{q.question}</span>
               </div>
               {q.status === "pending" || q.status === "answering" ? (
-                <div className="text-[11px] text-muted-foreground animate-pulse">
+                <div className="text-label text-muted-foreground animate-pulse">
                   Agent is thinking...
                 </div>
               ) : q.status === "error" ? (
-                <div className="text-[11px] text-destructive">
+                <div className="text-label text-destructive">
                   Error: {q.error || "Unknown error"}
                 </div>
               ) : (
-                <div className="text-[12px] leading-relaxed text-foreground/85 whitespace-pre-wrap border-l-2 border-primary/40 pl-3">
+                <div className="text-body leading-relaxed text-foreground/85 whitespace-pre-wrap border-l-2 border-primary/40 pl-3">
                   {q.answer}
                 </div>
               )}
-              <div className="text-[10px] text-muted-foreground">
+              <div className="text-label text-muted-foreground">
                 {formatClock(q.createdAt)}
                 {q.answeredAt && ` — answered ${formatClock(q.answeredAt)}`}
               </div>
@@ -1055,20 +1055,20 @@ function QAPanel({ prId, globalDrainMode }: { prId: string; globalDrainMode: boo
             aria-label="Question for selected pull request"
             disabled={globalDrainMode}
             data-testid="input-question"
-            className="flex-1 border border-border bg-transparent px-2 py-1 text-[12px] placeholder:text-muted-foreground/50 focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+            className="flex-1 border border-border bg-transparent px-2 py-1 text-body placeholder:text-muted-foreground/50 focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
           />
           <button
             type="submit"
             disabled={askDisabled}
             title={globalDrainMode ? DRAIN_PAUSED_TITLE : "Ask agent"}
             data-testid="button-ask"
-            className="cursor-pointer border border-primary bg-primary px-3 py-1 text-[11px] font-medium uppercase tracking-wider text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
+            className="cursor-pointer border border-primary bg-primary px-3 py-1 text-label font-medium uppercase tracking-wider text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
           >
             {globalDrainMode ? DRAIN_PAUSED_LABEL : askMutation.isPending ? "..." : "Ask"}
           </button>
         </div>
         {askMutation.isError && (
-          <div className="mt-1 text-[11px] text-destructive">
+          <div className="mt-1 text-label text-destructive">
             {getErrorMessage(askMutation.error)}
           </div>
         )}
@@ -1408,7 +1408,7 @@ export default function Dashboard() {
         )}
         actions={(
           <>
-            <label htmlFor="dashboard-coding-agent" className="text-[11px] uppercase tracking-wider text-muted-foreground">Agent</label>
+            <label htmlFor="dashboard-coding-agent" className="text-label uppercase tracking-wider text-muted-foreground">Agent</label>
             <select
               id="dashboard-coding-agent"
               value={config?.codingAgent ?? "codex"}
@@ -1420,7 +1420,7 @@ export default function Dashboard() {
               }}
               disabled={updateConfigMutation.isPending}
               data-testid="select-coding-agent"
-              className="cursor-pointer rounded-md border border-border bg-transparent px-2 py-1 text-[11px] transition-colors focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50"
+              className="cursor-pointer rounded-md border border-border bg-transparent px-2 py-1 text-label transition-colors focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50"
             >
               <option value="codex">codex</option>
               <option value="claude">claude</option>
@@ -1433,7 +1433,7 @@ export default function Dashboard() {
                   scrollToDashboardErrors();
                 }}
                 data-testid="dashboard-error-pill"
-                className="inline-flex items-center gap-1 rounded-md border border-destructive/50 bg-destructive/10 px-2 py-0.5 text-[11px] uppercase tracking-wider text-destructive transition-colors hover:bg-destructive hover:text-background focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+                className="inline-flex items-center gap-1 rounded-md border border-destructive/50 bg-destructive/10 px-2 py-0.5 text-label uppercase tracking-wider text-destructive transition-colors hover:bg-destructive hover:text-background focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
               >
                 <AlertTriangle className="h-3 w-3" aria-hidden="true" />
                 errors
@@ -1446,7 +1446,7 @@ export default function Dashboard() {
               disabled={isRefreshing || globalDrainMode || isGitHubThrottled}
               title={isGitHubThrottled ? throttledTitle : undefined}
               data-testid="button-sync-dashboard"
-              className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-0.5 text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
+              className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-0.5 text-label uppercase tracking-wider text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
             >
               {isRefreshing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
               sync
@@ -1484,7 +1484,7 @@ export default function Dashboard() {
               type="button"
               onClick={() => setViewMode("active")}
               data-testid="tab-active"
-              className={`flex-1 whitespace-nowrap px-2 py-2 text-[11px] uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset ${
+              className={`flex-1 whitespace-nowrap px-2 py-2 text-label uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset ${
                 viewMode === "active"
                   ? "bg-muted text-foreground shadow-[inset_0_-2px_0_0_hsl(var(--primary))]"
                   : "text-muted-foreground hover:text-foreground"
@@ -1496,7 +1496,7 @@ export default function Dashboard() {
               type="button"
               onClick={() => setViewMode("issues")}
               data-testid="tab-on-issues"
-              className={`flex-1 whitespace-nowrap px-2 py-2 text-[11px] uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset ${
+              className={`flex-1 whitespace-nowrap px-2 py-2 text-label uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset ${
                 viewMode === "issues"
                   ? "bg-muted text-foreground shadow-[inset_0_-2px_0_0_hsl(var(--primary))]"
                   : "text-muted-foreground hover:text-foreground"
@@ -1508,7 +1508,7 @@ export default function Dashboard() {
               type="button"
               onClick={() => setViewMode("archived")}
               data-testid="tab-archived"
-              className={`flex-1 whitespace-nowrap px-2 py-2 text-[11px] uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset ${
+              className={`flex-1 whitespace-nowrap px-2 py-2 text-label uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-inset ${
                 viewMode === "archived"
                   ? "bg-muted text-foreground shadow-[inset_0_-2px_0_0_hsl(var(--primary))]"
                   : "text-muted-foreground hover:text-foreground"
@@ -1526,11 +1526,11 @@ export default function Dashboard() {
                 onChange={(event) => setPrNumberSearch(event.target.value)}
                 placeholder="Search #"
                 data-testid="pr-number-search"
-                className="h-7 w-full rounded-md border border-border bg-background px-2 font-mono text-[12px] text-foreground placeholder:font-sans placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                className="h-7 w-full rounded-md border border-border bg-background px-2 font-mono text-body text-foreground placeholder:font-sans placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               />
             </div>
             <div className="flex flex-wrap items-start gap-2">
-              <span className="mt-1 w-14 shrink-0 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+              <span className="mt-1 w-14 shrink-0 text-label font-medium uppercase tracking-wider text-muted-foreground">
                 Repo
               </span>
               <div className="flex min-w-0 flex-1 flex-wrap gap-1">
@@ -1549,7 +1549,7 @@ export default function Dashboard() {
               </div>
             </div>
             <div className="flex flex-wrap items-start gap-2">
-              <span className="mt-1 w-14 shrink-0 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+              <span className="mt-1 w-14 shrink-0 text-label font-medium uppercase tracking-wider text-muted-foreground">
                 Status
               </span>
               <div className="flex min-w-0 flex-1 flex-wrap gap-1">
@@ -1580,7 +1580,7 @@ export default function Dashboard() {
                 ))}
               </div>
             ) : displayedPRs.length === 0 ? (
-              <div className="p-4 text-[12px] text-muted-foreground">
+              <div className="p-4 text-body text-muted-foreground">
                 {normalizedPrNumberSearch
                   ? `No PRs match #${normalizedPrNumberSearch}.`
                   : isArchived
@@ -1672,7 +1672,7 @@ export default function Dashboard() {
                             : "Sync GitHub feedback now"
                       }
                       data-testid="button-sync-pr"
-                      className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-border bg-transparent px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground transition-colors hover:border-foreground/30 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
+                      className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-border bg-transparent px-2.5 py-0.5 text-label font-medium uppercase tracking-wider text-muted-foreground transition-colors hover:border-foreground/30 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       {syncPrMutation.isPending ? (
                         <><Loader2 className="h-3.5 w-3.5 animate-spin" />Syncing</>
@@ -1686,7 +1686,7 @@ export default function Dashboard() {
                       disabled={watchMutation.isPending}
                       data-testid="button-toggle-watch"
                       title={selectedPRWatchEnabled ? "Pause background watch for this PR" : "Resume background watch for this PR"}
-                      className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-border bg-transparent px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground transition-colors hover:border-foreground/30 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
+                      className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-border bg-transparent px-2.5 py-0.5 text-label font-medium uppercase tracking-wider text-muted-foreground transition-colors hover:border-foreground/30 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       {selectedPRWatchEnabled ? (
                         <><Pause className="h-3.5 w-3.5" />Pause watch</>
@@ -1706,7 +1706,7 @@ export default function Dashboard() {
                             : "Queue PR work safely"
                       }
                       data-testid="button-apply"
-                      className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-primary bg-primary px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
+                      className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-primary bg-primary px-2.5 py-0.5 text-label font-medium uppercase tracking-wider text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       {applyMutation.isPending || selectedPR.status === "processing" || selectedPRQueueStatus ? (
                         <>
@@ -1736,21 +1736,21 @@ export default function Dashboard() {
                         testId="detail-ready-to-merge"
                         label="GitHub ready to merge"
                         hint="Open PR on GitHub →"
-                        className="mt-2 gap-2 px-3 py-1.5 text-[12px] tracking-wider"
+                        className="mt-2 gap-2 px-3 py-1.5 text-body tracking-wider"
                         dotClassName="h-2 w-2"
-                        hintClassName="text-[11px] normal-case tracking-normal text-success-foreground/75"
+                        hintClassName="text-label normal-case tracking-normal text-success-foreground/75"
                       />
                     )}
                     {selectedPRErrorMessage && (
                       <div
-                        className="mt-2 border border-destructive/40 bg-destructive/10 px-3 py-2 text-[12px] leading-5 text-destructive"
+                        className="mt-2 border border-destructive/40 bg-destructive/10 px-3 py-2 text-body leading-5 text-destructive"
                         data-testid="selected-pr-error"
                       >
-                        <div className="text-[10px] font-medium uppercase tracking-wider">Automation error</div>
+                        <div className="text-label font-medium uppercase tracking-wider">Automation error</div>
                         <div className="mt-1 whitespace-pre-wrap break-words">{selectedPRErrorMessage}</div>
                       </div>
                     )}
-                    <div className="mt-2 text-[11px] text-muted-foreground">
+                    <div className="mt-2 text-label text-muted-foreground">
                       {globalDrainMode
                         ? GLOBAL_DRAIN_PR_COPY
                         : selectedPRWatchEnabled
@@ -1768,7 +1768,7 @@ export default function Dashboard() {
 
           <div className="flex-1 overflow-y-auto">
                 {selectedPR.feedbackItems.length === 0 ? (
-                  <div className="p-4 text-[12px] text-muted-foreground">
+                  <div className="p-4 text-body text-muted-foreground">
                     {selectedPRWatchEnabled
                       ? "No feedback yet. The watcher will sync GitHub comments automatically."
                       : "No feedback yet. Background watch is paused for this PR."}
@@ -1787,7 +1787,7 @@ export default function Dashboard() {
               </div>
             </>
           ) : (
-            <div className="flex flex-1 items-center justify-center text-[12px] text-muted-foreground">
+            <div className="flex flex-1 items-center justify-center text-body text-muted-foreground">
               Select a PR from the left panel.
             </div>
           )}
@@ -1808,7 +1808,7 @@ export default function Dashboard() {
             {selectedPRId ? (
               <QAPanel prId={selectedPRId} globalDrainMode={globalDrainMode} />
             ) : (
-              <div className="flex h-full items-center justify-center p-4 text-[12px] text-muted-foreground">
+              <div className="flex h-full items-center justify-center p-4 text-body text-muted-foreground">
                 Select a PR to ask questions.
               </div>
             )}

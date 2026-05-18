@@ -134,7 +134,7 @@
 
   body {
     @apply font-sans antialiased bg-background text-foreground;
-    font-size: 14px;
+    font-size: 13px;
     line-height: 1.5;
     letter-spacing: -0.011em;
     font-feature-settings: "cv11", "ss01";

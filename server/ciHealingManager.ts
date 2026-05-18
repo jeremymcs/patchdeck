@@ -38,7 +38,7 @@ const NEXT_STATES: Record<HealingSessionState, ReadonlyArray<HealingSessionState
   verifying: ["healed", "awaiting_repair_slot", "cooldown", "blocked", "escalated", "superseded"],
   cooldown: ["awaiting_repair_slot", "blocked", "escalated", "superseded"],
   healed: [],
-  blocked: [],
+  blocked: ["verifying", "healed"],
   escalated: [],
   superseded: [],
 };

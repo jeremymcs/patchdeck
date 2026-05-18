@@ -108,6 +108,38 @@ test("runtime queueBabysit enqueues a babysit job using the configured agent", a
   assert.equal(jobs[0]?.payload.activityTargetUrl, pr.url);
 });
 
+test("runtime queueBabysit records durable PR work intent", async () => {
+  const storage = new MemStorage();
+  const runtime = createAppRuntime({
+    storage,
+    startBackgroundServices: false,
+    startWatcher: false,
+  });
+  const pr = await seedPR(storage, {
+    status: "error",
+    watchEnabled: false,
+  });
+
+  const updated = await runtime.queueBabysit(pr.id);
+
+  assert.equal(updated.status, "watching");
+  assert.equal(updated.watchEnabled, true);
+
+  const config = await storage.getConfig();
+  assert.deepEqual(config.watchedRepos, ["acme/widgets"]);
+
+  const jobs = await storage.listBackgroundJobs({
+    kind: "babysit_pr",
+    status: "queued",
+  });
+  assert.equal(jobs.length, 1);
+  assert.equal(jobs[0]?.targetId, pr.id);
+
+  const logs = await storage.getLogs(pr.id);
+  assert.ok(logs.some((log) => log.message === "Background watch resumed by queued PR work"));
+  assert.ok(logs.some((log) => log.message === "Queued PR work resumed this PR after a failed run"));
+});
+
 test("runtime queueBabysit uses repo agent override when configured", async () => {
   const storage = new MemStorage();
   const runtime = createAppRuntime({

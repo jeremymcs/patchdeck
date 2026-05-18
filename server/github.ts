@@ -94,6 +94,14 @@ export type GitHubStatusFailure = {
   targetUrl: string | null;
 };
 
+export type GitHubActionsRerun = {
+  runId: number;
+  targetUrl: string | null;
+  contexts: string[];
+};
+
+const GITHUB_ACTIONS_RUN_URL_PATTERN = /\/actions\/runs\/(\d+)(?:\/|$)/;
+
 type GitHubCommitStatusResponse = {
   state?: string | null;
   context?: string | null;
@@ -623,6 +631,68 @@ export async function fetchCheckSnapshotsForRef(
     statuses: (statusResponse.data.statuses ?? []) as GitHubCommitStatusResponse[],
     checkRuns,
   });
+}
+
+function extractGitHubActionsRunId(targetUrl: string | null): number | null {
+  if (!targetUrl) {
+    return null;
+  }
+
+  const match = GITHUB_ACTIONS_RUN_URL_PATTERN.exec(targetUrl);
+  if (!match?.[1]) {
+    return null;
+  }
+
+  const runId = Number.parseInt(match[1], 10);
+  return Number.isFinite(runId) && runId > 0 ? runId : null;
+}
+
+export async function rerunFailedGitHubActionsRunsForSnapshots(
+  octokit: Octokit,
+  repo: ParsedRepoSlug,
+  snapshots: CheckSnapshot[],
+): Promise<GitHubActionsRerun[]> {
+  const byRunId = new Map<number, GitHubActionsRerun>();
+
+  for (const snapshot of snapshots) {
+    if (
+      snapshot.provider !== "github.check_run"
+      || snapshot.status !== "completed"
+      || snapshot.conclusion !== "cancelled"
+    ) {
+      continue;
+    }
+
+    const runId = extractGitHubActionsRunId(snapshot.targetUrl);
+    if (runId === null) {
+      continue;
+    }
+
+    const existing = byRunId.get(runId);
+    if (existing) {
+      existing.contexts.push(snapshot.context);
+      continue;
+    }
+
+    byRunId.set(runId, {
+      runId,
+      targetUrl: snapshot.targetUrl,
+      contexts: [snapshot.context],
+    });
+  }
+
+  const reruns = Array.from(byRunId.values());
+  for (const rerun of reruns) {
+    await withGitHubErrorHandling("rerun failed workflow jobs", repo, () =>
+      octokit.rest.actions.reRunWorkflowFailedJobs({
+        owner: repo.owner,
+        repo: repo.repo,
+        run_id: rerun.runId,
+      }),
+    );
+  }
+
+  return reruns;
 }
 
 function resolveConfiguredGitHubToken(config: Config): string | undefined {

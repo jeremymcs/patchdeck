@@ -36,11 +36,13 @@ import {
   postFollowUpForFeedbackItem,
   postPRComment,
   postStatusReplyForFeedbackItem,
+  rerunFailedGitHubActionsRunsForSnapshots,
   resolveReviewThread,
   resolveGitHubAuthToken,
   updateStatusReply,
   APP_STATUS_COMMENT_PATTERN,
   type CiPollResult,
+  type GitHubActionsRerun,
   type GitHubPullSummary,
   type GitHubStatusFailure,
   type ParsedPRUrl,
@@ -64,6 +66,7 @@ import type { DeploymentHealingManager } from "./deploymentHealingManager";
 import { detectDeploymentPlatform } from "./deploymentPlatformDetector";
 import {
   applyEvaluationDecision,
+  isFeedbackClosedStatus,
   markInProgress,
   markResolved,
   markFailed,
@@ -93,6 +96,11 @@ const QUIET_REPO_COOLDOWN_MS = 10 * 60_000;
 const MAX_BABYSIT_ENQUEUES_PER_SWEEP = 10;
 const DEFERRED_BABYSIT_SWEEP_DELAY_MS = 15_000;
 const DEFERRED_BABYSIT_TARGET_PREFIX = "runtime:deferred-babysit:";
+const PR_MONITOR_FOLLOW_UP_DELAY_MS = 60_000;
+const AUTHENTICATED_LOGIN_CACHE_TTL_MS = 10 * 60_000;
+const AUTHENTICATED_LOGIN_FAILURE_COOLDOWN_MS = 60_000;
+const AUTHENTICATED_LOGIN_LOOKUP_TIMEOUT_MS = 5_000;
+const AUTHENTICATED_LOGIN_LOOKUP_ATTEMPTS = 2;
 // Repos visited per non-full sweep. The PR-list fetch is a conditional GET, so
 // a quiet repo costs no rate-limit budget; visiting several per tick keeps the
 // round-robin rotation short instead of one-repo-per-tick. Actual babysit work
@@ -126,6 +134,7 @@ type GitHubService = {
   postFollowUpForFeedbackItem: typeof postFollowUpForFeedbackItem;
   postPRComment: typeof postPRComment;
   postStatusReplyForFeedbackItem: typeof postStatusReplyForFeedbackItem;
+  rerunFailedGitHubActionsRunsForSnapshots?: typeof rerunFailedGitHubActionsRunsForSnapshots;
   resolveReviewThread: typeof resolveReviewThread;
   resolveGitHubAuthToken: typeof resolveGitHubAuthToken;
   updateStatusReply: typeof updateStatusReply;
@@ -198,7 +207,11 @@ const defaultGitHubService: GitHubService = {
   fetchPullCloseState,
   fetchPullSummary,
   getAuthenticatedLogin: async (octokit) => {
-    const { data } = await octokit.rest.users.getAuthenticated();
+    const { data } = await octokit.request("GET /user", {
+      request: {
+        timeout: getAuthenticatedLoginLookupTimeoutMs(),
+      },
+    });
     const login = data.login?.trim().toLowerCase();
     return login ? login : null;
   },
@@ -208,6 +221,7 @@ const defaultGitHubService: GitHubService = {
   postFollowUpForFeedbackItem,
   postPRComment,
   postStatusReplyForFeedbackItem,
+  rerunFailedGitHubActionsRunsForSnapshots,
   resolveReviewThread,
   resolveGitHubAuthToken,
   updateStatusReply,
@@ -681,7 +695,11 @@ function hasAuditTrail(
   runStartedAtMs?: number,
 ): boolean {
   return feedbackItems.some((candidate) => {
-    if (candidate.id === item.id || !candidate.body.includes(item.auditToken)) {
+    if (
+      candidate.id === item.id
+      || isCodeFactoryComment(candidate.body)
+      || !candidate.body.includes(item.auditToken)
+    ) {
       return false;
     }
 
@@ -1236,6 +1254,39 @@ function summarizeUnknownError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function getAuthenticatedLoginLookupTimeoutMs(): number {
+  const raw = process.env.PATCHDECK_AUTH_LOGIN_TIMEOUT_MS;
+  if (!raw) {
+    return AUTHENTICATED_LOGIN_LOOKUP_TIMEOUT_MS;
+  }
+
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : AUTHENTICATED_LOGIN_LOOKUP_TIMEOUT_MS;
+}
+
+class AuthenticatedLoginLookupTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`GitHub authenticated-user lookup timed out after ${timeoutMs}ms`);
+    this.name = "AuthenticatedLoginLookupTimeoutError";
+  }
+}
+
+async function withAuthenticatedLoginTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new AuthenticatedLoginLookupTimeoutError(timeoutMs)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
+}
+
 function shouldApplyFeedbackSyncCooldown(message: string): boolean {
   const lower = message.toLowerCase();
   return lower.includes("rate limit")
@@ -1378,6 +1429,102 @@ function getLastCheckedSortValue(pr: PR | undefined): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function getPRNotMergeReadyReason(pr: PR): string | null {
+  if (pr.status === "processing") {
+    return "work is still running";
+  }
+  if (pr.status === "error") {
+    return "last work run failed";
+  }
+  if (pr.status === "archived") {
+    return null;
+  }
+  if (pr.testsPassed === false) {
+    return "tests are failing";
+  }
+  if (pr.lintPassed === false) {
+    return "lint is failing";
+  }
+  if (pr.mergeableState !== "clean") {
+    return `GitHub mergeable state is ${pr.mergeableState ?? "unknown"}`;
+  }
+  if (pr.feedbackItems.some((item) => !isFeedbackClosedStatus(item.status))) {
+    return "tracked feedback is not resolved";
+  }
+  return null;
+}
+
+function isRerunnableCancelledGitHubActionsSnapshot(snapshot: CheckSnapshot): boolean {
+  return snapshot.provider === "github.check_run"
+    && snapshot.status === "completed"
+    && snapshot.conclusion === "cancelled"
+    && Boolean(snapshot.targetUrl?.includes("/actions/runs/"));
+}
+
+function summarizeGitHubActionsReruns(reruns: GitHubActionsRerun[]): string {
+  return reruns
+    .map((rerun) => `run ${rerun.runId} (${rerun.contexts.join(", ")})`)
+    .join("; ");
+}
+
+function isGenericStatusDescription(description: string): boolean {
+  const normalized = description.trim().toLowerCase();
+  return normalized.length === 0
+    || normalized === "failure"
+    || normalized === "failed"
+    || normalized === "check failed"
+    || normalized === "check run failure"
+    || normalized === "ci failure";
+}
+
+function shouldReplaceStatusDescription(current: string, candidate: string): boolean {
+  if (candidate.trim().length === 0) {
+    return false;
+  }
+  if (isGenericStatusDescription(current) && !isGenericStatusDescription(candidate)) {
+    return true;
+  }
+  return !isGenericStatusDescription(candidate) && candidate.length > current.length;
+}
+
+function buildStatusTaskCandidates(
+  failingStatuses: GitHubStatusFailure[],
+  failingCheckSnapshots: CheckSnapshot[],
+): { context: string; description: string; targetUrl: string | null }[] {
+  const byContext = new Map<string, { context: string; description: string; targetUrl: string | null }>();
+
+  for (const status of failingStatuses) {
+    byContext.set(status.context, {
+      context: status.context,
+      description: status.description,
+      targetUrl: status.targetUrl,
+    });
+  }
+
+  for (const snapshot of failingCheckSnapshots) {
+    const existing = byContext.get(snapshot.context);
+    const candidateDescription = snapshot.description?.trim() || existing?.description || "Check run failure";
+    if (!existing) {
+      byContext.set(snapshot.context, {
+        context: snapshot.context,
+        description: candidateDescription,
+        targetUrl: snapshot.targetUrl,
+      });
+      continue;
+    }
+
+    byContext.set(snapshot.context, {
+      context: existing.context,
+      description: shouldReplaceStatusDescription(existing.description, candidateDescription)
+        ? candidateDescription
+        : existing.description,
+      targetUrl: existing.targetUrl ?? snapshot.targetUrl,
+    });
+  }
+
+  return Array.from(byContext.values());
+}
+
 export class PRBabysitter {
   private readonly storage: IStorage;
   private readonly inProgress = new Map<string, {
@@ -1394,6 +1541,9 @@ export class PRBabysitter {
   private readonly clock: () => Date;
   private readonly agentHealthCache = new Map<CodingAgent, { checkedAtMs: number; result: AgentHealthResult }>();
   private readonly feedbackSyncCooldownUntilMs = new Map<string, number>();
+  private authenticatedLoginCache: { login: string; checkedAtMs: number } | null = null;
+  private authenticatedLoginFailureCooldownUntilMs = 0;
+  private authenticatedLoginLookupPromise: Promise<string | null> | null = null;
   private repoSyncCursor = 0;
   private deferredBabysitSweepSequence = 0;
   // Per-repo open-PR list snapshot + its etag, kept together so a conditional
@@ -1420,6 +1570,76 @@ export class PRBabysitter {
 
   private now(): Date {
     return this.clock();
+  }
+
+  private async getAuthenticatedLoginForWatcher(
+    octokit: Awaited<ReturnType<typeof buildOctokit>>,
+    needsAuthenticatedLogin: boolean,
+  ): Promise<string | null> {
+    if (!needsAuthenticatedLogin) {
+      return null;
+    }
+
+    const nowMs = this.now().getTime();
+    if (this.authenticatedLoginCache && nowMs - this.authenticatedLoginCache.checkedAtMs < AUTHENTICATED_LOGIN_CACHE_TTL_MS) {
+      return this.authenticatedLoginCache.login;
+    }
+
+    if (this.authenticatedLoginFailureCooldownUntilMs > nowMs) {
+      return null;
+    }
+
+    if (!this.authenticatedLoginLookupPromise) {
+      this.authenticatedLoginLookupPromise = this.lookupAuthenticatedLoginForWatcher(octokit)
+        .finally(() => {
+          this.authenticatedLoginLookupPromise = null;
+        });
+    }
+
+    return this.authenticatedLoginLookupPromise;
+  }
+
+  private async lookupAuthenticatedLoginForWatcher(
+    octokit: Awaited<ReturnType<typeof buildOctokit>>,
+  ): Promise<string | null> {
+    const timeoutMs = getAuthenticatedLoginLookupTimeoutMs();
+    let lastError: unknown = null;
+
+    for (let attempt = 1; attempt <= AUTHENTICATED_LOGIN_LOOKUP_ATTEMPTS; attempt += 1) {
+      try {
+        const rawLogin = await withAuthenticatedLoginTimeout(
+          this.github.getAuthenticatedLogin?.(octokit) ?? Promise.resolve(null),
+          timeoutMs,
+        );
+        const login = rawLogin?.trim().toLowerCase() ?? "";
+        if (!login) {
+          this.authenticatedLoginCache = null;
+          this.authenticatedLoginFailureCooldownUntilMs = this.now().getTime() + AUTHENTICATED_LOGIN_FAILURE_COOLDOWN_MS;
+          return null;
+        }
+
+        this.authenticatedLoginCache = {
+          login,
+          checkedAtMs: this.now().getTime(),
+        };
+        this.authenticatedLoginFailureCooldownUntilMs = 0;
+        return login;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    this.authenticatedLoginFailureCooldownUntilMs = this.now().getTime() + AUTHENTICATED_LOGIN_FAILURE_COOLDOWN_MS;
+    log.warn(
+      {
+        err: summarizeUnknownError(lastError),
+        attempts: AUTHENTICATED_LOGIN_LOOKUP_ATTEMPTS,
+        timeoutMs,
+        cooldownMs: AUTHENTICATED_LOGIN_FAILURE_COOLDOWN_MS,
+      },
+      "Could not identify authenticated GitHub user for own-PR filtering; skipping own-only watcher work this pass",
+    );
+    return null;
   }
 
   private async scheduleDeferredBabysitSweep(): Promise<void> {
@@ -1456,6 +1676,53 @@ export class PRBabysitter {
         priority: 5,
       },
     );
+  }
+
+  private async schedulePRMonitorFollowUp(
+    pr: PR,
+    preferredAgent: CodingAgent,
+    reason: string,
+  ): Promise<void> {
+    if (!this.scheduleBackgroundJob || pr.watchEnabled === false || pr.status === "archived") {
+      return;
+    }
+
+    const queuedFollowUps = await this.storage.listBackgroundJobs({
+      kind: "babysit_pr",
+      targetId: pr.id,
+      status: "queued",
+    });
+    if (queuedFollowUps.length > 0) {
+      return;
+    }
+
+    const availableAt = new Date(this.now().getTime() + PR_MONITOR_FOLLOW_UP_DELAY_MS);
+    await this.scheduleBackgroundJob(
+      "babysit_pr",
+      pr.id,
+      `babysit_pr:${pr.id}:monitor:${availableAt.getTime()}`,
+      {
+        preferredAgent,
+        monitorFollowUp: true,
+        monitorReason: reason,
+        ...buildActivityPayload({
+          label: `Monitoring PR #${pr.number}`,
+          detail: `${pr.repo} - ${pr.title}`,
+          targetUrl: pr.url,
+        }),
+      },
+      {
+        availableAt,
+      },
+    );
+
+    await this.storage.addLog(pr.id, "info", `PR is not merge-ready; queued follow-up monitoring because ${reason}`, {
+      phase: "watcher",
+      metadata: {
+        reason,
+        availableAt: availableAt.toISOString(),
+      },
+    });
   }
 
   private isFeedbackSyncCoolingDown(prId: string): boolean {
@@ -2014,25 +2281,6 @@ export class PRBabysitter {
     const needsAuthenticatedLogin = Array.from(repoCandidates).some(
       (repo) => (repoSettingsByRepo.get(repo)?.ownPrsOnly ?? true),
     );
-    let authenticatedLoginPromise: Promise<string | null> | null = null;
-    const getAuthenticatedLogin = async (): Promise<string | null> => {
-      if (!needsAuthenticatedLogin) {
-        return null;
-      }
-
-      if (!authenticatedLoginPromise) {
-        authenticatedLoginPromise = (this.github.getAuthenticatedLogin?.(octokit) ?? Promise.resolve(null))
-          .catch((error) => {
-            log.warn(
-              { err: error instanceof Error ? error.message : String(error) },
-              "Failed to determine authenticated GitHub login for watcher filtering",
-            );
-            return null;
-          });
-      }
-
-      return authenticatedLoginPromise;
-    };
 
     const repos = Array.from(repoCandidates)
       .map((repo) => parseRepoSlug(repo))
@@ -2123,7 +2371,9 @@ export class PRBabysitter {
 
       const openNumbers = new Set(openPulls.map((p) => p.number));
       const repoOwnPrsOnly = repoSettingsByRepo.get(repoSlug)?.ownPrsOnly ?? true;
-      const authenticatedLogin = repoOwnPrsOnly ? await getAuthenticatedLogin() : null;
+      const authenticatedLogin = repoOwnPrsOnly
+        ? await this.getAuthenticatedLoginForWatcher(octokit, needsAuthenticatedLogin)
+        : null;
       const automationScopeNumbers = new Set(
         openPulls
           .filter((pull) => !repoOwnPrsOnly || (
@@ -2301,25 +2551,42 @@ export class PRBabysitter {
             continue;
           }
 
-          local = await this.storage.addPR({
-            number: pull.number,
-            title: pull.title,
-            repo: repoSlug,
-            branch: pull.branch,
-            author: pull.author,
-            url: pull.url,
-            status: "watching",
-            feedbackItems: [],
-            accepted: 0,
-            rejected: 0,
-            flagged: 0,
-            testsPassed: null,
-            lintPassed: null,
-            lastChecked: null,
-          });
+          const existingByNumber = await this.storage.getPRByRepoAndNumber(repoSlug, pull.number);
+          if (existingByNumber) {
+            const reactivated = await this.storage.updatePR(existingByNumber.id, {
+              title: pull.title,
+              repo: repoSlug,
+              branch: pull.branch,
+              author: pull.author,
+              url: pull.url,
+              status: "watching",
+            });
+            local = reactivated ?? existingByNumber;
+            await this.storage.addLog(local.id, "info", `Re-activated existing PR #${pull.number} from ${repoSlug}`, {
+              phase: "watcher",
+            });
+            localByNumber.set(pull.number, local);
+          } else {
+            local = await this.storage.addPR({
+              number: pull.number,
+              title: pull.title,
+              repo: repoSlug,
+              branch: pull.branch,
+              author: pull.author,
+              url: pull.url,
+              status: "watching",
+              feedbackItems: [],
+              accepted: 0,
+              rejected: 0,
+              flagged: 0,
+              testsPassed: null,
+              lintPassed: null,
+              lastChecked: null,
+            });
 
-          await this.storage.addLog(local.id, "info", `Auto-registered open PR #${pull.number} from ${repoSlug}`);
-          localByNumber.set(pull.number, local);
+            await this.storage.addLog(local.id, "info", `Auto-registered open PR #${pull.number} from ${repoSlug}`);
+            localByNumber.set(pull.number, local);
+          }
         }
 
         if (!automationScopeNumbers.has(pull.number)) {
@@ -3274,14 +3541,18 @@ export class PRBabysitter {
       } else {
         const existingHealingSession = await healingManager.getSessionByPrAndHead(pr.id, pullSummary.headSha);
         const canMarkHealthy = existingHealingSession
-          && ["triaging", "awaiting_repair_slot", "repairing", "awaiting_ci", "verifying", "cooldown"].includes(existingHealingSession.state);
+          && ["triaging", "awaiting_repair_slot", "repairing", "awaiting_ci", "verifying", "cooldown", "blocked"].includes(existingHealingSession.state);
 
         if (canMarkHealthy) {
           healingSession = await healingManager.markVerifying(existingHealingSession.id, {
             currentHeadSha: pullSummary.headSha,
+            endedAt: null,
           });
           healingSession = await healingManager.markHealed(healingSession.id, {
             currentHeadSha: pullSummary.headSha,
+            blockedReason: null,
+            escalationReason: null,
+            latestFingerprint: null,
             lastImprovementScore: healingSession.lastImprovementScore ?? 0,
           });
         } else {
@@ -3581,8 +3852,59 @@ export class PRBabysitter {
         }
       }
 
+      const rerunnableCancelledSnapshots = failingCheckSnapshots.filter(isRerunnableCancelledGitHubActionsSnapshot);
+      if (
+        pendingComments.length === 0
+        && rerunnableCancelledSnapshots.length > 0
+        && rerunnableCancelledSnapshots.length === failingCheckSnapshots.length
+        && this.github.rerunFailedGitHubActionsRunsForSnapshots
+      ) {
+        let reruns: GitHubActionsRerun[] = [];
+        try {
+          reruns = await this.github.rerunFailedGitHubActionsRunsForSnapshots(
+            octokit,
+            parsedRepo,
+            rerunnableCancelledSnapshots,
+          );
+        } catch (error) {
+          await logBestEffortFailure(
+            pr.id,
+            "verify.ci.rerun",
+            `Failed to rerun cancelled GitHub Actions checks: ${summarizeUnknownError(error)}`,
+          );
+        }
+
+        if (reruns.length > 0) {
+          await queueLog(pr.id, "info", `Reran cancelled GitHub Actions workflow run(s): ${summarizeGitHubActionsReruns(reruns)}`, {
+            phase: "verify.ci.rerun",
+            metadata: { reruns },
+          });
+          const rerunPr = await this.storage.updatePR(pr.id, {
+            status: "watching",
+            prStage: "tests",
+            testsPassed: null,
+            lastChecked: new Date().toISOString(),
+          });
+          if (rerunPr) {
+            await this.schedulePRMonitorFollowUp(rerunPr, preferredAgent, "cancelled GitHub Actions run was rerun");
+          }
+          await updateRunRecord({
+            status: "completed",
+            phase: "ci.rerun_queued",
+            lastError: null,
+          });
+          return;
+        }
+      }
+
+      const statusTaskCandidates = buildStatusTaskCandidates(failingStatuses, failingCheckSnapshots);
       const statusTasks: { context: string; description: string; targetUrl: string | null }[] = [];
-      if (config.autoHealCI && healingSession) {
+      const healingOwnsStatusEvaluation = Boolean(
+        config.autoHealCI
+        && healingSession
+        && (!isTerminalHealingState(healingSession.state) || healingSession.state === "blocked"),
+      );
+      if (healingOwnsStatusEvaluation && healingSession) {
         await queueLog(pr.id, "info", `Skipping legacy status-task evaluation because CI healing session ${healingSession.id} is active`, {
           phase: "evaluate.status",
           metadata: {
@@ -3591,10 +3913,10 @@ export class PRBabysitter {
           },
         });
       } else {
-        await queueLog(pr.id, "info", `Evaluating ${failingStatuses.length} failing status check(s)`, {
+        await queueLog(pr.id, "info", `Evaluating ${statusTaskCandidates.length} failing status check(s)`, {
           phase: "evaluate.status",
         });
-        for (const status of failingStatuses) {
+        for (const status of statusTaskCandidates) {
           const statusEvalPrompt = buildStatusEvaluationPrompt({
             pr,
             context: status.context,
@@ -3734,10 +4056,14 @@ export class PRBabysitter {
         await queueLog(pr.id, "info", `Checked PR #${pr.number}; no necessary fixes identified`, {
           phase: "run",
         });
-        await this.storage.updatePR(pr.id, {
+        const checkedPr = await this.storage.updatePR(pr.id, {
           status: "watching",
           lastChecked: new Date().toISOString(),
         });
+        const monitorReason = checkedPr ? getPRNotMergeReadyReason(checkedPr) : null;
+        if (checkedPr && monitorReason) {
+          await this.schedulePRMonitorFollowUp(checkedPr, preferredAgent, monitorReason);
+        }
         await updateRunRecord({
           status: "completed",
           phase: "run.completed",
@@ -4861,10 +5187,14 @@ export class PRBabysitter {
         }
       }
 
-      await this.storage.updatePR(pr.id, {
+      const completedPr = await this.storage.updatePR(pr.id, {
         status: "watching",
         lastChecked: new Date().toISOString(),
       });
+      const monitorReason = completedPr ? getPRNotMergeReadyReason(completedPr) : null;
+      if (completedPr && monitorReason) {
+        await this.schedulePRMonitorFollowUp(completedPr, preferredAgent, monitorReason);
+      }
       await queueLog(pr.id, "info", "PR work run complete", {
         phase: "run",
         metadata: { remoteName: remoteNameForLogs, branchMoved },
@@ -4927,10 +5257,14 @@ export class PRBabysitter {
               },
               lastError: null,
             });
-            await this.storage.updatePR(currentPr.id, {
+            const fallbackPr = await this.storage.updatePR(currentPr.id, {
               status: "watching",
               lastChecked: this.now().toISOString(),
             });
+            const monitorReason = fallbackPr ? getPRNotMergeReadyReason(fallbackPr) : null;
+            if (fallbackPr && monitorReason) {
+              await this.schedulePRMonitorFollowUp(fallbackPr, preferredAgent, monitorReason);
+            }
             return;
           } catch (fallbackError) {
             const fallbackMessage = summarizeUnknownError(fallbackError);

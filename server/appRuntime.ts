@@ -2014,6 +2014,37 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
     );
   };
 
+  const activatePRWorkIntent = async (pr: PR, config: Config): Promise<{ pr: PR; config: Config }> => {
+    let nextConfig = config;
+    if (!nextConfig.watchedRepos.includes(pr.repo)) {
+      nextConfig = await storage.updateConfig({
+        watchedRepos: [...nextConfig.watchedRepos, pr.repo].sort((a, b) => a.localeCompare(b)),
+      });
+      await storage.addLog(pr.id, "info", `Repository ${pr.repo} added to automatic PR work watch list`);
+    }
+
+    const updates: Partial<PR> = {};
+    if (pr.watchEnabled === false) {
+      updates.watchEnabled = true;
+    }
+    if (pr.status === "error") {
+      updates.status = "watching";
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return { pr, config: nextConfig };
+    }
+
+    const updated = assertFound(await storage.updatePR(pr.id, updates), "PR not found");
+    if (updates.watchEnabled === true) {
+      await storage.addLog(pr.id, "info", "Background watch resumed by queued PR work");
+    }
+    if (updates.status === "watching") {
+      await storage.addLog(pr.id, "info", "Queued PR work resumed this PR after a failed run");
+    }
+    return { pr: updated, config: nextConfig };
+  };
+
   const queueBabysitForRepo = async (pr: PR, config: Config) => {
     const repoSettings = await storage.getRepoSettings(pr.repo);
     await queueBabysitWithAgent(pr, resolveRepoCodingAgent(config, repoSettings));
@@ -2406,10 +2437,15 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       const repoSlug = `${parsed.owner}/${parsed.repo}`;
       const existing = await storage.getPRByRepoAndNumber(repoSlug, parsed.number);
       if (existing) {
-        return existing;
+        const config = await storage.getConfig();
+        const activated = await activatePRWorkIntent(existing, config);
+        await storage.addLog(activated.pr.id, "info", "PR already tracked; queued PR work and monitoring");
+        await queueBabysitForRepo(activated.pr, activated.config);
+        notifyChange();
+        return activated.pr;
       }
 
-      const config = await storage.getConfig();
+      let config = await storage.getConfig();
       const octokit = await buildOctokit(config);
       const summary = await fetchPullSummary(octokit, parsed);
 
@@ -2437,7 +2473,7 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       await storage.addLog(pr.id, "info", `Repository ${repoSlug} added to automatic PR work watch list`);
 
       if (!config.watchedRepos.includes(repoSlug)) {
-        await storage.updateConfig({
+        config = await storage.updateConfig({
           watchedRepos: [...config.watchedRepos, repoSlug].sort((a, b) => a.localeCompare(b)),
         });
       }
@@ -2560,13 +2596,13 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
         });
       }
 
-      const config = await storage.getConfig();
-      const repoSettings = await storage.getRepoSettings(pr.repo);
+      const { pr: activatedPr, config } = await activatePRWorkIntent(pr, await storage.getConfig());
+      const repoSettings = await storage.getRepoSettings(activatedPr.repo);
       const selectedAgent = resolveRepoCodingAgent(config, repoSettings);
-      await storage.addLog(pr.id, "info", `Queued manual PR work using ${selectedAgent}`);
-      await queueBabysitForRepo(pr, config);
+      await storage.addLog(activatedPr.id, "info", `Queued manual PR work using ${selectedAgent}`);
+      await queueBabysitForRepo(activatedPr, config);
 
-      const updated = await storage.getPR(pr.id);
+      const updated = await storage.getPR(activatedPr.id);
       notifyChange();
       return assertFound(updated, "PR disappeared after apply run");
     },
@@ -2581,13 +2617,13 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
         });
       }
 
-      const config = await storage.getConfig();
-      const repoSettings = await storage.getRepoSettings(pr.repo);
+      const { pr: activatedPr, config } = await activatePRWorkIntent(pr, await storage.getConfig());
+      const repoSettings = await storage.getRepoSettings(activatedPr.repo);
       const selectedAgent = resolveRepoCodingAgent(config, repoSettings);
-      await storage.addLog(pr.id, "info", `Queued manual PR work using ${selectedAgent}`);
-      await queueBabysitForRepo(pr, config);
+      await storage.addLog(activatedPr.id, "info", `Queued manual PR work using ${selectedAgent}`);
+      await queueBabysitForRepo(activatedPr, config);
 
-      const updated = await storage.getPR(pr.id);
+      const updated = await storage.getPR(activatedPr.id);
       notifyChange();
       return assertFound(updated, "PR disappeared after babysit run");
     },

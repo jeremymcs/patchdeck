@@ -56,7 +56,7 @@ function StatusBadge({ status }: { status: ReleaseRunStatus }) {
           : "border-border text-muted-foreground";
 
   return (
-    <span className={`rounded-md border px-1.5 py-0 text-[10px] font-medium uppercase tracking-wider ${cls}`}>
+    <span className={`rounded-md border px-1.5 py-0 text-label font-medium uppercase tracking-wider ${cls}`}>
       {status}
     </span>
   );
@@ -80,7 +80,7 @@ function CopyButton({ text }: { text: string }) {
     <button
       type="button"
       onClick={handleCopy}
-      className="cursor-pointer rounded-md border border-border bg-transparent px-2.5 py-0.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground transition-colors hover:border-foreground/30 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+      className="cursor-pointer rounded-md border border-border bg-transparent px-2.5 py-0.5 text-label font-medium uppercase tracking-wider text-muted-foreground transition-colors hover:border-foreground/30 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
     >
       {copied ? "copied" : "copy"}
     </button>
@@ -123,21 +123,21 @@ function ReleaseRunCard({
       >
         <div className="flex min-w-0 items-center gap-3">
           <StatusBadge status={run.status} />
-          <span className="truncate text-sm font-medium">{run.repo}</span>
-          <span className="font-mono text-[11px] text-muted-foreground">#{run.triggerPrNumber}</span>
+          <span className="truncate text-body font-medium">{run.repo}</span>
+          <span className="font-mono text-label text-muted-foreground">#{run.triggerPrNumber}</span>
           {run.proposedVersion && (
-            <span className="rounded-md border border-primary/40 bg-primary/10 px-1.5 py-0 font-mono text-[10px] font-medium uppercase tracking-wider text-primary">
+            <span className="rounded-md border border-primary/40 bg-primary/10 px-1.5 py-0 font-mono text-label font-medium uppercase tracking-wider text-primary">
               {run.proposedVersion}
             </span>
           )}
           {!run.proposedVersion && run.recommendedBump && (
-            <span className="text-[11px] text-muted-foreground">
+            <span className="text-label text-muted-foreground">
               bump {run.recommendedBump}
             </span>
           )}
           {githubRelease && (
             <span
-              className="inline-flex items-center gap-1 rounded-md border border-success-border bg-success-muted px-1.5 py-0 text-[10px] font-medium uppercase tracking-wider text-success-foreground"
+              className="inline-flex items-center gap-1 rounded-md border border-success-border bg-success-muted px-1.5 py-0 text-label font-medium uppercase tracking-wider text-success-foreground"
               title={`Linked to GitHub release ${githubRelease.tagName}`}
               data-testid={`github-link-${run.id}`}
             >
@@ -146,7 +146,7 @@ function ReleaseRunCard({
             </span>
           )}
         </div>
-        <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
+        <div className="flex items-center gap-3 text-label text-muted-foreground">
           <span>{formatDateTime(run.createdAt)}</span>
           <span>{expanded ? "Hide" : "Show"}</span>
         </div>
@@ -154,7 +154,7 @@ function ReleaseRunCard({
 
       {expanded && (
         <div id={detailsId} className="border-t border-border px-4 pb-4 pt-3">
-          <div className="mb-3 text-[12px] text-muted-foreground">
+          <div className="mb-3 text-body text-muted-foreground">
             Trigger PR:{" "}
             <a href={run.triggerPrUrl} target="_blank" rel="noreferrer noopener" className="underline underline-offset-2 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background">
               #{run.triggerPrNumber} {run.triggerPrTitle}
@@ -162,17 +162,17 @@ function ReleaseRunCard({
           </div>
 
           {run.decisionReason && (
-            <p className="mb-3 text-[12px] leading-relaxed">{run.decisionReason}</p>
+            <p className="mb-3 text-body leading-relaxed">{run.decisionReason}</p>
           )}
 
           {run.releaseTitle && (
-            <p className="mb-3 text-[12px]">
+            <p className="mb-3 text-body">
               <span className="text-muted-foreground">Release title:</span>{" "}
               <span>{run.releaseTitle}</span>
             </p>
           )}
 
-          <div className="mb-3 grid grid-cols-1 gap-2 text-[12px] text-muted-foreground md:grid-cols-2">
+          <div className="mb-3 grid grid-cols-1 gap-2 text-body text-muted-foreground md:grid-cols-2">
             <div>Base branch: {run.baseBranch || "n/a"}</div>
             <div>Trigger SHA: {shortSha(run.triggerMergeSha)}</div>
             <div>Merged at: {formatDateTime(run.triggerMergedAt)}</div>
@@ -181,10 +181,10 @@ function ReleaseRunCard({
 
           {run.includedPrs.length > 0 && (
             <div className="mb-3">
-              <div className="mb-1.5 text-[11px] uppercase tracking-wider text-muted-foreground">
+              <div className="mb-1.5 text-label uppercase tracking-wider text-muted-foreground">
                 Included PRs ({run.includedPrs.length})
               </div>
-              <div className="space-y-1 border border-border p-3 text-[12px]">
+              <div className="space-y-1 border border-border p-3 text-body">
                 {run.includedPrs.map((pr) => (
                   <div key={`${pr.mergeSha}-${pr.number}`} className="flex items-center justify-between gap-3">
                     <span className="truncate">
@@ -202,29 +202,29 @@ function ReleaseRunCard({
           {run.releaseNotes && (
             <div className="mb-3">
               <div className="mb-1.5 flex items-center justify-between">
-                <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Release Notes</span>
+                <span className="text-label uppercase tracking-wider text-muted-foreground">Release Notes</span>
                 <CopyButton text={run.releaseNotes} />
               </div>
-              <pre className="whitespace-pre-wrap border border-border bg-background p-3 text-[12px] leading-relaxed font-mono">
+              <pre className="whitespace-pre-wrap border border-border bg-background p-3 text-body leading-relaxed font-mono">
                 {run.releaseNotes}
               </pre>
             </div>
           )}
 
           {run.error && (
-            <div className="mb-3 border border-destructive/40 bg-destructive/5 p-3 text-[12px] text-destructive">
+            <div className="mb-3 border border-destructive/40 bg-destructive/5 p-3 text-body text-destructive">
               {run.error}
             </div>
           )}
 
           {githubRelease && (
-            <div className="mb-3 rounded-md border border-success-border bg-success-muted/40 px-3 py-2 text-[12px]">
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px]">
-                <span className="text-[10px] font-medium uppercase tracking-wider text-success-foreground">
+            <div className="mb-3 rounded-md border border-success-border bg-success-muted/40 px-3 py-2 text-body">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-label">
+                <span className="text-label font-medium uppercase tracking-wider text-success-foreground">
                   Linked GitHub release
                 </span>
                 <span className="text-border" aria-hidden="true">·</span>
-                <span className="rounded-md border border-primary/40 bg-primary/10 px-1.5 py-0 font-mono text-[10px] font-medium uppercase tracking-wider text-primary">
+                <span className="rounded-md border border-primary/40 bg-primary/10 px-1.5 py-0 font-mono text-label font-medium uppercase tracking-wider text-primary">
                   {githubRelease.tagName}
                 </span>
                 {githubRelease.publishedAt && (
@@ -237,7 +237,7 @@ function ReleaseRunCard({
                 )}
               </div>
               {githubRelease.name && (
-                <div className="mt-1 truncate text-[12px] font-medium">{githubRelease.name}</div>
+                <div className="mt-1 truncate text-body font-medium">{githubRelease.name}</div>
               )}
             </div>
           )}
@@ -248,7 +248,7 @@ function ReleaseRunCard({
                 href={githubRelease?.htmlUrl ?? run.githubReleaseUrl ?? "#"}
                 target="_blank"
                 rel="noreferrer noopener"
-                className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-border bg-transparent px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground transition-colors hover:border-primary/40 hover:bg-muted hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+                className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-border bg-transparent px-2.5 py-0.5 text-label font-medium uppercase tracking-wider text-muted-foreground transition-colors hover:border-primary/40 hover:bg-muted hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
               >
                 <ExternalLink className="h-3 w-3" />
                 Open on GitHub
@@ -259,7 +259,7 @@ function ReleaseRunCard({
                 type="button"
                 onClick={() => onRetry(run.id)}
                 disabled={retryPending}
-                className="cursor-pointer rounded-md border border-primary bg-primary px-3 py-1 text-[11px] font-medium uppercase tracking-wider text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
+                className="cursor-pointer rounded-md border border-primary bg-primary px-3 py-1 text-label font-medium uppercase tracking-wider text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
               >
                 retry
               </button>
@@ -267,7 +267,7 @@ function ReleaseRunCard({
           </div>
 
           {shouldShowEmptyDetails && (
-            <p className="mt-2 text-[12px] text-muted-foreground">No details available yet.</p>
+            <p className="mt-2 text-body text-muted-foreground">No details available yet.</p>
           )}
 
           <SocialPostGenerator
@@ -302,8 +302,8 @@ function RepoListButton({
           : "border-l-transparent hover:bg-muted/30"
       }`}
     >
-      <span className="min-w-0 truncate text-[12px] text-foreground">{repo}</span>
-      <span className={`shrink-0 font-mono text-[11px] ${selected ? "text-primary" : "text-muted-foreground"}`}>
+      <span className="min-w-0 truncate text-body text-foreground">{repo}</span>
+      <span className={`shrink-0 font-mono text-label ${selected ? "text-primary" : "text-muted-foreground"}`}>
         {count}
       </span>
     </button>
@@ -450,7 +450,7 @@ export default function Releases() {
         {/* Sidebar: repo list */}
         <aside className="flex max-h-[42vh] w-full shrink-0 flex-col overflow-hidden border-b border-border lg:max-h-none lg:w-72 lg:border-b-0 lg:border-r">
           <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-2">
-            <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+            <span className="text-label font-medium uppercase tracking-wider text-muted-foreground">
               Watched repositories
             </span>
             <button
@@ -471,9 +471,9 @@ export default function Releases() {
           </div>
           <div className="flex-1 overflow-y-auto">
             {isLoading && repoList.length === 0 ? (
-              <div className="p-4 text-[12px] text-muted-foreground">Loading…</div>
+              <div className="p-4 text-body text-muted-foreground">Loading…</div>
             ) : repoList.length === 0 ? (
-              <div className="p-4 text-[12px] text-muted-foreground">
+              <div className="p-4 text-body text-muted-foreground">
                 No watched repositories. Add some from Settings.
               </div>
             ) : (
@@ -493,8 +493,8 @@ export default function Releases() {
         {/* Content: selected repo's releases */}
         <main className="flex min-h-0 flex-1 flex-col overflow-y-auto">
           {githubError && (
-            <div className="mx-6 mt-6 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-[12px] text-destructive">
-              <div className="text-[10px] font-medium uppercase tracking-wider">GitHub sync error</div>
+            <div className="mx-6 mt-6 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-body text-destructive">
+              <div className="text-label font-medium uppercase tracking-wider">GitHub sync error</div>
               <div className="mt-1 whitespace-pre-wrap break-words">
                 {githubError instanceof Error ? githubError.message : String(githubError)}
               </div>
@@ -502,22 +502,22 @@ export default function Releases() {
           )}
 
           {!selectedRepo ? (
-            <div className="flex flex-1 items-center justify-center p-6 text-[12px] text-muted-foreground">
+            <div className="flex flex-1 items-center justify-center p-6 text-body text-muted-foreground">
               {isLoading ? "Loading…" : "Select a repository from the left to see its releases."}
             </div>
           ) : (
             <div className="p-6">
               <div className="mb-4 flex items-baseline justify-between">
-                <h2 className="text-[15px] font-semibold tracking-tight">{selectedRepo}</h2>
-                <span className="font-mono text-[11px] text-muted-foreground">
+                <h2 className="text-title font-semibold tracking-tight">{selectedRepo}</h2>
+                <span className="font-mono text-label text-muted-foreground">
                   {selectedRuns.length} pipeline · {selectedOrphans.length} external
                 </span>
               </div>
 
               {selectedRuns.length === 0 && selectedOrphans.length === 0 ? (
                 <div className="rounded-md border border-border px-4 py-8 text-center">
-                  <p className="text-sm text-muted-foreground">No release activity yet.</p>
-                  <p className="mt-1 text-[12px] text-muted-foreground">
+                  <p className="text-body text-muted-foreground">No release activity yet.</p>
+                  <p className="mt-1 text-body text-muted-foreground">
                     Pipeline runs appear after merged PRs are evaluated. GitHub releases appear when you sync from GitHub.
                   </p>
                 </div>
@@ -526,10 +526,10 @@ export default function Releases() {
                   {selectedRuns.length > 0 && (
                     <section>
                       <div className="mb-2 flex items-baseline justify-between">
-                        <h3 className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                        <h3 className="text-label font-medium uppercase tracking-wider text-muted-foreground">
                           Pipeline runs
                         </h3>
-                        <span className="font-mono text-[11px] text-muted-foreground">
+                        <span className="font-mono text-label text-muted-foreground">
                           {selectedRuns.length}
                         </span>
                       </div>
@@ -555,14 +555,14 @@ export default function Releases() {
                   {selectedOrphans.length > 0 && (
                     <section>
                       <div className="mb-2 flex items-baseline justify-between">
-                        <h3 className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                        <h3 className="text-label font-medium uppercase tracking-wider text-muted-foreground">
                           Published outside the pipeline
                         </h3>
-                        <span className="font-mono text-[11px] text-muted-foreground">
+                        <span className="font-mono text-label text-muted-foreground">
                           {selectedOrphans.length}
                         </span>
                       </div>
-                      <p className="mb-3 text-[11px] text-muted-foreground">
+                      <p className="mb-3 text-label text-muted-foreground">
                         GitHub releases with no matching internal run. Created manually or before this tool started watching.
                       </p>
                       <div className="flex flex-col gap-2">

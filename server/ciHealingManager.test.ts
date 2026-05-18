@@ -159,8 +159,10 @@ test("CIHealingManager can verify an awaiting repair session that becomes health
 
   const verifying = await manager.markVerifying(session.id, {
     currentHeadSha: "sha-a",
+    endedAt: null,
   });
   assert.equal(verifying.state, "verifying");
+  assert.equal(verifying.endedAt, null);
 
   const healed = await manager.markHealed(session.id, {
     currentHeadSha: "sha-a",
@@ -168,6 +170,45 @@ test("CIHealingManager can verify an awaiting repair session that becomes health
     lastImprovementScore: 0,
   });
   assert.equal(healed.state, "healed");
+  assert.equal(healed.latestFingerprint, null);
+  assert.ok(healed.endedAt);
+});
+
+test("CIHealingManager can clear a blocked session after external CI turns healthy", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig(makeConfig());
+  const pr = await storage.addPR(makePR());
+  const manager = new CIHealingManager(storage);
+  const session = await storage.createHealingSession({
+    prId: pr.id,
+    repo: pr.repo,
+    prNumber: pr.number,
+    initialHeadSha: "sha-a",
+    currentHeadSha: "sha-a",
+    state: "blocked",
+    endedAt: "2026-04-01T10:00:00.000Z",
+    blockedReason: "External CI failure",
+    escalationReason: null,
+    latestFingerprint: "github-check-run:cancelled:triage",
+    attemptCount: 0,
+    lastImprovementScore: null,
+  });
+
+  const verifying = await manager.markVerifying(session.id, {
+    currentHeadSha: "sha-a",
+    endedAt: null,
+  });
+  assert.equal(verifying.state, "verifying");
+  assert.equal(verifying.endedAt, null);
+
+  const healed = await manager.markHealed(session.id, {
+    currentHeadSha: "sha-a",
+    blockedReason: null,
+    latestFingerprint: null,
+    lastImprovementScore: 0,
+  });
+  assert.equal(healed.state, "healed");
+  assert.equal(healed.blockedReason, null);
   assert.equal(healed.latestFingerprint, null);
   assert.ok(healed.endedAt);
 });

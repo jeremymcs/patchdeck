@@ -8,6 +8,7 @@ import { APP_COMMENT_FOOTER, PRBabysitter } from "./babysitter";
 import { BackgroundJobQueue } from "./backgroundJobQueue";
 import { MemStorage } from "./memoryStorage";
 import { clearRateLimitStateForTests, recordResourceBudget } from "./rateLimitState";
+import { SqliteStorage } from "./sqliteStorage";
 
 function makeFeedbackItem(overrides: Partial<FeedbackItem> = {}): FeedbackItem {
   return {
@@ -897,6 +898,68 @@ function makeOctocatPull(n: number) {
     baseSha: "base",
   };
 }
+
+test("syncAndBabysitTrackedRepos reactivates archived PRs instead of inserting duplicates", async () => {
+  clearRateLimitStateForTests();
+  const root = await mkdtemp(path.join(os.tmpdir(), "patchdeck-babysitter-sqlite-"));
+  const storage = new SqliteStorage(root);
+  await storage.updateConfig({
+    watchedRepos: ["octo/example"],
+    maxConcurrentBabysitRuns: 50,
+    autoUpdateDocs: false,
+  });
+  const archived = await storage.addPR({
+    number: 106,
+    title: "Archived PR",
+    repo: "octo/example",
+    branch: "old-branch",
+    author: "octocat",
+    url: "https://github.com/octo/example/pull/106",
+    status: "archived",
+    feedbackItems: [],
+    accepted: 0,
+    rejected: 0,
+    flagged: 0,
+    testsPassed: null,
+    lintPassed: null,
+    lastChecked: null,
+  });
+  const backgroundJobQueue = new BackgroundJobQueue(storage);
+  const babysitter = new PRBabysitter(
+    storage,
+    makeWatcherGitHubService({
+      listOpenPullsForRepo: async () => [makeOctocatPull(106)],
+    }),
+    {
+      resolveAgent: async () => "codex",
+      ciPollIntervalMs: 0,
+      evaluateFixNecessityWithAgent: async () => ({ needsFix: false, reason: "unused" }),
+      applyFixesWithAgent: async () => ({ code: 0, stdout: "", stderr: "" }),
+      runCommand: async () => ({ code: 0, stdout: "", stderr: "" }),
+    },
+    undefined,
+    async (...args) => backgroundJobQueue.enqueue(...args),
+  );
+  babysitter.babysitPR = async () => {
+    throw new Error("watcher should enqueue, not babysit directly");
+  };
+
+  await babysitter.syncAndBabysitTrackedRepos({ fullSweep: true });
+
+  const reactivated = await storage.getPR(archived.id);
+  const lookup = await storage.getPRByRepoAndNumber("octo/example", 106);
+  const jobs = await storage.listBackgroundJobs({
+    kind: "babysit_pr",
+    targetId: archived.id,
+    status: "queued",
+  });
+
+  assert.equal(lookup?.id, archived.id);
+  assert.equal(reactivated?.status, "watching");
+  assert.equal(reactivated?.title, "PR 106");
+  assert.equal(reactivated?.branch, "feature/106");
+  assert.equal(jobs.length, 1);
+});
 
 test("syncAndBabysitTrackedRepos caps babysit_pr enqueues per repo per sweep", async () => {
   clearRateLimitStateForTests();
@@ -5888,6 +5951,7 @@ test("runQueuedBabysitPR launches code-owner fallback after the default run fail
   });
   const worktreeRoot = await mkdtemp(path.join(os.tmpdir(), "codefactory-home-"));
   process.env.CODEFACTORY_HOME = worktreeRoot;
+  const backgroundJobQueue = new BackgroundJobQueue(storage);
   const applyCalls: Array<{
     agent: string;
     cwd?: string;
@@ -5899,7 +5963,7 @@ test("runQueuedBabysitPR launches code-owner fallback after the default run fail
     const babysitter = new PRBabysitter(
       storage,
       makeWatcherGitHubService({
-        fetchPullSummary: async () => makePullSummary(pr),
+        fetchPullSummary: async () => makePullSummary(pr, { mergeableState: "blocked" }),
         listFailingStatuses: async () => [{
           context: "build",
           description: "TypeScript compilation failed",
@@ -5926,6 +5990,8 @@ test("runQueuedBabysitPR launches code-owner fallback after the default run fail
           remoteHeadSha: "def456",
         }),
       },
+      undefined,
+      async (...args) => backgroundJobQueue.enqueue(...args),
     );
 
     await babysitter.runQueuedBabysitPR(pr.id, "claude");
@@ -5960,6 +6026,11 @@ test("runQueuedBabysitPR launches code-owner fallback after the default run fail
   assert.equal(typeof fallbackMetadata?.startedAt, "string");
   assert.equal(typeof fallbackMetadata?.completedAt, "string");
   assert.ok(logs.some((log) => log.phase === "code-owner-fallback" && log.message.includes("Launching claude code-owner fallback")));
+  const jobs = await storage.listBackgroundJobs({ kind: "babysit_pr", status: "queued" });
+  assert.equal(jobs.length, 1);
+  assert.equal(jobs[0]?.targetId, pr.id);
+  assert.equal(jobs[0]?.payload.monitorFollowUp, true);
+  assert.equal(jobs[0]?.payload.monitorReason, "GitHub mergeable state is blocked");
 });
 
 test("runQueuedBabysitPR records code-owner fallback failure phase", async () => {
@@ -6158,6 +6229,139 @@ test("babysitPR resolves lingering review threads without reposting an existing 
   assert.equal(updatedItem?.status, "resolved");
   assert.deepEqual(postedFollowUps, []);
   assert.deepEqual(resolvedThreads, ["PRRT_kwDO_example"]);
+});
+
+test("babysitPR does not count agent command comments as feedback audit trails", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig({ autoUpdateDocs: false });
+  const existingItem = makeFeedbackItem({
+    id: "gh-issue-comment-risk-report",
+    author: "github-actions[bot]",
+    body: "## PR Risk Report\n\nReview this PR before merge.",
+    bodyHtml: "<h2>PR Risk Report</h2><p>Review this PR before merge.</p>",
+    replyKind: "general_comment",
+    sourceId: "100",
+    sourceNodeId: "IC_kwDO_risk",
+    sourceUrl: "https://github.com/alex-morgan-o/lolodex/pull/106#issuecomment-100",
+    threadId: null,
+    threadResolved: null,
+    auditToken: "codefactory-feedback:gh-issue-comment-risk-report",
+    file: null,
+    line: null,
+    type: "general_comment",
+    decision: "accept",
+    decisionReason: "Auto-accepted: trusted reviewer @github-actions[bot]",
+    action: "Review this PR before merge.",
+    status: "in_progress",
+  });
+  const commandComment = makeFeedbackItem({
+    id: "gh-issue-comment-command",
+    author: "octocat",
+    body: `<!-- codefactory-agent-command -->\n\nDispatched agent with ${existingItem.auditToken}`,
+    bodyHtml: `<p>Dispatched agent with ${existingItem.auditToken}</p>`,
+    replyKind: "general_comment",
+    sourceId: "101",
+    sourceNodeId: "IC_kwDO_command",
+    sourceUrl: "https://github.com/alex-morgan-o/lolodex/pull/106#issuecomment-101",
+    threadId: null,
+    threadResolved: null,
+    auditToken: "codefactory-feedback:gh-issue-comment-command",
+    file: null,
+    line: null,
+    type: "general_comment",
+    decision: "reject",
+    decisionReason: "PatchDeck agent command comment",
+    action: null,
+    status: "rejected",
+    statusReason: "PatchDeck agent command comment",
+  });
+  const pr = await storage.addPR({
+    number: 106,
+    title: "Verbose PR",
+    repo: "alex-morgan-o/lolodex",
+    branch: "feature/verbose",
+    author: "octocat",
+    url: "https://github.com/alex-morgan-o/lolodex/pull/106",
+    status: "watching",
+    feedbackItems: [existingItem, commandComment],
+    accepted: 1,
+    rejected: 1,
+    flagged: 0,
+    testsPassed: null,
+    lintPassed: null,
+    lastChecked: null,
+  });
+
+  let feedbackFetchCount = 0;
+  let postedBody = "";
+  const babysitter = new PRBabysitter(
+    storage,
+    {
+      buildOctokit: async () => ({}) as never,
+      fetchFeedbackItemsForPR: async () => {
+        feedbackFetchCount += 1;
+        if (feedbackFetchCount === 1) {
+          return [existingItem, commandComment];
+        }
+
+        return [
+          existingItem,
+          commandComment,
+          makeFeedbackItem({
+            id: "gh-issue-comment-followup",
+            author: "octocat",
+            body: postedBody,
+            bodyHtml: `<p>${postedBody}</p>`,
+            replyKind: "general_comment",
+            sourceId: "102",
+            sourceNodeId: "IC_kwDO_followup",
+            sourceUrl: "https://github.com/alex-morgan-o/lolodex/pull/106#issuecomment-102",
+            threadId: null,
+            threadResolved: null,
+            auditToken: "codefactory-feedback:gh-issue-comment-followup",
+            file: null,
+            line: null,
+            type: "general_comment",
+            createdAt: new Date().toISOString(),
+            decision: null,
+            action: null,
+            status: "pending",
+          }),
+        ];
+      },
+      fetchPullSummary: async () => makePullSummary(pr),
+      listFailingStatuses: async () => [],
+      checkCISettled: async () => true,
+      listOpenPullsForRepo: async () => [],
+      postFollowUpForFeedbackItem: async (_octokit, _parsed, _item, body) => {
+        postedBody = body;
+      },
+      resolveReviewThread: async () => undefined,
+      resolveGitHubAuthToken: async () => "test-token",
+      addReactionToComment: async () => {},
+      postStatusReplyForFeedbackItem: async () => null,
+      updateStatusReply: async () => {},
+    },
+    {
+      resolveAgent: async () => "codex",
+      ciPollIntervalMs: 0,
+      evaluateFixNecessityWithAgent: async () => {
+        throw new Error("in-progress feedback should not be re-evaluated");
+      },
+      applyFixesWithAgent: async () => {
+        throw new Error("in-progress feedback recovery should only post the missing follow-up");
+      },
+      runCommand: makeGitRunCommand(),
+    },
+  );
+
+  await babysitter.babysitPR(pr.id, "codex");
+
+  const updated = await storage.getPR(pr.id);
+  const updatedItem = updated?.feedbackItems.find((item) => item.id === existingItem.id);
+
+  assert.match(postedBody, new RegExp(existingItem.auditToken));
+  assert.equal(updatedItem?.status, "resolved");
 });
 
 test("babysitPR reposts GitHub follow-up when an earlier audit trail used the wrong thread", async () => {
@@ -7094,6 +7298,108 @@ test("syncAndBabysitTrackedRepos auto-registers only the authenticated user's PR
   assert.deepEqual(queuedTargets, [prs[0]!.id]);
 });
 
+test("syncAndBabysitTrackedRepos caches the authenticated GitHub login across sweeps", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig({
+    watchedRepos: ["alex-morgan-o/lolodex"],
+    autoUpdateDocs: false,
+  });
+
+  let loginCalls = 0;
+  const babysitter = new PRBabysitter(
+    storage,
+    makeWatcherGitHubService({
+      getAuthenticatedLogin: async () => {
+        loginCalls += 1;
+        return "OctoCat";
+      },
+      listOpenPullsForRepo: async () => [
+        {
+          number: 106,
+          title: "My PR",
+          branch: "feature/mine",
+          author: "octocat",
+          url: "https://github.com/alex-morgan-o/lolodex/pull/106",
+        },
+      ],
+    }),
+    {
+      resolveAgent: async () => "codex",
+      evaluateFixNecessityWithAgent: async () => ({ needsFix: false, reason: "unused" }),
+      applyFixesWithAgent: async () => ({ code: 0, stdout: "", stderr: "" }),
+      runCommand: async () => ({ code: 0, stdout: "", stderr: "" }),
+    },
+    undefined,
+    async () => ({} as never),
+  );
+
+  await babysitter.syncAndBabysitTrackedRepos();
+  await babysitter.syncAndBabysitTrackedRepos();
+
+  const prs = await storage.getPRs();
+  assert.equal(prs.length, 1);
+  assert.equal(prs[0]?.number, 106);
+  assert.equal(loginCalls, 1, "the watcher should reuse the authenticated login instead of calling GET /user every sweep");
+});
+
+test("syncAndBabysitTrackedRepos times out authenticated login lookup and cools down", async () => {
+  const previousTimeout = process.env.PATCHDECK_AUTH_LOGIN_TIMEOUT_MS;
+  process.env.PATCHDECK_AUTH_LOGIN_TIMEOUT_MS = "5";
+
+  try {
+    const storage = new MemStorage();
+    await storage.updateConfig({
+      watchedRepos: ["alex-morgan-o/lolodex"],
+      autoUpdateDocs: false,
+    });
+
+    let loginCalls = 0;
+    const babysitter = new PRBabysitter(
+      storage,
+      makeWatcherGitHubService({
+        getAuthenticatedLogin: async () => {
+          loginCalls += 1;
+          return new Promise<string | null>(() => {});
+        },
+        listOpenPullsForRepo: async () => [
+          {
+            number: 106,
+            title: "My PR",
+            branch: "feature/mine",
+            author: "octocat",
+            url: "https://github.com/alex-morgan-o/lolodex/pull/106",
+          },
+        ],
+      }),
+      {
+        resolveAgent: async () => "codex",
+        evaluateFixNecessityWithAgent: async () => ({ needsFix: false, reason: "unused" }),
+        applyFixesWithAgent: async () => ({ code: 0, stdout: "", stderr: "" }),
+        runCommand: async () => ({ code: 0, stdout: "", stderr: "" }),
+      },
+      undefined,
+      async () => ({} as never),
+    );
+
+    const startedAt = Date.now();
+    await babysitter.syncAndBabysitTrackedRepos();
+    const elapsedMs = Date.now() - startedAt;
+
+    assert.ok(elapsedMs < 500, `watcher should fail closed quickly, took ${elapsedMs}ms`);
+    assert.equal(loginCalls, 2, "the watcher should retry the timed-out lookup once");
+    assert.equal((await storage.getPRs()).length, 0, "own-only filtering should fail closed without an authenticated login");
+
+    await babysitter.syncAndBabysitTrackedRepos();
+    assert.equal(loginCalls, 2, "the failure cooldown should skip immediate repeated GET /user attempts");
+  } finally {
+    if (previousTimeout === undefined) {
+      delete process.env.PATCHDECK_AUTH_LOGIN_TIMEOUT_MS;
+    } else {
+      process.env.PATCHDECK_AUTH_LOGIN_TIMEOUT_MS = previousTimeout;
+    }
+  }
+});
+
 test("syncAndBabysitTrackedRepos can include teammate PRs when repo setting disables own-only filtering", async () => {
   const storage = new MemStorage();
   await storage.updateConfig({
@@ -7307,6 +7613,66 @@ test("babysitPR blocks external CI failures without launching the healing agent"
   assert.equal(healingAgentCalled, false);
 });
 
+test("babysitPR clears a blocked CI healing session when the same head becomes healthy", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig({ autoHealCI: true, autoUpdateDocs: false });
+  const pr = await storage.addPR({
+    number: 42,
+    title: "Recovered CI",
+    repo: "alex-morgan-o/lolodex",
+    branch: "feature/recovered-ci",
+    author: "octocat",
+    url: "https://github.com/alex-morgan-o/lolodex/pull/42",
+    status: "watching",
+    feedbackItems: [],
+    accepted: 0,
+    rejected: 0,
+    flagged: 0,
+    testsPassed: null,
+    lintPassed: null,
+    lastChecked: null,
+  });
+  const session = await storage.createHealingSession({
+    prId: pr.id,
+    repo: pr.repo,
+    prNumber: pr.number,
+    initialHeadSha: "blocked123",
+    currentHeadSha: "blocked123",
+    state: "blocked",
+    endedAt: "2026-04-29T03:46:32.083Z",
+    blockedReason: "External CI failure likely not fixable in-branch: triage: Check run cancelled",
+    escalationReason: null,
+    latestFingerprint: "github-check-run:cancelled:triage",
+    attemptCount: 0,
+    lastImprovementScore: null,
+  });
+
+  const babysitter = new PRBabysitter(
+    storage,
+    {
+      ...makeWatcherGitHubService(),
+      fetchPullSummary: async () => makePullSummary(pr, { headSha: "blocked123", headRef: pr.branch, branch: pr.branch }),
+      fetchCheckSnapshotsForRef: async () => [],
+    },
+    {
+      resolveAgent: async () => "codex",
+      evaluateFixNecessityWithAgent: async () => ({ needsFix: false, reason: "unused" }),
+      applyFixesWithAgent: async () => ({ code: 0, stdout: "", stderr: "" }),
+      runCommand: async () => ({ code: 0, stdout: "", stderr: "" }),
+      runCIHealingRepairAttempt: async () => {
+        throw new Error("healing agent should not run after CI turns healthy");
+      },
+    },
+  );
+
+  await babysitter.babysitPR(pr.id, "codex");
+
+  const updatedSession = await storage.getHealingSession(session.id);
+  assert.equal(updatedSession?.state, "healed");
+  assert.equal(updatedSession?.blockedReason, null);
+  assert.equal(updatedSession?.latestFingerprint, null);
+});
+
 test("babysitPR does not reopen terminal healing sessions for the same head SHA", async () => {
   const storage = new MemStorage();
   await storage.updateConfig({ autoHealCI: true, autoUpdateDocs: false });
@@ -7374,6 +7740,268 @@ test("babysitPR does not reopen terminal healing sessions for the same head SHA"
   assert.equal(updatedSession?.state, "escalated");
   assert.equal(healingAgentCalled, false);
   assert.ok(!logs.some((log) => log.message.includes("Illegal healing session transition")));
+});
+
+test("babysitPR falls back to status-task fixes after CI healing escalates", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig({ autoHealCI: true, autoUpdateDocs: false });
+  const pr = await storage.addPR({
+    number: 48,
+    title: "Escalated CI still red",
+    repo: "alex-morgan-o/lolodex",
+    branch: "feature/escalated-status",
+    author: "octocat",
+    url: "https://github.com/alex-morgan-o/lolodex/pull/48",
+    status: "watching",
+    feedbackItems: [],
+    accepted: 0,
+    rejected: 0,
+    flagged: 0,
+    testsPassed: null,
+    lintPassed: null,
+    lastChecked: null,
+  });
+
+  const session = await storage.createHealingSession({
+    prId: pr.id,
+    repo: pr.repo,
+    prNumber: pr.number,
+    initialHeadSha: "same-head",
+    currentHeadSha: "same-head",
+    state: "escalated",
+    endedAt: "2026-04-29T03:46:32.083Z",
+    blockedReason: null,
+    escalationReason: "agent exited with code 124",
+    latestFingerprint: "github-check-run:tests:build",
+    attemptCount: 1,
+    lastImprovementScore: null,
+  });
+
+  const evaluatedPrompts: string[] = [];
+  const appliedPrompts: string[] = [];
+  let healingAgentCalled = false;
+  const worktreeRoot = await mkdtemp(path.join(os.tmpdir(), "codefactory-home-"));
+  process.env.CODEFACTORY_HOME = worktreeRoot;
+
+  try {
+    const babysitter = new PRBabysitter(
+      storage,
+      {
+        ...makeWatcherGitHubService(),
+        fetchPullSummary: async () => makePullSummary(pr, { headSha: "same-head", headRef: pr.branch, branch: pr.branch }),
+        fetchCheckSnapshotsForRef: async (_octokit: unknown, _repo: unknown, prId: string, headSha: string) => [
+          makeCheckSnapshot({
+            prId,
+            sha: headSha,
+            description: "Failed steps: Run unit tests",
+          }),
+        ],
+        listFailingStatuses: async (_octokit: unknown, _repo: unknown, sha: string) => (
+          sha === "same-head"
+            ? [{
+                context: "build",
+                description: "Check run failure",
+                targetUrl: "https://github.com/octo/example/actions/runs/1",
+              }]
+            : []
+        ),
+        checkCISettled: async () => true,
+      },
+      {
+        ciPollIntervalMs: 0,
+        resolveAgent: async () => "codex",
+        evaluateFixNecessityWithAgent: async ({ prompt }) => {
+          evaluatedPrompts.push(prompt);
+          return { needsFix: true, reason: "Unit test failure needs a code change" };
+        },
+        applyFixesWithAgent: async ({ prompt }) => {
+          appliedPrompts.push(prompt);
+          return { code: 0, stdout: "", stderr: "" };
+        },
+        runCommand: makeGitRunCommand({
+          localHeadSha: "repaired123",
+          remoteHeadSha: "repaired123",
+        }),
+        runCIHealingRepairAttempt: async () => {
+          healingAgentCalled = true;
+          throw new Error("terminal healing session must not launch the dedicated healing agent");
+        },
+      },
+    );
+
+    await babysitter.babysitPR(pr.id, "codex");
+  } finally {
+    delete process.env.CODEFACTORY_HOME;
+  }
+
+  const updatedSession = await storage.getHealingSession(session.id);
+  const updatedPr = await storage.getPR(pr.id);
+  const logs = await storage.getLogs(pr.id);
+
+  assert.equal(healingAgentCalled, false);
+  assert.equal(updatedSession?.state, "escalated");
+  assert.equal(updatedPr?.testsPassed, true);
+  assert.equal(evaluatedPrompts.length, 1);
+  assert.match(evaluatedPrompts[0] ?? "", /Failed steps: Run unit tests/);
+  assert.equal(appliedPrompts.length, 1);
+  assert.match(appliedPrompts[0] ?? "", /Approved status-check tasks/);
+  assert.match(appliedPrompts[0] ?? "", /build: Failed steps: Run unit tests/);
+  assert.ok(logs.some((log) => log.phase === "evaluate.status" && log.message.includes("Evaluating 1 failing status check")));
+  assert.ok(!logs.some((log) => log.phase === "evaluate.status" && log.message.includes("Skipping legacy status-task evaluation")));
+});
+
+test("babysitPR reruns cancelled GitHub Actions checks and queues monitoring", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig({ autoUpdateDocs: false });
+  const pr = await storage.addPR({
+    number: 50,
+    title: "Cancelled build",
+    repo: "alex-morgan-o/lolodex",
+    branch: "feature/cancelled-build",
+    author: "octocat",
+    url: "https://github.com/alex-morgan-o/lolodex/pull/50",
+    status: "watching",
+    feedbackItems: [],
+    accepted: 0,
+    rejected: 0,
+    flagged: 0,
+    testsPassed: false,
+    lintPassed: null,
+    mergeableState: "blocked",
+    lastChecked: null,
+  });
+  const backgroundJobQueue = new BackgroundJobQueue(storage);
+  const rerunCalls: Array<{ runId: number; contexts: string[] }> = [];
+  let statusEvaluationCalls = 0;
+  const now = new Date("2026-05-18T11:00:00.000Z");
+  const cancelledSnapshot = makeCheckSnapshot({
+    prId: pr.id,
+    sha: "cancelled-head",
+    conclusion: "cancelled",
+    description: "Check run cancelled",
+    targetUrl: "https://github.com/alex-morgan-o/lolodex/actions/runs/12345/job/67890",
+  });
+  const babysitter = new PRBabysitter(
+    storage,
+    {
+      ...makeWatcherGitHubService(),
+      fetchPullSummary: async () => makePullSummary(pr, {
+        headSha: "cancelled-head",
+        headRef: pr.branch,
+        branch: pr.branch,
+        mergeableState: "blocked",
+      }),
+      fetchCheckSnapshotsForRef: async () => [cancelledSnapshot],
+      listFailingStatuses: async () => [{
+        context: "build",
+        description: "Check run cancelled",
+        targetUrl: cancelledSnapshot.targetUrl,
+      }],
+      rerunFailedGitHubActionsRunsForSnapshots: async (_octokit, _repo, snapshots) => {
+        rerunCalls.push({ runId: 12345, contexts: snapshots.map((snapshot) => snapshot.context) });
+        return [{
+          runId: 12345,
+          targetUrl: cancelledSnapshot.targetUrl,
+          contexts: snapshots.map((snapshot) => snapshot.context),
+        }];
+      },
+    },
+    {
+      now: () => now,
+      checkAgentHealth: async () => ({ ok: true }),
+      resolveAgent: async () => "codex",
+      evaluateFixNecessityWithAgent: async () => {
+        statusEvaluationCalls += 1;
+        return { needsFix: true, reason: "should not evaluate cancelled CI as code work" };
+      },
+      applyFixesWithAgent: async () => {
+        throw new Error("cancelled CI should not launch agent fixes");
+      },
+      runCommand: async () => ({ code: 0, stdout: "", stderr: "" }),
+    },
+    undefined,
+    async (...args) => backgroundJobQueue.enqueue(...args),
+  );
+
+  await babysitter.babysitPR(pr.id, "codex");
+
+  const updatedPr = await storage.getPR(pr.id);
+  assert.equal(updatedPr?.status, "watching");
+  assert.equal(updatedPr?.prStage, "tests");
+  assert.equal(updatedPr?.testsPassed, null);
+  assert.equal(statusEvaluationCalls, 0);
+  assert.deepEqual(rerunCalls, [{ runId: 12345, contexts: ["build"] }]);
+
+  const jobs = await storage.listBackgroundJobs({ kind: "babysit_pr", status: "queued" });
+  assert.equal(jobs.length, 1);
+  assert.equal(jobs[0]?.targetId, pr.id);
+  assert.equal(jobs[0]?.availableAt, "2026-05-18T11:01:00.000Z");
+  assert.equal(jobs[0]?.payload.monitorFollowUp, true);
+  assert.equal(jobs[0]?.payload.monitorReason, "cancelled GitHub Actions run was rerun");
+
+  const runs = await storage.listAgentRuns({ prId: pr.id });
+  assert.equal(runs[0]?.status, "completed");
+  assert.equal(runs[0]?.phase, "ci.rerun_queued");
+  const logs = await storage.getLogs(pr.id);
+  assert.ok(logs.some((log) => log.phase === "verify.ci.rerun" && log.message.includes("Reran cancelled GitHub Actions")));
+});
+
+test("babysitPR queues follow-up monitoring when PR remains not merge-ready", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig({ autoUpdateDocs: false });
+  const pr = await storage.addPR({
+    number: 49,
+    title: "Still blocked",
+    repo: "alex-morgan-o/lolodex",
+    branch: "feature/still-blocked",
+    author: "octocat",
+    url: "https://github.com/alex-morgan-o/lolodex/pull/49",
+    status: "watching",
+    feedbackItems: [],
+    accepted: 0,
+    rejected: 0,
+    flagged: 0,
+    testsPassed: null,
+    lintPassed: null,
+    mergeableState: "blocked",
+    lastChecked: null,
+  });
+  const backgroundJobQueue = new BackgroundJobQueue(storage);
+  const now = new Date("2026-05-18T10:00:00.000Z");
+  const babysitter = new PRBabysitter(
+    storage,
+    {
+      ...makeWatcherGitHubService(),
+      fetchPullSummary: async () => makePullSummary(pr, {
+        headSha: "blocked-head",
+        headRef: pr.branch,
+        branch: pr.branch,
+        mergeableState: "blocked",
+      }),
+    },
+    {
+      now: () => now,
+      resolveAgent: async () => "codex",
+      evaluateFixNecessityWithAgent: async () => ({ needsFix: false, reason: "unused" }),
+      applyFixesWithAgent: async () => ({ code: 0, stdout: "", stderr: "" }),
+      runCommand: async () => ({ code: 0, stdout: "", stderr: "" }),
+    },
+    undefined,
+    async (...args) => backgroundJobQueue.enqueue(...args),
+  );
+
+  await babysitter.babysitPR(pr.id, "codex");
+
+  const jobs = await storage.listBackgroundJobs({ kind: "babysit_pr", status: "queued" });
+  assert.equal(jobs.length, 1);
+  assert.equal(jobs[0]?.targetId, pr.id);
+  assert.match(jobs[0]?.dedupeKey ?? "", /:monitor:/);
+  assert.equal(jobs[0]?.availableAt, "2026-05-18T10:01:00.000Z");
+  assert.equal(jobs[0]?.payload.monitorFollowUp, true);
+  assert.equal(jobs[0]?.payload.monitorReason, "GitHub mergeable state is blocked");
+
+  const logs = await storage.getLogs(pr.id);
+  assert.ok(logs.some((log) => log.message.includes("queued follow-up monitoring")));
 });
 
 test("babysitPR honors CI healing retry budgets before launching the healing agent", async () => {
