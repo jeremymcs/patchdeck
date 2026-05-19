@@ -4,8 +4,13 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
-  release:
-    types: [published]
+  workflow_call:
+    inputs:
+      release-tag:
+        description: Tag to upload built artifacts to. Empty for a CI-only build.
+        type: string
+        required: false
+        default: ''
 
 jobs:
   build-tauri:
@@ -73,7 +78,7 @@ jobs:
           Copy-Item $nodePath vendor/node/node.exe
 
       - name: Build Tauri app
-        if: github.event_name != 'release'
+        if: inputs.release-tag == ''
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -81,10 +86,10 @@ jobs:
           args: --target ${{ matrix.target }}
 
       - name: Build and upload Tauri app
-        if: github.event_name == 'release'
+        if: inputs.release-tag != ''
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: ${{ github.event.release.tag_name }}
+          tagName: ${{ inputs.release-tag }}
           args: --target ${{ matrix.target }}
