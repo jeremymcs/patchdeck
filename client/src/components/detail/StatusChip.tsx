@@ -19,7 +19,7 @@ export function StatusChip({
     <span
       data-testid={testId}
       title={title}
-      className={`inline-flex items-center rounded-md border px-1.5 py-0 text-[10px] font-medium uppercase tracking-wider ${toneChipClass(tone)}${animateClass}`}
+      className={`inline-flex items-center rounded-md border px-1.5 py-0 text-label font-medium uppercase tracking-wider ${toneChipClass(tone)}${animateClass}`}
     >
       {label}
     </span>

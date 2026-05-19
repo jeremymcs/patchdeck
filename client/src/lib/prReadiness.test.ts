@@ -68,8 +68,10 @@ test("isGitHubReadyToMerge only treats GitHub clean state as ready", () => {
   assert.equal(isGitHubReadyToMerge({ mergeableState: null }), false);
 });
 
-test("isPRDetailReadyToMerge requires idle work, checks, lint, resolved comments, and GitHub ready state", () => {
+test("isPRDetailReadyToMerge requires idle work, no known check failures, resolved comments, and GitHub ready state", () => {
   assert.equal(isPRDetailReadyToMerge(makePr()), true);
+  assert.equal(isPRDetailReadyToMerge(makePr({ testsPassed: null })), true);
+  assert.equal(isPRDetailReadyToMerge(makePr({ lintPassed: null })), true);
   assert.equal(isPRDetailReadyToMerge(makePr({ testsPassed: false })), false);
   assert.equal(isPRDetailReadyToMerge(makePr({ lintPassed: false })), false);
   assert.equal(isPRDetailReadyToMerge(makePr({ mergeableState: "blocked" })), false);
@@ -84,8 +86,10 @@ test("isPRSummaryReadyToMerge uses stored checks and GitHub ready state", () => 
 
   assert.equal(isPRSummaryReadyToMerge(base satisfies PRSummary), true);
   assert.equal(isPRSummaryReadyToMerge({ ...base, status: "watching" }), true);
-  assert.equal(isPRSummaryReadyToMerge({ ...base, testsPassed: null }), false);
-  assert.equal(isPRSummaryReadyToMerge({ ...base, lintPassed: null }), false);
+  assert.equal(isPRSummaryReadyToMerge({ ...base, testsPassed: null }), true);
+  assert.equal(isPRSummaryReadyToMerge({ ...base, lintPassed: null }), true);
+  assert.equal(isPRSummaryReadyToMerge({ ...base, testsPassed: false }), false);
+  assert.equal(isPRSummaryReadyToMerge({ ...base, lintPassed: false }), false);
   assert.equal(isPRSummaryReadyToMerge({ ...base, mergeableState: "unstable" }), false);
   assert.equal(isPRSummaryReadyToMerge({ ...base, status: "processing" }), false);
 });
@@ -105,9 +109,21 @@ test("buildPRReadinessChecks explains why a PR is not ready", () => {
   assert.deepEqual(checks.map((check) => [check.key, check.passed]), [
     ["work-state", false],
     ["tests", false],
-    ["lint", false],
+    ["lint", true],
     ["comments", false],
     ["github", false],
   ]);
   assert.match(checks.find((check) => check.key === "comments")?.detail ?? "", /1 tracked feedback item/);
+});
+
+test("buildPRReadinessChecks reports queued automation instead of idle", () => {
+  const checks = buildPRReadinessChecks(makePr({ status: "error" }), {
+    label: "up next",
+    detail: "starts in ~5m",
+  });
+
+  const workState = checks.find((check) => check.key === "work-state");
+  assert.equal(workState?.label, "Automation queued");
+  assert.equal(workState?.passed, false);
+  assert.equal(workState?.detail, "starts in ~5m");
 });

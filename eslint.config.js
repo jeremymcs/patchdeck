@@ -4,7 +4,14 @@ import tseslint from "typescript-eslint";
 
 export default tseslint.config(
   {
-    ignores: ["dist/**", "build/**", "dogfood-output/**", "node_modules/**"],
+    ignores: [
+      "dist/**",
+      "build/**",
+      "dogfood-output/**",
+      "node_modules/**",
+      ".worktrees/**",
+      "src-tauri/target/**",
+    ],
   },
   {
     files: ["**/*.js"],
@@ -45,6 +52,21 @@ export default tseslint.config(
       globals: {
         ...globals.browser,
       },
+    },
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "Literal[value=/text-\\[[0-9]/]",
+          message:
+            "Use the named font-size tokens (text-label/text-body/text-title/text-display) instead of arbitrary text-[…] sizes.",
+        },
+        {
+          selector: "TemplateElement[value.raw=/text-\\[[0-9]/]",
+          message:
+            "Use the named font-size tokens (text-label/text-body/text-title/text-display) instead of arbitrary text-[…] sizes.",
+        },
+      ],
     },
   },
   {

@@ -108,6 +108,64 @@ test("runtime queueBabysit enqueues a babysit job using the configured agent", a
   assert.equal(jobs[0]?.payload.activityTargetUrl, pr.url);
 });
 
+test("runtime queueBabysit records durable PR work intent", async () => {
+  const storage = new MemStorage();
+  const runtime = createAppRuntime({
+    storage,
+    startBackgroundServices: false,
+    startWatcher: false,
+  });
+  const pr = await seedPR(storage, {
+    status: "error",
+    watchEnabled: false,
+  });
+
+  const updated = await runtime.queueBabysit(pr.id);
+
+  assert.equal(updated.status, "watching");
+  assert.equal(updated.watchEnabled, true);
+
+  const config = await storage.getConfig();
+  assert.deepEqual(config.watchedRepos, ["acme/widgets"]);
+
+  const jobs = await storage.listBackgroundJobs({
+    kind: "babysit_pr",
+    status: "queued",
+  });
+  assert.equal(jobs.length, 1);
+  assert.equal(jobs[0]?.targetId, pr.id);
+
+  const logs = await storage.getLogs(pr.id);
+  assert.ok(logs.some((log) => log.message === "Background watch resumed by queued PR work"));
+  assert.ok(logs.some((log) => log.message === "Queued PR work resumed this PR after a failed run"));
+});
+
+test("runtime activity preserves monitor follow-up labels", async () => {
+  const storage = new MemStorage();
+  const runtime = createAppRuntime({
+    storage,
+    startBackgroundServices: false,
+    startWatcher: false,
+  });
+  const pr = await seedPR(storage);
+  await storage.enqueueBackgroundJob({
+    kind: "babysit_pr",
+    targetId: pr.id,
+    dedupeKey: `babysit_pr:${pr.id}:monitor:test`,
+    payload: {
+      monitorFollowUp: true,
+      activityLabel: "Monitoring PR #42",
+      activityDetail: "acme/widgets - feat: add widget",
+      activityTargetUrl: pr.url,
+    },
+  });
+
+  const activities = await runtime.listActivities();
+
+  assert.equal(activities.queued[0]?.label, "Monitoring PR #42");
+  assert.equal(activities.queued[0]?.detail, "acme/widgets - feat: add widget");
+});
+
 test("runtime queueBabysit uses repo agent override when configured", async () => {
   const storage = new MemStorage();
   const runtime = createAppRuntime({
@@ -973,9 +1031,88 @@ test("syncRepos syncs issues and persists the new etag when the issue list chang
   );
 });
 
+test("listIssues stays cached-only when issue automation is off", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig({ autoIssues: false, watchedRepos: ["owner/repo"] });
+  await storage.upsertSyncedIssues("owner/repo", [{
+    number: 7,
+    title: "Cached issue",
+    body: "cached body",
+    bodyHtml: null,
+    url: "https://github.com/owner/repo/issues/7",
+    repoFullName: "owner/repo",
+    repoCloneUrl: "https://github.com/owner/repo.git",
+    author: "alice",
+    labels: ["needs-triage"],
+    assignees: [],
+    comments: 0,
+    createdAt: "2026-05-03T17:00:00.000Z",
+    updatedAt: "2026-05-03T18:00:00.000Z",
+  }], "2026-05-03T18:00:00.000Z");
+
+  let buildOctokitCalls = 0;
+  const runtime = createAppRuntime({
+    storage,
+    startBackgroundServices: false,
+    startWatcher: false,
+    buildOctokitFn: async () => {
+      buildOctokitCalls += 1;
+      return {
+        paginate: async () => {
+          throw new Error("issue timeline should not be fetched when issue automation is off");
+        },
+      } as never;
+    },
+  });
+
+  const page = await runtime.listIssues({ limit: 50, offset: 0 });
+
+  assert.equal(page.items.length, 1);
+  assert.equal(page.items[0]?.title, "Cached issue");
+  assert.equal(page.items[0]?.externalWorkPrNumber, null);
+  assert.equal(buildOctokitCalls, 0, "disabled issue automation must not enrich list rows through GitHub");
+});
+
+test("getIssue stays cached-only when issue automation is off", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig({ autoIssues: false, watchedRepos: ["owner/repo"] });
+  await storage.upsertSyncedIssues("owner/repo", [{
+    number: 7,
+    title: "Cached issue",
+    body: "cached body",
+    bodyHtml: null,
+    url: "https://github.com/owner/repo/issues/7",
+    repoFullName: "owner/repo",
+    repoCloneUrl: "https://github.com/owner/repo.git",
+    author: "alice",
+    labels: ["needs-triage"],
+    assignees: [],
+    comments: 0,
+    createdAt: "2026-05-03T17:00:00.000Z",
+    updatedAt: "2026-05-03T18:00:00.000Z",
+  }], "2026-05-03T18:00:00.000Z");
+
+  let buildOctokitCalls = 0;
+  const runtime = createAppRuntime({
+    storage,
+    startBackgroundServices: false,
+    startWatcher: false,
+    buildOctokitFn: async () => {
+      buildOctokitCalls += 1;
+      throw new Error("issue detail should not fetch GitHub when issue automation is off");
+    },
+  });
+
+  const issue = await runtime.getIssue("owner/repo", 7);
+
+  assert.equal(issue.title, "Cached issue");
+  assert.equal(issue.externalWorkPrNumber, null);
+  assert.equal(buildOctokitCalls, 0, "disabled issue automation must keep issue detail cached-only");
+});
+
 test("syncIssue refreshes worked issue metadata from GitHub", async () => {
   const storage = new MemStorage();
-  await storage.updateConfig({ watchedRepos: ["owner/repo"] });
+  await storage.updateConfig({ autoIssues: false, watchedRepos: ["owner/repo"] });
   await storage.upsertSyncedIssues("owner/repo", [{
     number: 7,
     title: "Old title",

@@ -1297,6 +1297,7 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
     issue: Awaited<ReturnType<typeof fetchIssueSummary>>,
     options: {
       includePrMergeability?: boolean;
+      includeExternalPrLinks?: boolean;
       issueJobs?: BackgroundJob[];
       octokit?: Awaited<ReturnType<typeof buildOctokit>>;
       isWorked?: boolean;
@@ -1322,7 +1323,7 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
     }, evaluation);
     let externalPr: { number: number; url: string; repoFullName: string } | null = null;
     const parsedIssueRepo = parseRepoSlug(issue.repoFullName);
-    const linkedOpenPrs = options.octokit && parsedIssueRepo
+    const linkedOpenPrs = options.includeExternalPrLinks !== false && options.octokit && parsedIssueRepo
       ? await listOpenLinkedPullRequestsForIssue(options.octokit, parsedIssueRepo, issue.number)
       : [];
     if (linkedOpenPrs.length > 0) {
@@ -1492,7 +1493,8 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
 
     const synced = await storage.listSyncedIssues({ repos: config.watchedRepos, limit, offset, includeWorked: true });
     const counts = await storage.listSyncedIssueCounts({ repos: config.watchedRepos, includeWorked: true });
-    const octokit = await buildOctokit(config);
+    const issueAutomationEnabled = config.autoIssues !== false;
+    const octokit = issueAutomationEnabled ? await buildOctokit(config) : null;
     const workJobs = await storage.listBackgroundJobs({ kind: "work_issue" });
     const workJobsByTarget = new Map<string, BackgroundJob[]>();
 
@@ -1509,8 +1511,9 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       markIssueSyncSuccess(targetId, attemptedAt);
       return applyIssueWorkState(issue, {
         issueJobs: workJobsByTarget.get(targetId) ?? [],
-        includePrMergeability: record.isWorked,
-        octokit,
+        includePrMergeability: issueAutomationEnabled && record.isWorked,
+        includeExternalPrLinks: issueAutomationEnabled,
+        octokit: octokit ?? undefined,
         isWorked: record.isWorked,
       });
     }));
@@ -1545,8 +1548,20 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       throw new AppRuntimeError(404, `Repository ${canonical} is not being watched`);
     }
 
-    const octokit = await buildOctokitImpl(config);
     const targetId = formatIssueTargetId(canonical, number);
+    if (config.autoIssues === false) {
+      const cached = await storage.getSyncedIssue(canonical, number);
+      if (!cached) {
+        throw new AppRuntimeError(404, `Issue ${canonical}#${number} has not been synced yet`);
+      }
+      return applyIssueWorkState(cached.payload, {
+        includePrMergeability: false,
+        includeExternalPrLinks: false,
+        isWorked: cached.isWorked,
+      });
+    }
+
+    const octokit = await buildOctokitImpl(config);
     const attemptedAt = markIssueSyncAttempt(targetId);
     try {
       const issue = await fetchIssueSummary(octokit, { ...parsedRepo, number });
@@ -1827,6 +1842,10 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
     }
 
     if (job.kind === "babysit_pr") {
+      if (job.payload.monitorFollowUp === true && payloadDescription) {
+        return normalizeActivityDescription(payloadDescription);
+      }
+
       const pr = context.prsById.get(job.targetId);
       if (pr) {
         return {
@@ -1997,6 +2016,37 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
         }),
       },
     );
+  };
+
+  const activatePRWorkIntent = async (pr: PR, config: Config): Promise<{ pr: PR; config: Config }> => {
+    let nextConfig = config;
+    if (!nextConfig.watchedRepos.includes(pr.repo)) {
+      nextConfig = await storage.updateConfig({
+        watchedRepos: [...nextConfig.watchedRepos, pr.repo].sort((a, b) => a.localeCompare(b)),
+      });
+      await storage.addLog(pr.id, "info", `Repository ${pr.repo} added to automatic PR work watch list`);
+    }
+
+    const updates: Partial<PR> = {};
+    if (pr.watchEnabled === false) {
+      updates.watchEnabled = true;
+    }
+    if (pr.status === "error") {
+      updates.status = "watching";
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return { pr, config: nextConfig };
+    }
+
+    const updated = assertFound(await storage.updatePR(pr.id, updates), "PR not found");
+    if (updates.watchEnabled === true) {
+      await storage.addLog(pr.id, "info", "Background watch resumed by queued PR work");
+    }
+    if (updates.status === "watching") {
+      await storage.addLog(pr.id, "info", "Queued PR work resumed this PR after a failed run");
+    }
+    return { pr: updated, config: nextConfig };
   };
 
   const queueBabysitForRepo = async (pr: PR, config: Config) => {
@@ -2391,10 +2441,15 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       const repoSlug = `${parsed.owner}/${parsed.repo}`;
       const existing = await storage.getPRByRepoAndNumber(repoSlug, parsed.number);
       if (existing) {
-        return existing;
+        const config = await storage.getConfig();
+        const activated = await activatePRWorkIntent(existing, config);
+        await storage.addLog(activated.pr.id, "info", "PR already tracked; queued PR work and monitoring");
+        await queueBabysitForRepo(activated.pr, activated.config);
+        notifyChange();
+        return activated.pr;
       }
 
-      const config = await storage.getConfig();
+      let config = await storage.getConfig();
       const octokit = await buildOctokit(config);
       const summary = await fetchPullSummary(octokit, parsed);
 
@@ -2422,7 +2477,7 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       await storage.addLog(pr.id, "info", `Repository ${repoSlug} added to automatic PR work watch list`);
 
       if (!config.watchedRepos.includes(repoSlug)) {
-        await storage.updateConfig({
+        config = await storage.updateConfig({
           watchedRepos: [...config.watchedRepos, repoSlug].sort((a, b) => a.localeCompare(b)),
         });
       }
@@ -2545,13 +2600,13 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
         });
       }
 
-      const config = await storage.getConfig();
-      const repoSettings = await storage.getRepoSettings(pr.repo);
+      const { pr: activatedPr, config } = await activatePRWorkIntent(pr, await storage.getConfig());
+      const repoSettings = await storage.getRepoSettings(activatedPr.repo);
       const selectedAgent = resolveRepoCodingAgent(config, repoSettings);
-      await storage.addLog(pr.id, "info", `Queued manual PR work using ${selectedAgent}`);
-      await queueBabysitForRepo(pr, config);
+      await storage.addLog(activatedPr.id, "info", `Queued manual PR work using ${selectedAgent}`);
+      await queueBabysitForRepo(activatedPr, config);
 
-      const updated = await storage.getPR(pr.id);
+      const updated = await storage.getPR(activatedPr.id);
       notifyChange();
       return assertFound(updated, "PR disappeared after apply run");
     },
@@ -2566,13 +2621,13 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
         });
       }
 
-      const config = await storage.getConfig();
-      const repoSettings = await storage.getRepoSettings(pr.repo);
+      const { pr: activatedPr, config } = await activatePRWorkIntent(pr, await storage.getConfig());
+      const repoSettings = await storage.getRepoSettings(activatedPr.repo);
       const selectedAgent = resolveRepoCodingAgent(config, repoSettings);
-      await storage.addLog(pr.id, "info", `Queued manual PR work using ${selectedAgent}`);
-      await queueBabysitForRepo(pr, config);
+      await storage.addLog(activatedPr.id, "info", `Queued manual PR work using ${selectedAgent}`);
+      await queueBabysitForRepo(activatedPr, config);
 
-      const updated = await storage.getPR(pr.id);
+      const updated = await storage.getPR(activatedPr.id);
       notifyChange();
       return assertFound(updated, "PR disappeared after babysit run");
     },

@@ -245,7 +245,7 @@ export default function Logs() {
       <UpdateBanner />
       <AppHeader active="logs" />
 
-      <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-border px-4 py-2 text-[11px]">
+      <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-border px-4 py-2 text-label">
         <label htmlFor="logs-level" className="uppercase tracking-wider text-muted-foreground">level</label>
         <select
           id="logs-level"
@@ -319,28 +319,28 @@ export default function Logs() {
       </div>
 
       {error && (
-        <div className="shrink-0 border-b border-destructive/40 bg-destructive/10 px-4 py-1 text-[11px] text-destructive">
+        <div className="shrink-0 border-b border-destructive/40 bg-destructive/10 px-4 py-1 text-label text-destructive">
           {error}
         </div>
       )}
 
-      <div ref={containerRef} className="flex-1 overflow-y-auto p-3 font-mono text-[11px] leading-relaxed">
+      <div ref={containerRef} className="flex-1 overflow-y-auto p-3 font-mono text-label leading-relaxed">
         <div className="mb-3 border border-border/60">
-          <div className="border-b border-border/60 px-2 py-1 text-[10px] uppercase tracking-wider text-muted-foreground">
+          <div className="border-b border-border/60 px-2 py-1 text-label uppercase tracking-wider text-muted-foreground">
             Activity
           </div>
           <div className="max-h-56 overflow-y-auto">
             {activityItems.length === 0 ? (
-              <div className="px-2 py-2 text-[10px] text-muted-foreground">No automation running or queued.</div>
+              <div className="px-2 py-2 text-label text-muted-foreground">No automation running or queued.</div>
             ) : (
               activityItems.map((item) => (
                 <div key={item.id} className="border-b border-border/40 px-2 py-1.5 last:border-b-0">
-                  <div className="flex items-center justify-between gap-2 text-[10px] uppercase tracking-wider text-muted-foreground">
+                  <div className="flex items-center justify-between gap-2 text-label uppercase tracking-wider text-muted-foreground">
                     <span>{item.kind.replace("_", " ")}</span>
                     <span>{item.status.replace("_", " ")}</span>
                   </div>
-                  <div className="mt-0.5 text-[11px] text-foreground/85">{item.label}</div>
-                  {item.detail && <div className="text-[10px] text-muted-foreground">{item.detail}</div>}
+                  <div className="mt-0.5 text-label text-foreground/85">{item.label}</div>
+                  {item.detail && <div className="text-label text-muted-foreground">{item.detail}</div>}
                 </div>
               ))
             )}

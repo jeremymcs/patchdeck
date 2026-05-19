@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { BackgroundJobDispatcher, CancelBackgroundJobError, TerminalBackgroundJobError } from "./backgroundJobDispatcher";
+import { BackgroundJobDispatcher, CancelBackgroundJobError, DeferBackgroundJobError, TerminalBackgroundJobError } from "./backgroundJobDispatcher";
 import { BackgroundJobQueue } from "./backgroundJobQueue";
 import { MemStorage } from "./memoryStorage";
 
@@ -398,6 +398,49 @@ test("BackgroundJobDispatcher retries transient handler errors before completing
     assert.equal(stored?.status, "completed");
     assert.equal(stored?.attemptCount, 2);
     assert.equal(stored?.lastError, null);
+  } finally {
+    dispatcher.stop();
+  }
+});
+
+test("BackgroundJobDispatcher defers jobs without consuming retry attempts", async () => {
+  const storage = new MemStorage();
+  const queue = new BackgroundJobQueue(storage);
+  const job = await queue.enqueue("babysit_pr", "pr-1", "babysit_pr:pr-1", {
+    prId: "pr-1",
+  });
+  const availableAt = new Date(Date.now() + 60_000);
+
+  let attempts = 0;
+  const dispatcher = new BackgroundJobDispatcher({
+    storage,
+    queue,
+    workerId: "dispatcher-1",
+    pollIntervalMs: 5,
+    leaseMs: 30_000,
+    heartbeatIntervalMs: 10,
+    maxAttempts: 1,
+    handlers: {
+      babysit_pr: async () => {
+        attempts += 1;
+        throw new DeferBackgroundJobError("GitHub core budget is in reserve; passive PR monitor deferred", availableAt);
+      },
+    },
+  });
+
+  try {
+    await dispatcher.start();
+    await waitForCondition(
+      async () => attempts === 1 && (await storage.getBackgroundJob(job.id))?.status === "queued",
+      500,
+    );
+
+    const stored = await storage.getBackgroundJob(job.id);
+    assert.equal(attempts, 1);
+    assert.equal(stored?.status, "queued");
+    assert.equal(stored?.attemptCount, 0);
+    assert.equal(stored?.availableAt, availableAt.toISOString());
+    assert.match(stored?.lastError ?? "", /core budget is in reserve/);
   } finally {
     dispatcher.stop();
   }

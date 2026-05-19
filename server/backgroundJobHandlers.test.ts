@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { TerminalBabysitterError } from "./babysitter";
-import { BackgroundJobDispatcher, CancelBackgroundJobError, TerminalBackgroundJobError } from "./backgroundJobDispatcher";
+import { BackgroundJobDispatcher, CancelBackgroundJobError, DeferBackgroundJobError, TerminalBackgroundJobError } from "./backgroundJobDispatcher";
 import { createBackgroundJobHandlers } from "./backgroundJobHandlers";
 import { BackgroundJobQueue } from "./backgroundJobQueue";
 import { MemStorage } from "./memoryStorage";
 import type { DeploymentHealingManager } from "./deploymentHealingManager";
+import { clearRateLimitStateForTests, recordResourceBudget } from "./rateLimitState";
 
 async function seedPR(storage: MemStorage): Promise<string> {
   const pr = await storage.addPR({
@@ -163,6 +164,43 @@ test("babysit_pr handler delegates to the babysitter with the queued preferred a
       claudeEffort: "default",
     },
   }]);
+});
+
+test("babysit_pr handler defers passive monitor follow-ups while the core budget is reserved", async () => {
+  clearRateLimitStateForTests();
+  const storage = new MemStorage();
+  const prId = await seedPR(storage);
+  const queue = new BackgroundJobQueue(storage);
+  const job = await queue.enqueue(
+    "babysit_pr",
+    prId,
+    `babysit_pr:${prId}:monitor`,
+    { preferredAgent: "codex", monitorFollowUp: true },
+  );
+  let called = false;
+
+  const handlers = createBackgroundJobHandlers({
+    storage,
+    babysitter: {
+      syncAndBabysitTrackedRepos: async () => undefined,
+      runQueuedBabysitPR: async () => {
+        called = true;
+      },
+    },
+  });
+
+  recordResourceBudget("core", 900, 5000);
+  try {
+    await assert.rejects(
+      handlers.babysit_pr!(job),
+      (error: unknown) => error instanceof DeferBackgroundJobError
+        && error.message.includes("core budget is in reserve")
+        && error.availableAt.getTime() > Date.now(),
+    );
+    assert.equal(called, false);
+  } finally {
+    clearRateLimitStateForTests();
+  }
 });
 
 test("babysit_pr handler cancels jobs whose PR row is missing", async () => {

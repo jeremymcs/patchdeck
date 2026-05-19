@@ -6,6 +6,12 @@ export default {
   darkMode: ["class"],
   content: ["./client/index.html", "./client/src/**/*.{js,jsx,ts,tsx}"],
   theme: {
+    fontSize: {
+      label: ["0.6875rem", { lineHeight: "1rem" }],
+      body: ["0.8125rem", { lineHeight: "1.3rem" }],
+      title: ["0.9375rem", { lineHeight: "1.4rem" }],
+      display: ["1.25rem", { lineHeight: "1.5rem" }],
+    },
     extend: {
       borderRadius: {
         lg: ".5625rem", /* 9px */

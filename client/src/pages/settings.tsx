@@ -85,6 +85,21 @@ type GitHubRateLimitState = {
   resetAt: string | null;
   recentlyLimited: boolean;
   lastLimitedAt: string | null;
+  resources?: {
+    core?: GitHubRateLimitResourceState;
+    graphql?: GitHubRateLimitResourceState;
+    search?: GitHubRateLimitResourceState;
+  };
+};
+
+type GitHubRateLimitResourceState = {
+  limited: boolean;
+  resetAt: string | null;
+  recentlyLimited: boolean;
+  lastLimitedAt: string | null;
+  budget: { remaining: number; limit: number; percentRemaining: number; resetAt: string | null } | null;
+  belowReserve: boolean;
+  belowFloor: boolean;
 };
 
 type GitHubAuthStatus = {
@@ -209,7 +224,7 @@ function SegmentControl<T extends string>({
           <label
             key={option.value}
             data-testid={`${testIdPrefix}-${option.value}`}
-            className={`cursor-pointer rounded-md border px-2 py-1 text-[11px] font-medium transition-colors focus-within:ring-1 focus-within:ring-ring focus-within:ring-offset-1 focus-within:ring-offset-background ${
+            className={`cursor-pointer rounded-md border px-2 py-1 text-label font-medium transition-colors focus-within:ring-1 focus-within:ring-ring focus-within:ring-offset-1 focus-within:ring-offset-background ${
               active
                 ? "border-primary bg-primary/10 text-primary"
                 : "border-border text-muted-foreground hover:border-primary/40 hover:text-primary"
@@ -299,8 +314,8 @@ function scrollToSettingsSection(id: string) {
 function SettingsTOC() {
   return (
     <aside className="hidden w-48 shrink-0 lg:block">
-      <nav className="sticky top-6 text-[12px]" aria-label="Settings sections">
-        <div className="mb-3 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+      <nav className="sticky top-6 text-body" aria-label="Settings sections">
+        <div className="mb-3 text-label font-medium uppercase tracking-wider text-muted-foreground">
           On this page
         </div>
         <ul className="space-y-0.5">
@@ -346,9 +361,9 @@ function SettingsGroup({
   return (
     <section id={id} className="scroll-mt-6">
       <header className="mb-5 border-b border-border pb-3">
-        <h2 className="text-base font-semibold text-foreground">{title}</h2>
+        <h2 className="text-title font-semibold text-foreground">{title}</h2>
         {description ? (
-          <p className="mt-1 text-xs text-muted-foreground">{description}</p>
+          <p className="mt-1 text-body text-muted-foreground">{description}</p>
         ) : null}
       </header>
       <div className="space-y-6">{children}</div>
@@ -373,9 +388,9 @@ function SettingsSubsection({
     <div id={id} className="scroll-mt-6">
       <div className="mb-2 flex flex-wrap items-baseline justify-between gap-3">
         <div>
-          <h3 className="text-sm font-medium text-foreground">{title}</h3>
+          <h3 className="text-body font-medium text-foreground">{title}</h3>
           {description ? (
-            <p className="mt-0.5 text-[11px] text-muted-foreground">{description}</p>
+            <p className="mt-0.5 text-label text-muted-foreground">{description}</p>
           ) : null}
         </div>
         {action}
@@ -436,6 +451,10 @@ export default function Settings() {
     queryKey: ["/api/github-rate-limit"],
     refetchInterval: uiPollIntervalMs,
   });
+  const githubBudgetRows = (["core", "graphql", "search"] as const).map((resource) => ({
+    resource,
+    state: githubRateLimit?.resources?.[resource],
+  }));
   const { data: githubAuthStatus } = useQuery<GitHubAuthStatus>({
     queryKey: ["/api/github-auth/status"],
     refetchInterval: uiPollIntervalMs,
@@ -647,8 +666,8 @@ export default function Settings() {
         <div className="mx-auto max-w-6xl">
           <div className="mb-8 flex flex-wrap items-end justify-between gap-3 border-b border-border pb-4">
             <div>
-              <h1 className="text-xl font-semibold tracking-tight text-foreground">Settings</h1>
-              <p className="mt-1 text-xs text-muted-foreground">
+              <h1 className="text-display font-semibold tracking-tight text-foreground">Settings</h1>
+              <p className="mt-1 text-body text-muted-foreground">
                 Configure what PatchDeck watches, how the agent behaves, and how releases ship.
               </p>
             </div>
@@ -666,7 +685,7 @@ export default function Settings() {
                 }}
                 className="rounded-md border border-border p-4"
               >
-                <label htmlFor="settings-add-pr" className="text-sm">Pull request</label>
+                <label htmlFor="settings-add-pr" className="text-body">Pull request</label>
                 <div className="mt-2 flex gap-2">
                   <input
                     id="settings-add-pr"
@@ -676,13 +695,13 @@ export default function Settings() {
                     placeholder="github.com/owner/repo/pull/123"
                     aria-label="GitHub pull request URL"
                     data-testid="input-add-pr"
-                    className="min-w-0 flex-1 border border-border bg-transparent px-2 py-1 text-[12px] placeholder:text-muted-foreground/50 focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+                    className="min-w-0 flex-1 border border-border bg-transparent px-2 py-1 text-body placeholder:text-muted-foreground/50 focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
                   />
                   <button
                     type="submit"
                     disabled={addMutation.isPending || !addUrl.trim()}
                     data-testid="button-add-pr"
-                    className="cursor-pointer rounded-md border border-primary bg-primary px-3 py-1 text-[11px] font-medium uppercase tracking-wider text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
+                    className="cursor-pointer rounded-md border border-primary bg-primary px-3 py-1 text-label font-medium uppercase tracking-wider text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     Add
                   </button>
@@ -698,7 +717,7 @@ export default function Settings() {
                 }}
                 className="rounded-md border border-border p-4"
               >
-                <label htmlFor="settings-add-repo" className="text-sm">Repository</label>
+                <label htmlFor="settings-add-repo" className="text-body">Repository</label>
                 <div className="mt-2 flex gap-2">
                   <input
                     id="settings-add-repo"
@@ -708,19 +727,19 @@ export default function Settings() {
                     placeholder="owner/repo"
                     aria-label="Repository owner and name"
                     data-testid="input-add-repo"
-                    className="min-w-0 flex-1 border border-border bg-transparent px-2 py-1 text-[12px] placeholder:text-muted-foreground/50 focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+                    className="min-w-0 flex-1 border border-border bg-transparent px-2 py-1 text-body placeholder:text-muted-foreground/50 focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
                   />
                   <button
                     type="submit"
                     disabled={addRepoMutation.isPending || !addRepo.trim()}
                     data-testid="button-add-repo"
-                    className="cursor-pointer rounded-md border border-primary bg-primary px-3 py-1 text-[11px] font-medium uppercase tracking-wider text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
+                    className="cursor-pointer rounded-md border border-primary bg-primary px-3 py-1 text-label font-medium uppercase tracking-wider text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     Watch
                   </button>
                 </div>
                 <div className="mt-3">
-                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                  <div className="text-label uppercase tracking-wider text-muted-foreground">
                     Track automatically
                   </div>
                   <WatchScopeControl
@@ -746,14 +765,14 @@ export default function Settings() {
                       disabled={syncReposMutation.isPending || globalDrainMode}
                       title={globalDrainMode ? DRAIN_PAUSED_TITLE : "Sync watched repos from GitHub"}
                       data-testid="button-sync-repos"
-                      className="cursor-pointer rounded-md border border-primary bg-primary px-3 py-1 text-xs font-medium uppercase tracking-wider text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
+                      className="cursor-pointer rounded-md border border-primary bg-primary px-3 py-1 text-body font-medium uppercase tracking-wider text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       {globalDrainMode ? DRAIN_PAUSED_LABEL : syncReposMutation.isPending ? "Syncing..." : "Sync"}
                     </button>
                   }
                 >
             {repos.length === 0 ? (
-              <div className="rounded-md border border-border p-4 text-[12px] text-muted-foreground">
+              <div className="rounded-md border border-border p-4 text-body text-muted-foreground">
                 No repositories being watched yet.
               </div>
             ) : (
@@ -780,14 +799,14 @@ export default function Settings() {
                             href={getRepoHref(repo.repo)}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="break-all text-sm text-foreground underline decoration-border underline-offset-2 transition-colors hover:text-foreground/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+                            className="break-all text-body text-foreground underline decoration-border underline-offset-2 transition-colors hover:text-foreground/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
                           >
                             {repo.repo}
                           </a>
-                          <div className="mt-1 text-[11px] text-muted-foreground">
+                          <div className="mt-1 text-label text-muted-foreground">
                             {repo.ownPrsOnly === false ? "Tracking team PRs" : "Tracking your PRs"} · PR monitoring {repo.prAutoMonitor === false ? "manual" : "auto"} · issue evaluate {repo.issueAutoEvaluate ? "auto" : "manual"} · issue work {repo.issueAutoWork ? "auto" : "manual"}
                           </div>
-                          <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-wider">
+                          <div className="mt-2 flex flex-wrap items-center gap-2 text-label uppercase tracking-wider">
                             <span
                               className={`inline-flex items-center border px-2 py-0.5 ${
                                 repoFullyAuto
@@ -823,7 +842,7 @@ export default function Settings() {
                           disabled={manualReleaseMutation.isPending || globalDrainMode}
                           title={globalDrainMode ? DRAIN_PAUSED_TITLE : "Queue manual release"}
                           data-testid={`tracked-repo-manual-release-${repo.repo.replace("/", "-")}`}
-                          className="shrink-0 border border-border px-2 py-1 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:border-foreground/30 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-30"
+                          className="shrink-0 border border-border px-2 py-1 text-body uppercase tracking-wider text-muted-foreground transition-colors hover:border-foreground/30 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-30"
                         >
                           {globalDrainMode ? DRAIN_PAUSED_LABEL : manualReleasePending ? "Releasing..." : "Release"}
                         </button>
@@ -837,7 +856,7 @@ export default function Settings() {
                           disabled={removeRepoMutation.isPending}
                           title="Stop watching this repository and keep tracked PR history"
                           data-testid={`tracked-repo-soft-remove-${repo.repo.replace("/", "-")}`}
-                          className="shrink-0 border border-border px-2 py-1 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:border-foreground/30 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-30"
+                          className="shrink-0 border border-border px-2 py-1 text-body uppercase tracking-wider text-muted-foreground transition-colors hover:border-foreground/30 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-30"
                         >
                           Unwatch
                         </button>
@@ -851,7 +870,7 @@ export default function Settings() {
                           disabled={removeRepoMutation.isPending}
                           title="Stop watching this repository and remove tracked PRs"
                           data-testid={`tracked-repo-hard-remove-${repo.repo.replace("/", "-")}`}
-                          className="shrink-0 border border-destructive/60 px-2 py-1 text-xs uppercase tracking-wider text-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-30"
+                          className="shrink-0 border border-destructive/60 px-2 py-1 text-body uppercase tracking-wider text-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-30"
                         >
                           Remove data
                         </button>
@@ -859,7 +878,7 @@ export default function Settings() {
                       {shouldShowRepoAutoAlert && (
                         <div
                           data-testid={`tracked-repo-auto-alert-${repo.repo.replace("/", "-")}`}
-                          className="mt-3 flex flex-wrap items-center justify-between gap-2 border border-warning-border bg-warning-muted px-3 py-2 text-[11px] text-warning-foreground"
+                          className="mt-3 flex flex-wrap items-center justify-between gap-2 border border-warning-border bg-warning-muted px-3 py-2 text-label text-warning-foreground"
                         >
                           <span>
                             Global auto is on, but this repo is not fully automated yet.
@@ -876,7 +895,7 @@ export default function Settings() {
                             }
                             disabled={updateRepoSettingsMutation.isPending}
                             data-testid={`tracked-repo-enable-auto-${repo.repo.replace("/", "-")}`}
-                            className="shrink-0 border border-warning-border bg-background px-2 py-1 text-[10px] uppercase tracking-wider text-warning-foreground transition-colors hover:bg-warning-muted/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-40"
+                            className="shrink-0 border border-warning-border bg-background px-2 py-1 text-label uppercase tracking-wider text-warning-foreground transition-colors hover:bg-warning-muted/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-40"
                           >
                             Enable auto for repo
                           </button>
@@ -885,14 +904,14 @@ export default function Settings() {
                       {config?.autoIssues === false && (
                         <div
                           data-testid={`tracked-repo-global-issues-off-${repo.repo.replace("/", "-")}`}
-                          className="mt-3 border border-warning-border bg-warning-muted px-3 py-2 text-[11px] text-warning-foreground"
+                          className="mt-3 border border-warning-border bg-warning-muted px-3 py-2 text-label text-warning-foreground"
                         >
                           Global Issues auto is off — these per-repo issue controls are paused. Re-enable from the AUTO MODE menu.
                         </div>
                       )}
                       <div className="mt-4 grid gap-4 md:grid-cols-3">
                         <div>
-                          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                          <div className="text-label uppercase tracking-wider text-muted-foreground">
                             Track automatically
                           </div>
                           <WatchScopeControl
@@ -909,7 +928,7 @@ export default function Settings() {
                           />
                         </div>
                         <div>
-                          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                          <div className="text-label uppercase tracking-wider text-muted-foreground">
                             PR monitoring
                           </div>
                           <IssueWorkModeControl
@@ -924,12 +943,12 @@ export default function Settings() {
                             name={`tracked-repo-pr-monitor-${repo.repo}`}
                             testIdPrefix={`tracked-repo-pr-monitor-${repo.repo.replace("/", "-")}`}
                           />
-                          <div className="mt-1 text-[10px] text-muted-foreground">
+                          <div className="mt-1 text-label text-muted-foreground">
                             Manual still syncs PR status; skips automatic PR work.
                           </div>
                         </div>
                         <div>
-                          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                          <div className="text-label uppercase tracking-wider text-muted-foreground">
                             Issue auto-evaluate
                           </div>
                           <IssueWorkModeControl
@@ -946,7 +965,7 @@ export default function Settings() {
                           />
                         </div>
                         <div>
-                          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                          <div className="text-label uppercase tracking-wider text-muted-foreground">
                             Issue work mode
                           </div>
                           <IssueWorkModeControl
@@ -961,11 +980,11 @@ export default function Settings() {
                             name={`tracked-repo-issue-work-mode-${repo.repo}`}
                             testIdPrefix={`tracked-repo-issue-work-mode-${repo.repo.replace("/", "-")}`}
                           />
-                          <div className="mt-1 text-[10px] text-muted-foreground">
+                          <div className="mt-1 text-label text-muted-foreground">
                             Auto-work also enables auto-evaluate.
                           </div>
                         </div>
-                        <label className="flex items-end gap-2 text-[11px] uppercase tracking-wider text-muted-foreground">
+                        <label className="flex items-end gap-2 text-label uppercase tracking-wider text-muted-foreground">
                           <input
                             type="checkbox"
                             checked={repo.autoCreateReleases}
@@ -984,7 +1003,7 @@ export default function Settings() {
                       </div>
                       <div className="mt-4 grid gap-3 border-t border-border pt-4 md:grid-cols-5">
                         <div className="grid gap-2">
-                          <label htmlFor={`tracked-repo-agent-${id}`} className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                          <label htmlFor={`tracked-repo-agent-${id}`} className="text-label uppercase tracking-wider text-muted-foreground">
                             Agent
                           </label>
                           <select
@@ -999,7 +1018,7 @@ export default function Settings() {
                               })
                             }
                             disabled={updateRepoSettingsMutation.isPending}
-                            className="border border-border bg-transparent px-2 py-1 text-xs focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
+                            className="border border-border bg-transparent px-2 py-1 text-body focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
                           >
                             {REPO_AGENT_OPTIONS.map((option) => (
                               <option key={option.value} value={option.value}>{option.label}</option>
@@ -1007,7 +1026,7 @@ export default function Settings() {
                           </select>
                         </div>
                         <div className="grid gap-2">
-                          <label htmlFor={`tracked-repo-codex-model-${id}`} className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                          <label htmlFor={`tracked-repo-codex-model-${id}`} className="text-label uppercase tracking-wider text-muted-foreground">
                             Codex model
                           </label>
                           <select
@@ -1020,7 +1039,7 @@ export default function Settings() {
                               })
                             }
                             disabled={updateRepoSettingsMutation.isPending}
-                            className="border border-border bg-transparent px-2 py-1 text-xs focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
+                            className="border border-border bg-transparent px-2 py-1 text-body focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
                           >
                             <option value="">Global</option>
                             {CODEX_MODEL_OPTIONS.filter((option) => option.value !== "").map((option) => (
@@ -1029,7 +1048,7 @@ export default function Settings() {
                           </select>
                         </div>
                         <div className="grid gap-2">
-                          <label htmlFor={`tracked-repo-codex-reasoning-${id}`} className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                          <label htmlFor={`tracked-repo-codex-reasoning-${id}`} className="text-label uppercase tracking-wider text-muted-foreground">
                             Codex thinking
                           </label>
                           <select
@@ -1044,7 +1063,7 @@ export default function Settings() {
                               })
                             }
                             disabled={updateRepoSettingsMutation.isPending}
-                            className="border border-border bg-transparent px-2 py-1 text-xs focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
+                            className="border border-border bg-transparent px-2 py-1 text-body focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
                           >
                             <option value="">Global</option>
                             {CODEX_REASONING_OPTIONS.map((option) => (
@@ -1053,7 +1072,7 @@ export default function Settings() {
                           </select>
                         </div>
                         <div className="grid gap-2">
-                          <label htmlFor={`tracked-repo-claude-model-${id}`} className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                          <label htmlFor={`tracked-repo-claude-model-${id}`} className="text-label uppercase tracking-wider text-muted-foreground">
                             Claude model
                           </label>
                           <select
@@ -1066,7 +1085,7 @@ export default function Settings() {
                               })
                             }
                             disabled={updateRepoSettingsMutation.isPending}
-                            className="border border-border bg-transparent px-2 py-1 text-xs focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
+                            className="border border-border bg-transparent px-2 py-1 text-body focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
                           >
                             <option value="">Global</option>
                             {CLAUDE_MODEL_OPTIONS.filter((option) => option.value !== "").map((option) => (
@@ -1075,7 +1094,7 @@ export default function Settings() {
                           </select>
                         </div>
                         <div className="grid gap-2">
-                          <label htmlFor={`tracked-repo-claude-effort-${id}`} className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                          <label htmlFor={`tracked-repo-claude-effort-${id}`} className="text-label uppercase tracking-wider text-muted-foreground">
                             Claude thinking
                           </label>
                           <select
@@ -1090,7 +1109,7 @@ export default function Settings() {
                               })
                             }
                             disabled={updateRepoSettingsMutation.isPending}
-                            className="border border-border bg-transparent px-2 py-1 text-xs focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
+                            className="border border-border bg-transparent px-2 py-1 text-body focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
                           >
                             <option value="">Global</option>
                             {CLAUDE_EFFORT_OPTIONS.map((option) => (
@@ -1112,8 +1131,8 @@ export default function Settings() {
             <div className="flex flex-col gap-4 rounded-md border border-border p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <label htmlFor="settings-coding-agent" className="text-sm">Coding Agent</label>
-                  <div className="text-[11px] text-muted-foreground">
+                  <label htmlFor="settings-coding-agent" className="text-body">Coding Agent</label>
+                  <div className="text-label text-muted-foreground">
                     CLI agent used to apply fixes
                   </div>
                 </div>
@@ -1125,7 +1144,7 @@ export default function Settings() {
                     updateConfigMutation.mutate({ codingAgent: newAgent });
                   }}
                   disabled={updateConfigMutation.isPending}
-                  className="border border-border bg-transparent px-2 py-1 text-sm focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
+                  className="border border-border bg-transparent px-2 py-1 text-body focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
                 >
                   {AGENT_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>{option.label}</option>
@@ -1134,7 +1153,7 @@ export default function Settings() {
               </div>
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="grid gap-2">
-                  <label htmlFor="settings-codex-model" className="text-xs uppercase tracking-wider text-muted-foreground">
+                  <label htmlFor="settings-codex-model" className="text-body uppercase tracking-wider text-muted-foreground">
                     Codex model
                   </label>
                   <select
@@ -1142,7 +1161,7 @@ export default function Settings() {
                     value={config?.codexModel ?? ""}
                     onChange={(e) => updateConfigMutation.mutate({ codexModel: e.target.value })}
                     disabled={updateConfigMutation.isPending}
-                    className="border border-border bg-transparent px-2 py-1 text-sm focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
+                    className="border border-border bg-transparent px-2 py-1 text-body focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
                   >
                     {CODEX_MODEL_OPTIONS.map((option) => (
                       <option key={option.value} value={option.value}>{option.label}</option>
@@ -1150,7 +1169,7 @@ export default function Settings() {
                   </select>
                 </div>
                 <div className="grid gap-2">
-                  <label htmlFor="settings-codex-reasoning" className="text-xs uppercase tracking-wider text-muted-foreground">
+                  <label htmlFor="settings-codex-reasoning" className="text-body uppercase tracking-wider text-muted-foreground">
                     Codex thinking
                   </label>
                   <select
@@ -1158,7 +1177,7 @@ export default function Settings() {
                     value={config?.codexReasoningEffort ?? "default"}
                     onChange={(e) => updateConfigMutation.mutate({ codexReasoningEffort: e.target.value as Config["codexReasoningEffort"] })}
                     disabled={updateConfigMutation.isPending}
-                    className="border border-border bg-transparent px-2 py-1 text-sm focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
+                    className="border border-border bg-transparent px-2 py-1 text-body focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
                   >
                     {CODEX_REASONING_OPTIONS.map((option) => (
                       <option key={option.value} value={option.value}>{option.label}</option>
@@ -1166,7 +1185,7 @@ export default function Settings() {
                   </select>
                 </div>
                 <div className="grid gap-2">
-                  <label htmlFor="settings-claude-model" className="text-xs uppercase tracking-wider text-muted-foreground">
+                  <label htmlFor="settings-claude-model" className="text-body uppercase tracking-wider text-muted-foreground">
                     Claude model
                   </label>
                   <select
@@ -1174,7 +1193,7 @@ export default function Settings() {
                     value={config?.claudeModel ?? "opus"}
                     onChange={(e) => updateConfigMutation.mutate({ claudeModel: e.target.value })}
                     disabled={updateConfigMutation.isPending}
-                    className="border border-border bg-transparent px-2 py-1 text-sm focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
+                    className="border border-border bg-transparent px-2 py-1 text-body focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
                   >
                     {CLAUDE_MODEL_OPTIONS.map((option) => (
                       <option key={option.value} value={option.value}>{option.label}</option>
@@ -1182,7 +1201,7 @@ export default function Settings() {
                   </select>
                 </div>
                 <div className="grid gap-2">
-                  <label htmlFor="settings-claude-effort" className="text-xs uppercase tracking-wider text-muted-foreground">
+                  <label htmlFor="settings-claude-effort" className="text-body uppercase tracking-wider text-muted-foreground">
                     Claude thinking
                   </label>
                   <select
@@ -1190,7 +1209,7 @@ export default function Settings() {
                     value={config?.claudeEffort ?? "default"}
                     onChange={(e) => updateConfigMutation.mutate({ claudeEffort: e.target.value as Config["claudeEffort"] })}
                     disabled={updateConfigMutation.isPending}
-                    className="border border-border bg-transparent px-2 py-1 text-sm focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
+                    className="border border-border bg-transparent px-2 py-1 text-body focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
                   >
                     {CLAUDE_EFFORT_OPTIONS.map((option) => (
                       <option key={option.value} value={option.value}>{option.label}</option>
@@ -1200,8 +1219,8 @@ export default function Settings() {
               </div>
               <label className="flex items-start justify-between gap-3">
                 <div>
-                  <div className="text-sm">Fallback to next coding agent</div>
-                  <div className="text-[11px] text-muted-foreground">
+                  <div className="text-body">Fallback to next coding agent</div>
+                  <div className="text-label text-muted-foreground">
                     If the configured agent cannot start or authenticate, retry the automation run with the other local agent.
                   </div>
                 </div>
@@ -1225,8 +1244,8 @@ export default function Settings() {
             <div className="flex flex-col gap-4 rounded-md border border-border p-4">
               <label className="flex items-center justify-between gap-3 cursor-pointer">
                 <div>
-                  <div className="text-sm">Auto-fix conflicts</div>
-                  <div className="text-[11px] text-muted-foreground">
+                  <div className="text-body">Auto-fix conflicts</div>
+                  <div className="text-label text-muted-foreground">
                     Ask the agent to fix merge conflicts when tracked PRs are not mergeable.
                   </div>
                 </div>
@@ -1245,8 +1264,8 @@ export default function Settings() {
               </label>
               <label className="flex items-center justify-between gap-3 cursor-pointer">
                 <div>
-                  <div className="text-sm">Auto-update docs</div>
-                  <div className="text-[11px] text-muted-foreground">
+                  <div className="text-body">Auto-update docs</div>
+                  <div className="text-label text-muted-foreground">
                     Automatically assess whether tracked PRs need documentation updates.
                   </div>
                 </div>
@@ -1315,8 +1334,8 @@ export default function Settings() {
             <div className="flex flex-col gap-4 rounded-md border border-border p-4">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <div className="text-sm">Automatic CI healing</div>
-                  <div className="text-[11px] text-muted-foreground">
+                  <div className="text-body">Automatic CI healing</div>
+                  <div className="text-label text-muted-foreground">
                     Classify healable CI failures and run bounded repair attempts in isolated worktrees.
                   </div>
                 </div>
@@ -1398,8 +1417,8 @@ export default function Settings() {
             <div className="flex flex-col gap-4 rounded-md border border-border p-4">
               <label className="flex items-start justify-between gap-3">
                 <div>
-                  <div className="text-sm">Automatic release creation</div>
-                  <div className="text-[11px] text-muted-foreground">
+                  <div className="text-body">Automatic release creation</div>
+                  <div className="text-label text-muted-foreground">
                     Evaluate merged PRs and publish GitHub releases automatically when the agent decides they are release-worthy.
                   </div>
                 </div>
@@ -1422,25 +1441,25 @@ export default function Settings() {
                 data-testid="github-auth-status"
               >
                 <div className="min-w-0">
-                  <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Active account</div>
-                  <div className="truncate font-mono text-sm">
+                  <div className="text-label uppercase tracking-wider text-muted-foreground">Active account</div>
+                  <div className="truncate font-mono text-body">
                     {githubAuthStatus?.connected && githubAuthStatus.login
                       ? `@${githubAuthStatus.login}`
                       : "not connected"}
                   </div>
                   {githubAuthStatus?.error ? (
-                    <div className="mt-1 text-[11px] text-destructive">{githubAuthStatus.error}</div>
+                    <div className="mt-1 text-label text-destructive">{githubAuthStatus.error}</div>
                   ) : null}
                 </div>
-                <div className="shrink-0 text-[11px] text-muted-foreground">
+                <div className="shrink-0 text-label text-muted-foreground">
                   source: <span className="font-mono text-foreground">{GITHUB_AUTH_SOURCE_LABEL[githubAuthStatus?.source ?? "none"]}</span>
                 </div>
               </div>
               <div className="flex flex-col gap-3">
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <div className="text-sm">Tokens</div>
-                    <div className="text-[11px] text-muted-foreground">
+                    <div className="text-body">Tokens</div>
+                    <div className="text-label text-muted-foreground">
                       Tried in order before GITHUB_TOKEN and gh auth. For fine-grained PATs, give the watched repos
                       Metadata: read, Contents: read/write if you push, Issues: read/write, Pull requests: read/write,
                       and Checks: read. Tokens from the same GitHub account share the same rate-limit bucket.
@@ -1450,7 +1469,7 @@ export default function Settings() {
                     <button
                       type="button"
                       onClick={() => setShowTokenInput(true)}
-                      className="border border-border px-2 py-1 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+                      className="border border-border px-2 py-1 text-body hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
                     >
                       add
                     </button>
@@ -1464,8 +1483,8 @@ export default function Settings() {
                         className="flex items-center justify-between gap-3 border border-border px-2 py-1.5"
                       >
                         <div className="min-w-0">
-                          <div className="truncate font-mono text-xs">{token}</div>
-                          <div className="text-[10px] text-muted-foreground">
+                          <div className="truncate font-mono text-body">{token}</div>
+                          <div className="text-label text-muted-foreground">
                             priority {index + 1}
                           </div>
                         </div>
@@ -1474,7 +1493,7 @@ export default function Settings() {
                             type="button"
                             onClick={() => moveGithubToken(index, index - 1)}
                             disabled={index === 0 || updateConfigMutation.isPending}
-                            className="border border-border px-2 py-1 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
+                            className="border border-border px-2 py-1 text-body hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
                           >
                             up
                           </button>
@@ -1482,7 +1501,7 @@ export default function Settings() {
                             type="button"
                             onClick={() => moveGithubToken(index, index + 1)}
                             disabled={index === githubTokens.length - 1 || updateConfigMutation.isPending}
-                            className="border border-border px-2 py-1 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
+                            className="border border-border px-2 py-1 text-body hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
                           >
                             down
                           </button>
@@ -1490,7 +1509,7 @@ export default function Settings() {
                             type="button"
                             onClick={() => removeGithubToken(index)}
                             disabled={updateConfigMutation.isPending}
-                            className="border border-border px-2 py-1 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
+                            className="border border-border px-2 py-1 text-body hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
                           >
                             remove
                           </button>
@@ -1499,7 +1518,7 @@ export default function Settings() {
                     ))}
                   </div>
                 ) : (
-                  <div className="text-[11px] text-muted-foreground">none configured</div>
+                  <div className="text-label text-muted-foreground">none configured</div>
                 )}
                 {showTokenInput ? (
                   <div className="flex items-center gap-2">
@@ -1509,7 +1528,7 @@ export default function Settings() {
                       onChange={(e) => setNewGithubToken(e.target.value)}
                       placeholder="ghp_..."
                       aria-label="GitHub token"
-                      className="min-w-0 flex-1 border border-border bg-transparent px-2 py-1 text-sm focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+                      className="min-w-0 flex-1 border border-border bg-transparent px-2 py-1 text-body focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
                     />
                     <button
                       type="button"
@@ -1522,7 +1541,7 @@ export default function Settings() {
                         }
                       }}
                       disabled={!newGithubToken.trim() || updateConfigMutation.isPending}
-                      className="border border-border px-2 py-1 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
+                      className="border border-border px-2 py-1 text-body hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
                     >
                       add
                     </button>
@@ -1532,7 +1551,7 @@ export default function Settings() {
                         setShowTokenInput(false);
                         setNewGithubToken("");
                       }}
-                      className="px-2 py-1 text-xs text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+                      className="px-2 py-1 text-body text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
                     >
                       cancel
                     </button>
@@ -1541,7 +1560,7 @@ export default function Settings() {
 
                 <div className="mt-1 flex flex-col gap-2">
                   <div className="flex items-center justify-between gap-3">
-                    <div className="text-[11px] text-muted-foreground">
+                    <div className="text-label text-muted-foreground">
                       Run a direct GitHub auth and rate-limit check for each configured token.
                     </div>
                     <div className="flex items-center gap-2">
@@ -1550,7 +1569,7 @@ export default function Settings() {
                           type="button"
                           onClick={() => setTokenTestLogs([])}
                           data-testid="button-clear-github-token-tests"
-                          className="px-2 py-1 text-xs text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+                          className="px-2 py-1 text-body text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
                         >
                           clear
                         </button>
@@ -1560,7 +1579,7 @@ export default function Settings() {
                         onClick={() => testGitHubTokensMutation.mutate()}
                         disabled={testGitHubTokensMutation.isPending}
                         data-testid="button-test-github-tokens"
-                        className="border border-border px-2 py-1 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
+                        className="border border-border px-2 py-1 text-body hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
                       >
                         {testGitHubTokensMutation.isPending
                           ? `testing ${githubTokens.length} key${githubTokens.length === 1 ? "" : "s"}…`
@@ -1568,7 +1587,7 @@ export default function Settings() {
                       </button>
                     </div>
                   </div>
-                  <div className="min-h-[8rem] max-h-52 overflow-y-auto border border-border/80 bg-background/40 p-2 text-[11px] leading-relaxed">
+                  <div className="min-h-[8rem] max-h-52 overflow-y-auto border border-border/80 bg-background/40 p-2 text-label leading-relaxed">
                     {tokenTestLogs.length === 0 ? (
                       <div className="text-muted-foreground">No key tests run yet.</div>
                     ) : (
@@ -1577,7 +1596,7 @@ export default function Settings() {
                           key={`${log.timestamp}-${logIndex}`}
                           className="mb-3 last:mb-0 border-b border-border/40 pb-2 last:border-b-0 last:pb-0"
                         >
-                          <div className="mb-1 text-[10px] uppercase tracking-wider text-muted-foreground">
+                          <div className="mb-1 text-label uppercase tracking-wider text-muted-foreground">
                             {new Date(log.timestamp).toLocaleTimeString("en-US")}
                             {log.tokensTested > 0
                               ? ` · ${log.tokensTested} key${log.tokensTested === 1 ? "" : "s"}`
@@ -1597,7 +1616,7 @@ export default function Settings() {
                                     <div className="flex flex-wrap items-center gap-2 font-mono">
                                       <span className="text-muted-foreground">#{data.index}</span>
                                       <span
-                                        className={`inline-flex items-center rounded-sm border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider ${TOKEN_TEST_STATUS_CLASS[data.status]}`}
+                                        className={`inline-flex items-center rounded-sm border px-1.5 py-0.5 text-label font-semibold uppercase tracking-wider ${TOKEN_TEST_STATUS_CLASS[data.status]}`}
                                       >
                                         {data.status}
                                       </span>
@@ -1616,7 +1635,7 @@ export default function Settings() {
                               if (item.kind === "error") {
                                 return (
                                   <div key={key} className="flex flex-wrap items-center gap-2 font-mono">
-                                    <span className="inline-flex items-center rounded-sm border border-destructive/40 bg-destructive/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-destructive">
+                                    <span className="inline-flex items-center rounded-sm border border-destructive/40 bg-destructive/10 px-1.5 py-0.5 text-label font-semibold uppercase tracking-wider text-destructive">
                                       error
                                     </span>
                                     <span className="break-words text-destructive">{item.message}</span>
@@ -1636,10 +1655,10 @@ export default function Settings() {
               </div>
 
               <div className="flex flex-col gap-2">
-                <label htmlFor="settings-github-comment-app-name" className="text-sm">
+                <label htmlFor="settings-github-comment-app-name" className="text-body">
                   GitHub reply signature
                 </label>
-                <div className="text-[11px] text-muted-foreground">
+                <div className="text-label text-muted-foreground">
                   Replace the app name shown in public GitHub replies. Leave blank to remove it.
                 </div>
                 <input
@@ -1660,14 +1679,14 @@ export default function Settings() {
                     }
                   }}
                   disabled={updateConfigMutation.isPending}
-                  className="w-full border border-border bg-transparent px-2 py-1 text-sm focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
+                  className="w-full border border-border bg-transparent px-2 py-1 text-body focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
                 />
               </div>
 
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <div className="text-sm">Repository links in PR comments</div>
-                  <div className="text-[11px] text-muted-foreground">
+                  <div className="text-body">Repository links in PR comments</div>
+                  <div className="text-label text-muted-foreground">
                     Link the reply signature back to the project repository in agent-authored GitHub PR comments and footers.
                   </div>
                 </div>
@@ -1687,8 +1706,8 @@ export default function Settings() {
 
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <div className="text-sm">GitHub progress replies</div>
-                  <div className="text-[11px] text-muted-foreground">
+                  <div className="text-body">GitHub progress replies</div>
+                  <div className="text-label text-muted-foreground">
                     Post public Accepted/In progress/Verifying status replies while automation works on review comments.
                   </div>
                 </div>
@@ -1741,7 +1760,7 @@ export default function Settings() {
             <div className="flex flex-col gap-4 rounded-md border border-border p-4">
               {(githubRateLimit?.limited || githubRateLimit?.recentlyLimited) ? (
                 <div
-                  className="border-l-2 border-warning bg-warning-muted/40 px-3 py-2 text-[11px] text-warning-foreground"
+                  className="border-l-2 border-warning bg-warning-muted/40 px-3 py-2 text-label text-warning-foreground"
                   data-testid="runtime-github-rate-limit"
                 >
                   {githubRateLimit?.limited && githubRateLimit.resetAt
@@ -1749,14 +1768,41 @@ export default function Settings() {
                     : "GitHub rate limit was hit recently. Sync may be delayed."}
                 </div>
               ) : null}
+              <div className="grid gap-3 text-label sm:grid-cols-3" data-testid="runtime-github-budget">
+                {githubBudgetRows.map(({ resource, state }) => {
+                  const budget = state?.budget ?? null;
+                  const tone = state?.belowFloor
+                    ? "border-destructive text-destructive"
+                    : state?.belowReserve
+                      ? "border-warning-border text-warning-foreground"
+                      : "border-border text-muted-foreground";
+                  return (
+                    <div key={resource} className={`border-l-2 pl-2 ${tone}`}>
+                      <div className="uppercase tracking-wider">{resource}</div>
+                      <div className="mt-1 text-body text-foreground">
+                        {budget ? `${budget.remaining}/${budget.limit}` : "unknown"}
+                      </div>
+                      <div className="mt-0.5 uppercase tracking-wider">
+                        {state?.belowFloor
+                          ? "floor"
+                          : state?.belowReserve
+                            ? "reserve"
+                            : budget
+                              ? `${budget.percentRemaining}% left`
+                              : "not observed"}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="text-sm">Automation</div>
-                  <div className="text-[11px] text-muted-foreground">
+                  <div className="text-body">Automation</div>
+                  <div className="text-label text-muted-foreground">
                     Drain mode blocks new agent runs. In-flight runs continue until they finish.
                   </div>
                   <div
-                    className="mt-2 text-[11px]"
+                    className="mt-2 text-label"
                     aria-live="polite"
                     data-testid="text-drain-status"
                   >
@@ -1774,13 +1820,13 @@ export default function Settings() {
                   }
                   disabled={!runtimeState || drainMutation.isPending}
                   data-testid="button-toggle-drain"
-                  className="shrink-0 border border-border px-2 py-1 text-xs hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
+                  className="shrink-0 border border-border px-2 py-1 text-body hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
                 >
                   {getDrainActionLabel(runtimeState)}
                 </button>
               </div>
               {runtimeState?.drainMode && (runtimeState.drainReason || runtimeState.drainRequestedAt) ? (
-                <div className="border-l-2 border-destructive bg-muted/30 px-3 py-2 text-[11px]">
+                <div className="border-l-2 border-destructive bg-muted/30 px-3 py-2 text-label">
                   {runtimeState.drainReason ? (
                     <div className="text-foreground">{runtimeState.drainReason}</div>
                   ) : null}
@@ -1798,7 +1844,7 @@ export default function Settings() {
             <div className="rounded-md border border-border p-4">
               <div className="grid gap-3 md:grid-cols-[1fr_1fr_auto] md:items-end">
                 <div>
-                  <label htmlFor="settings-web-username" className="text-sm">Username</label>
+                  <label htmlFor="settings-web-username" className="text-body">Username</label>
                   <input
                     id="settings-web-username"
                     type="text"
@@ -1807,11 +1853,11 @@ export default function Settings() {
                     placeholder="operator"
                     aria-label="Remote access username"
                     data-testid="input-remote-access-username"
-                    className="mt-2 w-full rounded-md border border-border bg-transparent px-2 py-1 text-sm placeholder:text-muted-foreground/50 focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+                    className="mt-2 w-full rounded-md border border-border bg-transparent px-2 py-1 text-body placeholder:text-muted-foreground/50 focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
                   />
                 </div>
                 <div>
-                  <label htmlFor="settings-web-password" className="text-sm">Password</label>
+                  <label htmlFor="settings-web-password" className="text-body">Password</label>
                   <input
                     id="settings-web-password"
                     type="password"
@@ -1820,7 +1866,7 @@ export default function Settings() {
                     placeholder="not configured"
                     aria-label="Remote access password"
                     data-testid="input-remote-access-password"
-                    className="mt-2 w-full rounded-md border border-border bg-transparent px-2 py-1 text-sm placeholder:text-muted-foreground/50 focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+                    className="mt-2 w-full rounded-md border border-border bg-transparent px-2 py-1 text-body placeholder:text-muted-foreground/50 focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
                   />
                 </div>
                 <button
@@ -1833,12 +1879,12 @@ export default function Settings() {
                   }
                   disabled={updateConfigMutation.isPending}
                   data-testid="button-save-remote-access"
-                  className="cursor-pointer rounded-md border border-primary bg-primary px-3 py-1 text-xs font-medium uppercase tracking-wider text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
+                  className="cursor-pointer rounded-md border border-primary bg-primary px-3 py-1 text-body font-medium uppercase tracking-wider text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   Save
                 </button>
               </div>
-              <p className="mt-3 text-[11px] text-muted-foreground">
+              <p className="mt-3 text-label text-muted-foreground">
                 Remote network users must sign in with these credentials. Local loopback access remains open.
               </p>
             </div>
@@ -1890,8 +1936,8 @@ function StringListRow({
     <div className="flex flex-col gap-2">
       <div className="flex items-end gap-2">
         <label htmlFor={inputId} className="min-w-0 flex-1 cursor-pointer">
-          <span className="block text-sm">{label}</span>
-          <span id={descriptionId} className="block text-[11px] text-muted-foreground">{description}</span>
+          <span className="block text-body">{label}</span>
+          <span id={descriptionId} className="block text-label text-muted-foreground">{description}</span>
           <input
             id={inputId}
             type="text"
@@ -1906,14 +1952,14 @@ function StringListRow({
             placeholder={placeholder}
             disabled={disabled}
             aria-describedby={descriptionId}
-            className="mt-2 w-full min-w-0 border border-border bg-transparent px-2 py-1 text-sm focus:border-primary focus:outline-none disabled:opacity-50"
+            className="mt-2 w-full min-w-0 border border-border bg-transparent px-2 py-1 text-body focus:border-primary focus:outline-none disabled:opacity-50"
           />
         </label>
         <button
           type="button"
           onClick={addValue}
           disabled={!draft.trim() || disabled}
-          className="border border-border px-2 py-1 text-xs transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50"
+          className="border border-border px-2 py-1 text-body transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50"
         >
           add
         </button>
@@ -1923,7 +1969,7 @@ function StringListRow({
           {values.map((value, index) => (
             <span
               key={value}
-              className="inline-flex items-center gap-1.5 border border-border px-2 py-0.5 font-mono text-xs"
+              className="inline-flex items-center gap-1.5 border border-border px-2 py-0.5 font-mono text-body"
             >
               {value}
               <button
@@ -1939,7 +1985,7 @@ function StringListRow({
           ))}
         </div>
       ) : (
-        <div className="text-[11px] text-muted-foreground">none configured</div>
+        <div className="text-label text-muted-foreground">none configured</div>
       )}
     </div>
   );
@@ -1967,8 +2013,8 @@ function SettingRow({
   return (
     <div className="flex items-center justify-between gap-3">
       <div>
-        <label htmlFor={inputId} className="text-sm">{label}</label>
-        <div id={descriptionId} className="text-[11px] text-muted-foreground">{description}</div>
+        <label htmlFor={inputId} className="text-body">{label}</label>
+        <div id={descriptionId} className="text-label text-muted-foreground">{description}</div>
       </div>
       <div className="flex shrink-0 items-center gap-2">
         {canReset && (
@@ -1977,7 +2023,7 @@ function SettingRow({
             onClick={() => onChange(defaultValue)}
             disabled={disabled}
             aria-label={`Reset ${label} to default`}
-            className="rounded-md border border-border px-2 py-1 text-[10px] uppercase tracking-wider text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
+            className="rounded-md border border-border px-2 py-1 text-label uppercase tracking-wider text-muted-foreground transition-colors hover:border-foreground/30 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
           >
             Default
           </button>
@@ -1992,7 +2038,7 @@ function SettingRow({
           }}
           disabled={disabled}
           aria-describedby={descriptionId}
-          className="w-28 border border-border bg-transparent px-2 py-1 text-right text-sm focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
+          className="w-28 border border-border bg-transparent px-2 py-1 text-right text-body focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
         />
       </div>
     </div>

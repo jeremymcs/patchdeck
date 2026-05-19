@@ -38,6 +38,11 @@ export type BackgroundJobRetryParams = BackgroundJobFinalizeParams & {
   availableAt?: QueueDateInput;
 };
 
+export type BackgroundJobDeferParams = BackgroundJobFinalizeParams & {
+  error: string;
+  availableAt: QueueDateInput;
+};
+
 export type BackgroundJobCancelParams = BackgroundJobFinalizeParams & {
   error?: string | null;
 };
@@ -129,6 +134,17 @@ export class BackgroundJobQueue {
       params.leaseToken,
       params.error,
       this.resolveNow(params.availableAt ?? now),
+      now,
+    );
+  }
+
+  async defer(params: BackgroundJobDeferParams): Promise<BackgroundJob | undefined> {
+    const now = this.resolveNow(params.now);
+    return this.storage.deferBackgroundJob(
+      params.jobId,
+      params.leaseToken,
+      params.error,
+      this.resolveNow(params.availableAt),
       now,
     );
   }

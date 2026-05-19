@@ -16,6 +16,21 @@ type GitHubRateLimitState = {
   resetAt: string | null;
   recentlyLimited: boolean;
   lastLimitedAt: string | null;
+  resources?: {
+    core?: GitHubRateLimitResourceState;
+    graphql?: GitHubRateLimitResourceState;
+    search?: GitHubRateLimitResourceState;
+  };
+};
+
+type GitHubRateLimitResourceState = {
+  limited: boolean;
+  resetAt: string | null;
+  recentlyLimited: boolean;
+  lastLimitedAt: string | null;
+  budget: { remaining: number; limit: number; percentRemaining: number; resetAt: string | null } | null;
+  belowReserve: boolean;
+  belowFloor: boolean;
 };
 
 const PRIMARY_NAV_ITEMS: Array<{ section: AppHeaderSection; label: string; href: string }> = [
@@ -31,7 +46,7 @@ const SECONDARY_NAV_ITEMS: Array<{ section: AppHeaderSection; label: string; hre
 ];
 
 function navLinkClass(selected: boolean) {
-  return `inline-flex min-h-8 items-center rounded-md border px-2 py-1 text-[11px] uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background sm:min-h-0 ${
+  return `inline-flex min-h-8 items-center rounded-md border px-2 py-1 text-label uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background sm:min-h-0 ${
     selected
       ? "border-primary/40 bg-primary/10 text-primary"
       : "border-transparent text-muted-foreground hover:border-border hover:text-foreground"
@@ -193,7 +208,7 @@ function AutoModeButton() {
           title={tooltip}
           aria-label={tooltip}
           data-testid="auto-mode-indicator"
-          className={`inline-flex cursor-pointer items-center gap-1.5 rounded-md border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background ${chipClass}`}
+          className={`inline-flex cursor-pointer items-center gap-1.5 rounded-md border px-2 py-0.5 text-label font-medium uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background ${chipClass}`}
         >
           <span aria-hidden="true" className={`inline-block h-1.5 w-1.5 rounded-full ${dotClass}`} />
           {label}
@@ -201,17 +216,17 @@ function AutoModeButton() {
       </PopoverTrigger>
       <PopoverContent align="end" className="w-64 p-3">
         <div className="mb-2 flex items-center justify-between">
-          <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+          <span className="text-label font-medium uppercase tracking-wider text-muted-foreground">
             Auto mode
           </span>
-          <span className={`inline-flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider ${drainMode ? "text-warning-foreground" : "text-muted-foreground"}`}>
+          <span className={`inline-flex items-center gap-1.5 text-label font-medium uppercase tracking-wider ${drainMode ? "text-warning-foreground" : "text-muted-foreground"}`}>
             <span className={`inline-block h-1.5 w-1.5 rounded-full ${dotClass}`} />
             {label}
           </span>
         </div>
 
         {drainMode && (
-          <div className="mb-3 rounded-md border border-warning-border bg-warning-muted px-2 py-1.5 text-[11px] text-warning-foreground">
+          <div className="mb-3 rounded-md border border-warning-border bg-warning-muted px-2 py-1.5 text-label text-warning-foreground">
             Drain mode is active in Settings. Automation is paused regardless of these switches.
           </div>
         )}
@@ -221,8 +236,8 @@ function AutoModeButton() {
             className="flex cursor-pointer items-center justify-between gap-3 rounded-md px-1 py-1.5"
           >
             <label htmlFor="auto-mode-prs" className="flex min-w-0 cursor-pointer flex-col">
-              <span className="text-[12px] font-medium text-foreground">Pull requests</span>
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-body font-medium text-foreground">Pull requests</span>
+              <span className="text-label text-muted-foreground">
                 Watcher queues safe automation runs on watched PRs. Per-repo overrides live in Settings.
               </span>
             </label>
@@ -239,8 +254,8 @@ function AutoModeButton() {
             className="flex cursor-pointer items-center justify-between gap-3 rounded-md px-1 py-1.5"
           >
             <label htmlFor="auto-mode-issues" className="flex min-w-0 cursor-pointer flex-col">
-              <span className="text-[12px] font-medium text-foreground">Issues</span>
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-body font-medium text-foreground">Issues</span>
+              <span className="text-label text-muted-foreground">
                 Agent auto-evaluates and works eligible issues.
               </span>
             </label>
@@ -255,7 +270,7 @@ function AutoModeButton() {
         </div>
 
         <div className="mt-3 flex items-center justify-between gap-3 border-t border-border pt-2">
-          <div className="min-w-0 flex-1 text-[10px] uppercase tracking-wider text-muted-foreground">
+          <div className="min-w-0 flex-1 text-label uppercase tracking-wider text-muted-foreground">
             Background sync
           </div>
           <button
@@ -267,7 +282,7 @@ function AutoModeButton() {
             )}
             disabled={drainPending}
             data-testid="auto-mode-drain-toggle"
-            className="inline-flex min-h-[28px] items-center rounded-md border border-border px-2.5 py-1.5 text-[10px] uppercase tracking-wider text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
+            className="inline-flex min-h-[28px] items-center rounded-md border border-border px-2.5 py-1.5 text-label uppercase tracking-wider text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
           >
             {drainPending ? "…" : drainMode ? "Resume all" : "Pause all"}
           </button>
@@ -275,7 +290,7 @@ function AutoModeButton() {
 
         <Link
           href="/settings"
-          className="mt-3 inline-flex text-[10px] uppercase tracking-wider text-muted-foreground transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+          className="mt-3 inline-flex text-label uppercase tracking-wider text-muted-foreground transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
         >
           Manage in settings →
         </Link>
@@ -295,6 +310,9 @@ function GitHubRateLimitNotice() {
   });
   const explicitlyLimited = githubRateLimit?.limited === true;
   const recentlyLimited = githubRateLimit?.recentlyLimited === true;
+  const coreBudget = githubRateLimit?.resources?.core?.budget ?? null;
+  const coreBudgetTight = githubRateLimit?.resources?.core?.belowReserve === true;
+  const coreBudgetFloor = githubRateLimit?.resources?.core?.belowFloor === true;
   const { data: activities } = useQuery<ActivitySnapshot>({
     queryKey: ["/api/activities"],
     refetchInterval: ACTIVITY_POLL_INTERVAL_MS,
@@ -307,7 +325,7 @@ function GitHubRateLimitNotice() {
       .find((message) => message.toLowerCase().includes("rate limit")) ?? null
     : null;
 
-  if (!explicitlyLimited && !recentlyLimited && !activityRateLimitMessage) {
+  if (!explicitlyLimited && !recentlyLimited && !coreBudgetTight && !activityRateLimitMessage) {
     return null;
   }
 
@@ -319,6 +337,10 @@ function GitHubRateLimitNotice() {
     ? resetTime
       ? `GitHub rate limited until ${resetTime}`
       : "GitHub rate limited"
+    : coreBudgetFloor
+      ? "GitHub budget floor"
+    : coreBudgetTight
+      ? "GitHub budget reserve"
     : recentlyLimited
       ? "GitHub rate limit hit recently"
     : "GitHub rate limit hit in recent activity";
@@ -327,13 +349,21 @@ function GitHubRateLimitNotice() {
     ? resetTime
       ? `GitHub rate limit active until ${resetTime}. Open settings for token configuration.`
       : "GitHub rate limit active. Open settings for token configuration."
+    : coreBudgetFloor
+      ? coreBudget
+        ? `GitHub core budget is ${coreBudget.remaining}/${coreBudget.limit} (${coreBudget.percentRemaining}%). All GitHub jobs are waiting.`
+        : "GitHub core budget is below the hard floor. GitHub jobs are waiting."
+    : coreBudgetTight
+      ? coreBudget
+        ? `GitHub core budget is ${coreBudget.remaining}/${coreBudget.limit} (${coreBudget.percentRemaining}%). Passive PR monitor jobs are deferring.`
+        : "GitHub core budget is in reserve. Passive PR monitor jobs are deferring."
     : activityRateLimitMessage ?? "GitHub rate limit errors detected in recent activity. Open settings for token configuration.";
 
   return (
     <Link
       href="/settings"
       title={tooltip}
-      className="inline-flex max-w-[320px] items-center truncate whitespace-nowrap rounded-md border border-warning-border bg-warning-muted px-2.5 py-1 text-[10px] uppercase tracking-wider text-warning-foreground transition-colors hover:border-warning hover:bg-warning-muted/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+      className="inline-flex max-w-[320px] items-center truncate whitespace-nowrap rounded-md border border-warning-border bg-warning-muted px-2.5 py-1 text-label uppercase tracking-wider text-warning-foreground transition-colors hover:border-warning hover:bg-warning-muted/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
     >
       {label}
     </Link>
@@ -358,7 +388,7 @@ export function AppHeader({
           aria-label="PatchDeck dashboard"
         >
           <PatchdeckMark />
-          <span className="text-sm font-semibold tracking-tight">PatchDeck</span>
+          <span className="text-title font-semibold tracking-tight">PatchDeck</span>
         </Link>
         <nav aria-label="Primary" className="flex flex-wrap items-center gap-1">
           {PRIMARY_NAV_ITEMS.map((item) => {
@@ -381,7 +411,7 @@ export function AppHeader({
       </div>
       <div className="flex min-w-0 flex-wrap items-center gap-2 lg:justify-self-end lg:justify-end">
         {status ? (
-          <div className="flex min-w-0 flex-wrap items-center gap-2 border-l border-border/70 pl-2 text-[11px] text-muted-foreground lg:border-l-0 lg:pl-0">
+          <div className="flex min-w-0 flex-wrap items-center gap-2 border-l border-border/70 pl-2 text-label text-muted-foreground lg:border-l-0 lg:pl-0">
             {status}
           </div>
         ) : null}

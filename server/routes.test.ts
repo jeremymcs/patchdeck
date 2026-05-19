@@ -5,7 +5,7 @@ import express from "express";
 import type { Octokit } from "@octokit/rest";
 import type { AppUpdateStatus, FeedbackItem, Issue, IssueListPage, NewPR } from "@shared/schema";
 import type { AppRuntime } from "./appRuntime";
-import { clearRateLimited, markRateLimited } from "./rateLimitState";
+import { clearRateLimitStateForTests, markRateLimited, recordResourceBudget } from "./rateLimitState";
 import type { ReleaseAgentPullSummary, ReleaseEvaluationDecision } from "./releaseAgent";
 import { ReleaseManager, type ReleaseGitHubService } from "./releaseManager";
 import { MemStorage } from "./memoryStorage";
@@ -222,6 +222,7 @@ test("PATCH /api/config accepts legacy single githubToken updates", async () => 
 test("GET /api/github-rate-limit reports the current reset time", async () => {
   const resetAt = new Date(Date.now() + 600_000);
   markRateLimited(resetAt);
+  recordResourceBudget("core", 900, 5000);
 
   const harness = await createHarness();
 
@@ -234,6 +235,9 @@ test("GET /api/github-rate-limit reports the current reset time", async () => {
       resetAt: string | null;
       recentlyLimited: boolean;
       lastLimitedAt: string | null;
+      budget: { remaining: number; limit: number; percentRemaining: number; resetAt: string | null } | null;
+      belowReserve: boolean;
+      belowFloor: boolean;
     };
     const body = await response.json() as ResourceBody & {
       resources: { core: ResourceBody; graphql: ResourceBody; search: ResourceBody };
@@ -244,10 +248,18 @@ test("GET /api/github-rate-limit reports the current reset time", async () => {
     assert.ok(body.lastLimitedAt);
     assert.equal(body.resources.core.limited, true);
     assert.equal(body.resources.core.resetAt, resetAt.toISOString());
+    assert.deepEqual(body.resources.core.budget, {
+      remaining: 900,
+      limit: 5000,
+      percentRemaining: 18,
+      resetAt: null,
+    });
+    assert.equal(body.resources.core.belowReserve, true);
+    assert.equal(body.resources.core.belowFloor, false);
     assert.equal(body.resources.graphql.limited, false);
     assert.equal(body.resources.search.limited, false);
   } finally {
-    clearRateLimited();
+    clearRateLimitStateForTests();
     await harness.close();
   }
 });

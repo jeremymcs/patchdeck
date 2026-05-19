@@ -58,6 +58,10 @@ export type GitHubPullSummary = {
   baseSha: string;
   mergeable: boolean | null;
   mergeableState: string | null;
+  merged: boolean;
+  mergedAt: string | null;
+  closedAt: string | null;
+  mergeCommitSha: string | null;
 };
 
 export type GitHubIssueSummary = {
@@ -93,6 +97,14 @@ export type GitHubStatusFailure = {
   description: string;
   targetUrl: string | null;
 };
+
+export type GitHubActionsRerun = {
+  runId: number;
+  targetUrl: string | null;
+  contexts: string[];
+};
+
+const GITHUB_ACTIONS_RUN_URL_PATTERN = /\/actions\/runs\/(\d+)(?:\/|$)/;
 
 type GitHubCommitStatusResponse = {
   state?: string | null;
@@ -625,6 +637,68 @@ export async function fetchCheckSnapshotsForRef(
   });
 }
 
+function extractGitHubActionsRunId(targetUrl: string | null): number | null {
+  if (!targetUrl) {
+    return null;
+  }
+
+  const match = GITHUB_ACTIONS_RUN_URL_PATTERN.exec(targetUrl);
+  if (!match?.[1]) {
+    return null;
+  }
+
+  const runId = Number.parseInt(match[1], 10);
+  return Number.isFinite(runId) && runId > 0 ? runId : null;
+}
+
+export async function rerunFailedGitHubActionsRunsForSnapshots(
+  octokit: Octokit,
+  repo: ParsedRepoSlug,
+  snapshots: CheckSnapshot[],
+): Promise<GitHubActionsRerun[]> {
+  const byRunId = new Map<number, GitHubActionsRerun>();
+
+  for (const snapshot of snapshots) {
+    if (
+      snapshot.provider !== "github.check_run"
+      || snapshot.status !== "completed"
+      || snapshot.conclusion !== "cancelled"
+    ) {
+      continue;
+    }
+
+    const runId = extractGitHubActionsRunId(snapshot.targetUrl);
+    if (runId === null) {
+      continue;
+    }
+
+    const existing = byRunId.get(runId);
+    if (existing) {
+      existing.contexts.push(snapshot.context);
+      continue;
+    }
+
+    byRunId.set(runId, {
+      runId,
+      targetUrl: snapshot.targetUrl,
+      contexts: [snapshot.context],
+    });
+  }
+
+  const reruns = Array.from(byRunId.values());
+  for (const rerun of reruns) {
+    await withGitHubErrorHandling("rerun failed workflow jobs", repo, () =>
+      octokit.rest.actions.reRunWorkflowFailedJobs({
+        owner: repo.owner,
+        repo: repo.repo,
+        run_id: rerun.runId,
+      }),
+    );
+  }
+
+  return reruns;
+}
+
 function resolveConfiguredGitHubToken(config: Config): string | undefined {
   return [
     ...(config.githubTokens ?? []),
@@ -1043,8 +1117,10 @@ function attachRateLimitHook(
       if (responseResource === "core" || responseResource === "graphql") {
         const limitRaw = response.headers?.["x-ratelimit-limit"];
         const limit = typeof limitRaw === "string" ? Number.parseInt(limitRaw, 10) : Number.NaN;
+        const resetRaw = response.headers?.["x-ratelimit-reset"];
+        const reset = typeof resetRaw === "string" ? Number.parseInt(resetRaw, 10) : undefined;
         if (Number.isFinite(remaining) && Number.isFinite(limit)) {
-          recordResourceBudget(responseResource, remaining, limit);
+          recordResourceBudget(responseResource, remaining, limit, reset);
         }
       }
       if (Number.isFinite(remaining) && remaining > 0) {
@@ -1493,6 +1569,10 @@ export async function fetchPullSummary(
     baseSha: pull.base?.sha || "",
     mergeable: typeof pull.mergeable === "boolean" ? pull.mergeable : null,
     mergeableState: typeof pull.mergeable_state === "string" ? pull.mergeable_state : null,
+    merged: Boolean(pull.merged_at),
+    mergedAt: pull.merged_at || null,
+    closedAt: pull.closed_at || null,
+    mergeCommitSha: pull.merge_commit_sha || null,
   };
 }
 
@@ -2234,6 +2314,10 @@ function mapPullToSummary(pull: GitHubPullListItem, repo: ParsedRepoSlug): GitHu
     baseSha: pull.base?.sha || "",
     mergeable: null,
     mergeableState: null,
+    merged: false,
+    mergedAt: null,
+    closedAt: null,
+    mergeCommitSha: null,
   };
 }
 

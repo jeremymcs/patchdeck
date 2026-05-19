@@ -7,7 +7,7 @@ export function QueueStatusBadge({ status }: { status: QueueStatusView | null })
 
   return (
     <span
-      className={`inline-flex items-center gap-1 border px-1.5 py-0 text-[10px] uppercase tracking-wider ${status.className}`}
+      className={`inline-flex items-center gap-1 border px-1.5 py-0 text-label uppercase tracking-wider ${status.className}`}
       data-testid="queue-status-badge"
     >
       <span>{status.label}</span>

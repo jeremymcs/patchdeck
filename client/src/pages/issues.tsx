@@ -372,7 +372,7 @@ function IssueRow({
           target="_blank"
           rel="noreferrer noopener"
           data-testid="issue-ready-to-merge-list"
-          className={`mt-2 inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[10px] uppercase tracking-wider transition-colors hover:border-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background ${toneClass}`}
+          className={`mt-2 inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-label uppercase tracking-wider transition-colors hover:border-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background ${toneClass}`}
         >
           <ExternalLink className="h-3 w-3" />
           PR <span className="font-mono">#{issue.workPrNumber}</span>
@@ -390,7 +390,7 @@ function IssueRow({
             target="_blank"
             rel="noreferrer noopener"
             data-testid="issue-external-pr-list"
-            className="mt-2 inline-flex items-center gap-1 rounded-md border border-warning-border px-2 py-0.5 text-[10px] uppercase tracking-wider text-warning-foreground transition-colors hover:border-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+            className="mt-2 inline-flex items-center gap-1 rounded-md border border-warning-border px-2 py-0.5 text-label uppercase tracking-wider text-warning-foreground transition-colors hover:border-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
           >
             <ExternalLink className="h-3 w-3" />
             PR <span className="font-mono">#{issue.externalWorkPrNumber}</span>
@@ -401,7 +401,7 @@ function IssueRow({
         ? (
           <div
             data-testid="issue-work-in-progress-list"
-            className="mt-2 inline-flex items-center gap-1 rounded-md border border-border px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground"
+            className="mt-2 inline-flex items-center gap-1 rounded-md border border-border px-2 py-0.5 text-label uppercase tracking-wider text-muted-foreground"
           >
             {issue.workStatus === "in_progress" ? <Loader2 className="h-3 w-3 animate-spin" /> : <span className="h-3 w-3" />}
             {formatIssueWorkStage(issue)}
@@ -425,16 +425,16 @@ function IssueRow({
       >
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <span className="truncate text-sm font-medium">{issue.title}</span>
+            <span className="truncate text-body font-medium">{issue.title}</span>
             {showInlineStatusBadge && <IssueStatusBadge issue={issue} />}
           </div>
-          <div className="mt-1 text-[11px] text-muted-foreground">
+          <div className="mt-1 text-label text-muted-foreground">
             {issue.repo} <span className="font-mono text-foreground/70">#{issue.number}</span>
           </div>
-          <div className="mt-0.5 text-[11px] text-muted-foreground">
+          <div className="mt-0.5 text-label text-muted-foreground">
             by {formatGitHubUsername(issue.author)}
           </div>
-          <div className="mt-1 line-clamp-2 text-[12px] leading-5 text-muted-foreground">
+          <div className="mt-1 line-clamp-2 text-body leading-5 text-muted-foreground">
             {formatBodyPreview(issue.body)}
           </div>
           <div className="mt-2 flex flex-wrap gap-1">
@@ -464,18 +464,18 @@ function IssueRow({
               />
             )}
             {visibleLabels.slice(0, 3).map((label) => (
-              <span key={label} className="border border-border px-1.5 py-0 text-[10px] uppercase tracking-wider text-muted-foreground">
+              <span key={label} className="border border-border px-1.5 py-0 text-label uppercase tracking-wider text-muted-foreground">
                 {label}
               </span>
             ))}
             {visibleLabels.length > 3 && (
-              <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              <span className="text-label uppercase tracking-wider text-muted-foreground">
                 +{visibleLabels.length - 3}
               </span>
             )}
           </div>
         </div>
-        <span className="shrink-0 text-[11px] text-muted-foreground">
+        <span className="shrink-0 text-label text-muted-foreground">
           {formatDateTime(issue.updatedAt)}
         </span>
       </button>
@@ -492,7 +492,7 @@ function VerifyStateBadge({ state }: { state: VerifyState }) {
     <span
       data-testid="issue-verify-state-badge"
       data-verify-state={state}
-      className={`inline-flex items-center gap-1 border px-1.5 py-0 text-[10px] uppercase tracking-wider ${
+      className={`inline-flex items-center gap-1 border px-1.5 py-0 text-label uppercase tracking-wider ${
         isPending
           ? "border-primary/60 bg-primary/10 text-primary animate-pulse"
           : "border-success-border bg-success-muted text-success-foreground"
@@ -544,7 +544,7 @@ function SubtaskListPanel({ subtasks }: { subtasks: IssueSubtask[] }) {
       title="Subtasks"
       testId="issue-subtasks"
       chip={(
-        <span className="font-mono text-[10px] text-muted-foreground">
+        <span className="font-mono text-label text-muted-foreground">
           {doneCount} / {subtasks.length} done
         </span>
       )}
@@ -562,18 +562,18 @@ function SubtaskListPanel({ subtasks }: { subtasks: IssueSubtask[] }) {
             </span>
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="truncate text-[12px] font-medium text-foreground">{task.title}</span>
-                <span className="border border-border/60 px-1.5 py-0 text-[10px] uppercase tracking-wider text-muted-foreground">
+                <span className="truncate text-body font-medium text-foreground">{task.title}</span>
+                <span className="border border-border/60 px-1.5 py-0 text-label uppercase tracking-wider text-muted-foreground">
                   {task.status}
                 </span>
               </div>
               {task.summary && (
-                <div className="mt-0.5 text-[11px] leading-5 text-muted-foreground">
+                <div className="mt-0.5 text-label leading-5 text-muted-foreground">
                   {task.summary}
                 </div>
               )}
               {task.statusReason && (
-                <div className="mt-1 text-[11px] italic leading-5 text-foreground/70">
+                <div className="mt-1 text-label italic leading-5 text-foreground/70">
                   {task.statusReason}
                 </div>
               )}
@@ -592,16 +592,16 @@ function IssueLogRow({ entry }: { entry: LogEntry }) {
     <div className="border-b border-border/60 px-3 py-2 last:border-b-0">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-[12px] text-foreground">{entry.message}</div>
-          {entry.phase && <div className="mt-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">{entry.phase}</div>}
+          <div className="text-body text-foreground">{entry.message}</div>
+          {entry.phase && <div className="mt-0.5 text-label uppercase tracking-wider text-muted-foreground">{entry.phase}</div>}
         </div>
-        <span className="shrink-0 text-[10px] text-muted-foreground">{formatDateTime(entry.timestamp)}</span>
+        <span className="shrink-0 text-label text-muted-foreground">{formatDateTime(entry.timestamp)}</span>
       </div>
       {metadataEntries.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-1.5">
           {metadataEntries.map((field) => {
             const content = (
-              <span className="inline-flex max-w-full items-center gap-1 border border-border/60 px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+              <span className="inline-flex max-w-full items-center gap-1 border border-border/60 px-2 py-0.5 text-label uppercase tracking-wider text-muted-foreground">
                 <span className="shrink-0 text-foreground/70">{field.label}:</span>
                 <span className="min-w-0 truncate normal-case tracking-normal text-foreground/85">{field.value}</span>
                 {field.href && <ExternalLink className="h-3 w-3 shrink-0" />}
@@ -680,7 +680,7 @@ function IssueLogPanel({
     <div className="flex max-h-[42dvh] min-h-0 w-full shrink-0 flex-col border-t border-border lg:max-h-none lg:min-h-0 lg:w-80 lg:border-l lg:border-t-0">
       <div className="flex shrink-0 items-center border-b border-border">
         <div
-          className="flex-1 bg-muted px-3 py-2 text-[11px] uppercase tracking-wider text-foreground shadow-[inset_0_-2px_0_0_hsl(var(--primary))]"
+          className="flex-1 bg-muted px-3 py-2 text-label uppercase tracking-wider text-foreground shadow-[inset_0_-2px_0_0_hsl(var(--primary))]"
           data-testid="tab-issue-activity"
         >
           Activity
@@ -699,27 +699,27 @@ function IssueLogPanel({
       <GlobalActivityPanel activities={activities} queueStatusById={queueStatusById} idleReason={idleReason} />
       <div className="flex-1 overflow-y-auto" data-testid="issue-detail-logs">
         {!selected ? (
-          <div className="p-4 text-[12px] text-muted-foreground">
+          <div className="p-4 text-body text-muted-foreground">
             Select an issue to see logs.
           </div>
         ) : logs.length === 0 ? (
-          <div className="p-4 text-[12px] text-muted-foreground">
+          <div className="p-4 text-body text-muted-foreground">
             No workflow logs yet.
           </div>
         ) : viewLogs.length === 0 ? (
-          <div className="p-4 text-[12px] text-muted-foreground">
+          <div className="p-4 text-body text-muted-foreground">
             View cleared. New log entries will appear here.
           </div>
         ) : (
           <>
             <div className="flex items-center justify-between gap-2 border-b border-border/60 px-3 py-2">
-              <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              <span className="text-label uppercase tracking-wider text-muted-foreground">
                 {viewLogs.length} visible
               </span>
               <button
                 type="button"
                 onClick={() => setClearedLogIds(new Set(logs.map((log) => log.id)))}
-                className="cursor-pointer rounded-md border border-border bg-transparent px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground transition-colors hover:border-foreground/30 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                className="cursor-pointer rounded-md border border-border bg-transparent px-2 py-0.5 text-label font-medium uppercase tracking-wider text-muted-foreground transition-colors hover:border-foreground/30 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               >
                 Clear view
               </button>
@@ -754,8 +754,8 @@ class IssuesErrorBoundary extends Component<{ children: ReactNode }, IssuesError
     if (this.state.hasError) {
       return (
         <div className="flex min-h-screen items-center justify-center bg-background p-6">
-          <div className="max-w-2xl border border-destructive/40 bg-destructive/10 p-4 text-[12px] text-destructive">
-            <div className="text-[11px] uppercase tracking-wider text-destructive/80">Issues UI runtime error</div>
+          <div className="max-w-2xl border border-destructive/40 bg-destructive/10 p-4 text-body text-destructive">
+            <div className="text-label uppercase tracking-wider text-destructive/80">Issues UI runtime error</div>
             <pre className="mt-2 whitespace-pre-wrap break-words">{this.state.message || "Unknown render error"}</pre>
           </div>
         </div>
@@ -1415,7 +1415,7 @@ function IssuesPage() {
             </span>
             <span><span className="font-mono text-foreground">{activeIssueCount}</span> active</span>
             {runtime?.drainMode && (
-              <span className="rounded-md border border-border px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+              <span className="rounded-md border border-border px-1.5 py-0.5 text-label uppercase tracking-wider text-muted-foreground">
                 paused
               </span>
             )}
@@ -1430,7 +1430,7 @@ function IssuesPage() {
                   setAreErrorsRolledUp(false);
                   scrollToDashboardErrors();
                 }}
-                className="inline-flex items-center gap-1 rounded-md border border-destructive/50 px-2 py-0.5 text-[11px] uppercase tracking-wider text-destructive transition-colors hover:bg-destructive hover:text-background focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+                className="inline-flex items-center gap-1 rounded-md border border-destructive/50 px-2 py-0.5 text-label uppercase tracking-wider text-destructive transition-colors hover:bg-destructive hover:text-background focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
                 data-testid="issues-error-pill"
               >
                 <AlertTriangle className="h-3 w-3" aria-hidden="true" />
@@ -1444,7 +1444,7 @@ function IssuesPage() {
               disabled={isSyncingRepos || globalDrainMode || isGitHubThrottled}
               title={isGitHubThrottled ? throttledTitle : undefined}
               data-testid="button-sync-issues"
-              className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-0.5 text-[11px] uppercase tracking-wider text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
+              className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-0.5 text-label uppercase tracking-wider text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
             >
               {globalDrainMode ? <span className="h-3.5 w-3.5" /> : (isSyncingRepos || isFetching) ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
               {globalDrainMode ? "paused" : "sync"}
@@ -1474,7 +1474,7 @@ function IssuesPage() {
 
       <div className="flex flex-1 flex-col overflow-hidden lg:flex-row">
         <div className="flex max-h-[42vh] w-full shrink-0 flex-col overflow-hidden border-b border-border lg:max-h-none lg:w-[34rem] xl:w-[36rem] lg:border-b-0 lg:border-r">
-          <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-2 text-[11px] uppercase tracking-wider text-muted-foreground">
+          <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-2 text-label uppercase tracking-wider text-muted-foreground">
             <div>
               Watched issues
               <span className="ml-2 normal-case tracking-normal text-muted-foreground/80">
@@ -1505,7 +1505,7 @@ function IssuesPage() {
                         : `Queue work for ${startableVisibleIssues.length} visible issue${startableVisibleIssues.length === 1 ? "" : "s"}`
                 }
                 data-testid="button-start-visible-issue-work"
-                className="inline-flex items-center gap-1 rounded-md border border-primary bg-primary px-2 py-0.5 text-[10px] uppercase tracking-wider text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
+                className="inline-flex items-center gap-1 rounded-md border border-primary bg-primary px-2 py-0.5 text-label uppercase tracking-wider text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {startVisibleWorkMutation.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Wrench className="h-3 w-3" />}
                 {startVisibleWorkMutation.isPending ? "queuing safely" : `queue work (${startableVisibleIssues.length})`}
@@ -1516,7 +1516,7 @@ function IssuesPage() {
                 disabled={isSyncingRepos || globalDrainMode || isGitHubThrottled}
                 title={isGitHubThrottled ? throttledTitle : undefined}
                 data-testid="button-full-sweep-issues"
-                className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
+                className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-0.5 text-label uppercase tracking-wider text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
               >
                 {globalDrainMode ? "paused" : "full sweep"}
               </button>
@@ -1532,7 +1532,7 @@ function IssuesPage() {
               }}
               className="flex flex-wrap items-start gap-2"
             >
-              <span className="mt-1 w-14 shrink-0 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+              <span className="mt-1 w-14 shrink-0 text-label font-medium uppercase tracking-wider text-muted-foreground">
                 Pull
               </span>
               <div className="flex min-w-0 flex-1 flex-wrap gap-1">
@@ -1543,13 +1543,13 @@ function IssuesPage() {
                   onChange={(event) => setManualPullNumber(event.target.value)}
                   placeholder={`# for ${manualPullRepoHint}`}
                   data-testid="input-manual-issue-pr-number"
-                  className="h-7 min-w-[11rem] flex-1 rounded-md border border-border bg-background px-2 font-mono text-[12px] text-foreground placeholder:font-sans placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  className="h-7 min-w-[11rem] flex-1 rounded-md border border-border bg-background px-2 font-mono text-body text-foreground placeholder:font-sans placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 />
                 <button
                   type="submit"
                   disabled={!canManualPull || manualPullIssueMutation.isPending}
                   data-testid="button-pull-issue-number"
-                  className="inline-flex h-7 items-center gap-1 rounded-md border border-border px-2 text-[10px] uppercase tracking-wider text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
+                  className="inline-flex h-7 items-center gap-1 rounded-md border border-border px-2 text-label uppercase tracking-wider text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   {manualPullIssueMutation.isPending && <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />}
                   Pull issue
@@ -1563,7 +1563,7 @@ function IssuesPage() {
                   }}
                   disabled={!canManualPull || manualPullPrMutation.isPending}
                   data-testid="button-pull-pr-number"
-                  className="inline-flex h-7 items-center gap-1 rounded-md border border-border px-2 text-[10px] uppercase tracking-wider text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
+                  className="inline-flex h-7 items-center gap-1 rounded-md border border-border px-2 text-label uppercase tracking-wider text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   {manualPullPrMutation.isPending && <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />}
                   Pull PR
@@ -1571,7 +1571,7 @@ function IssuesPage() {
               </div>
             </form>
             <div className="flex flex-wrap items-start gap-2">
-              <span className="mt-1 w-14 shrink-0 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+              <span className="mt-1 w-14 shrink-0 text-label font-medium uppercase tracking-wider text-muted-foreground">
                 Search
               </span>
               <label htmlFor="issue-number-search" className="sr-only">Search issue number</label>
@@ -1581,18 +1581,18 @@ function IssuesPage() {
                 onChange={(event) => setIssueNumberSearch(event.target.value)}
                 placeholder="Search #"
                 data-testid="issue-number-search"
-                className="h-7 min-w-0 flex-1 rounded-md border border-border bg-background px-2 font-mono text-[12px] text-foreground placeholder:font-sans placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                className="h-7 min-w-0 flex-1 rounded-md border border-border bg-background px-2 font-mono text-body text-foreground placeholder:font-sans placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               />
             </div>
             <div className="flex flex-wrap items-start gap-2">
-              <span className="mt-1 w-14 shrink-0 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+              <span className="mt-1 w-14 shrink-0 text-label font-medium uppercase tracking-wider text-muted-foreground">
                 Repo
               </span>
               <div className="flex min-w-0 flex-1 flex-wrap gap-1">
                 <button
                   type="button"
                   onClick={() => setSelectedRepo("all")}
-                  className={`rounded-md border px-2 py-0.5 text-[10px] uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background ${
+                  className={`rounded-md border px-2 py-0.5 text-label uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background ${
                     selectedRepo === "all"
                       ? "border-primary bg-primary/10 text-primary"
                       : "border-border text-muted-foreground hover:border-primary/40 hover:text-primary"
@@ -1605,7 +1605,7 @@ function IssuesPage() {
                     key={repo}
                     type="button"
                     onClick={() => setSelectedRepo(repo)}
-                    className={`rounded-md border px-2 py-0.5 text-[10px] uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background ${
+                    className={`rounded-md border px-2 py-0.5 text-label uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background ${
                       selectedRepo === repo
                         ? "border-primary bg-primary/10 text-primary"
                         : "border-border text-muted-foreground hover:border-primary/40 hover:text-primary"
@@ -1617,14 +1617,14 @@ function IssuesPage() {
               </div>
             </div>
             <div className="flex flex-wrap items-start gap-2">
-              <span className="mt-1 w-14 shrink-0 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+              <span className="mt-1 w-14 shrink-0 text-label font-medium uppercase tracking-wider text-muted-foreground">
                 Status
               </span>
               <div className="flex min-w-0 flex-1 flex-wrap gap-1">
             <button
               type="button"
               onClick={() => setSelectedWorkFilter("ready")}
-              className={`rounded-md border px-2 py-0.5 text-[10px] uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background ${
+              className={`rounded-md border px-2 py-0.5 text-label uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background ${
                 selectedWorkFilter === "ready"
                   ? "border-primary bg-primary/10 text-primary"
                   : "border-border text-muted-foreground hover:border-primary/40 hover:text-primary"
@@ -1636,7 +1636,7 @@ function IssuesPage() {
               type="button"
               onClick={() => setSelectedWorkFilter("worked")}
               data-testid="issue-worked-filter"
-              className={`rounded-md border px-2 py-0.5 text-[10px] uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background ${
+              className={`rounded-md border px-2 py-0.5 text-label uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background ${
                 selectedWorkFilter === "worked"
                   ? "border-primary bg-primary/10 text-primary"
                   : "border-border text-muted-foreground hover:border-primary/40 hover:text-primary"
@@ -1648,7 +1648,7 @@ function IssuesPage() {
               type="button"
               onClick={() => setSelectedWorkFilter("auto")}
               data-testid="issue-auto-eligible-filter"
-              className={`rounded-md border px-2 py-0.5 text-[10px] uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background ${
+              className={`rounded-md border px-2 py-0.5 text-label uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background ${
                 selectedWorkFilter === "auto"
                   ? "border-primary bg-primary/10 text-primary"
                   : "border-border text-muted-foreground hover:border-primary/40 hover:text-primary"
@@ -1660,7 +1660,7 @@ function IssuesPage() {
               type="button"
               onClick={() => setSelectedWorkFilter("needs_eval")}
               data-testid="issue-needs-evaluation-filter"
-              className={`rounded-md border px-2 py-0.5 text-[10px] uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background ${
+              className={`rounded-md border px-2 py-0.5 text-label uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background ${
                 selectedWorkFilter === "needs_eval"
                   ? "border-primary bg-primary/10 text-primary"
                   : "border-border text-muted-foreground hover:border-primary/40 hover:text-primary"
@@ -1672,7 +1672,7 @@ function IssuesPage() {
               type="button"
               onClick={() => setSelectedWorkFilter("review")}
               data-testid="issue-review-filter"
-              className={`rounded-md border px-2 py-0.5 text-[10px] uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background ${
+              className={`rounded-md border px-2 py-0.5 text-label uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background ${
                 selectedWorkFilter === "review"
                   ? "border-primary bg-primary/10 text-primary"
                   : "border-border text-muted-foreground hover:border-primary/40 hover:text-primary"
@@ -1684,7 +1684,7 @@ function IssuesPage() {
               type="button"
               onClick={() => setSelectedWorkFilter("failed")}
               data-testid="issue-failed-filter"
-              className={`rounded-md border px-2 py-0.5 text-[10px] uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background ${
+              className={`rounded-md border px-2 py-0.5 text-label uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background ${
                 selectedWorkFilter === "failed"
                   ? "border-primary bg-primary/10 text-primary"
                   : "border-border text-muted-foreground hover:border-primary/40 hover:text-primary"
@@ -1696,7 +1696,7 @@ function IssuesPage() {
               type="button"
               onClick={() => setSelectedWorkFilter("stale")}
               data-testid="issue-stale-filter"
-              className={`rounded-md border px-2 py-0.5 text-[10px] uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background ${
+              className={`rounded-md border px-2 py-0.5 text-label uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background ${
                 selectedWorkFilter === "stale"
                   ? "border-primary bg-primary/10 text-primary"
                   : "border-border text-muted-foreground hover:border-primary/40 hover:text-primary"
@@ -1707,7 +1707,7 @@ function IssuesPage() {
             <button
               type="button"
               onClick={() => setSelectedWorkFilter("all")}
-              className={`rounded-md border px-2 py-0.5 text-[10px] uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background ${
+              className={`rounded-md border px-2 py-0.5 text-label uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background ${
                 selectedWorkFilter === "all"
                   ? "border-primary bg-primary/10 text-primary"
                   : "border-border text-muted-foreground hover:border-primary/40 hover:text-primary"
@@ -1727,7 +1727,7 @@ function IssuesPage() {
                   ))}
                 </div>
               ) : visibleIssues.length === 0 ? (
-                <div className="p-4 text-[12px] text-muted-foreground">
+                <div className="p-4 text-body text-muted-foreground">
                   {normalizedIssueNumberSearch
                     ? `No issues match #${normalizedIssueNumberSearch}.`
                     : "No open issues found in watched repositories."}
@@ -1736,7 +1736,7 @@ function IssuesPage() {
                 <>
                   {repoGroups.map((group) => (
                     <div key={group.repo} className="border-b border-border/60 last:border-b-0">
-                      <div className="sticky top-0 z-10 border-b border-border bg-background px-4 py-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                      <div className="sticky top-0 z-10 border-b border-border bg-background px-4 py-2 text-label font-medium uppercase tracking-wider text-muted-foreground">
                         {group.repo} <span className="font-mono text-foreground/70">({group.issues.length})</span>
                       </div>
                       {group.issues.map((issue) => (
@@ -1760,7 +1760,7 @@ function IssuesPage() {
                   {canLoadMore ? (
                     <div ref={loadMoreSentinelRef} className="border-t border-border/60 px-4 py-3" data-testid="issues-load-more-sentinel">
                       <div className="flex items-center justify-between gap-3">
-                        <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                        <span className="text-label uppercase tracking-wider text-muted-foreground">
                           Loaded <span className="font-mono text-foreground">{loadedScopeCount}</span>
                           {" "}of <span className="font-mono text-foreground">{totalScopeCount}</span>
                         </span>
@@ -1769,7 +1769,7 @@ function IssuesPage() {
                           onClick={() => { void loadMoreIssues(); }}
                           disabled={isLoadingMore || globalDrainMode}
                           data-testid="button-load-more-issues"
-                          className="inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-[10px] uppercase tracking-wider text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50"
+                          className="inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-label uppercase tracking-wider text-muted-foreground transition-colors hover:border-primary/40 hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           {isLoadingMore && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />}
                           Load more
@@ -1777,7 +1777,7 @@ function IssuesPage() {
                       </div>
                     </div>
                   ) : totalIssueCount > loadedIssueCount ? (
-                    <div className="border-t border-border/60 px-4 py-3 text-[11px] uppercase tracking-wider text-muted-foreground" data-testid="issues-loaded-count">
+                    <div className="border-t border-border/60 px-4 py-3 text-label uppercase tracking-wider text-muted-foreground" data-testid="issues-loaded-count">
                       Loaded <span className="font-mono text-foreground">{loadedScopeCount}</span>
                       {" "}of <span className="font-mono text-foreground">{totalScopeCount}</span>
                     </div>
@@ -1856,7 +1856,7 @@ function IssuesPage() {
                       disabled={syncIssueMutation.isPending || Boolean(runtime?.drainMode)}
                       title={runtime?.drainMode ? "Issue sync is paused by drain mode" : "Sync issue from GitHub now"}
                       data-testid="button-sync-issue"
-                      className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-border bg-transparent px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground transition-colors hover:border-foreground/30 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
+                      className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-border bg-transparent px-2.5 py-0.5 text-label font-medium uppercase tracking-wider text-muted-foreground transition-colors hover:border-foreground/30 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       {syncIssueMutation.isPending ? (
                         <>
@@ -1876,7 +1876,7 @@ function IssuesPage() {
                       disabled={evaluateMutation.isPending || Boolean(runtime?.drainMode)}
                       title={runtime?.drainMode ? "Issue evaluation is paused by drain mode" : "Evaluate this issue for auto work"}
                       data-testid="button-evaluate-issue"
-                      className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-border bg-transparent px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground transition-colors hover:border-foreground/30 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
+                      className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-border bg-transparent px-2.5 py-0.5 text-label font-medium uppercase tracking-wider text-muted-foreground transition-colors hover:border-foreground/30 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       {evaluateMutation.isPending ? (
                         <>
@@ -1902,7 +1902,7 @@ function IssuesPage() {
                             : "Queue this issue for work"
                       }
                       data-testid="button-work-issue"
-                      className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-primary bg-primary px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
+                      className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-primary bg-primary px-2.5 py-0.5 text-label font-medium uppercase tracking-wider text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       {workMutation.isPending ? (
                         <>
@@ -1935,7 +1935,7 @@ function IssuesPage() {
                             : "Check the work PR diff against this issue's subtasks"
                       }
                       data-testid="button-verify-issue"
-                      className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-border bg-transparent px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground transition-colors hover:border-foreground/30 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
+                      className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-border bg-transparent px-2.5 py-0.5 text-label font-medium uppercase tracking-wider text-muted-foreground transition-colors hover:border-foreground/30 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       {isVerifying ? (
                         <>
@@ -1961,7 +1961,7 @@ function IssuesPage() {
               <div className="px-4 py-3">
                 <div data-testid="issue-label-editor" className="flex flex-wrap items-center gap-1">
                   {selectedIssue.labels.length > 0 ? selectedIssue.labels.map((label) => (
-                    <span key={label} className="inline-flex max-w-full items-center gap-1 border border-border pl-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+                    <span key={label} className="inline-flex max-w-full items-center gap-1 border border-border pl-1.5 text-label uppercase tracking-wider text-muted-foreground">
                       <span className="min-w-0 truncate">{label}</span>
                       <button
                         type="button"
@@ -1975,7 +1975,7 @@ function IssuesPage() {
                       </button>
                     </span>
                   )) : (
-                    <span className="text-[11px] text-muted-foreground">No labels</span>
+                    <span className="text-label text-muted-foreground">No labels</span>
                   )}
                   <form
                     className="ml-1 inline-flex items-center gap-1"
@@ -1993,7 +1993,7 @@ function IssuesPage() {
                       onChange={(event) => setLabelInput(event.target.value)}
                       placeholder="add label"
                       data-testid="issue-label-input"
-                      className="h-6 w-44 border border-border bg-background px-2 text-[11px] text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      className="h-6 w-44 border border-border bg-background px-2 text-label text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                     />
                     <button
                       type="submit"
@@ -2020,13 +2020,13 @@ function IssuesPage() {
                       target="_blank"
                       rel="noreferrer noopener"
                       data-testid="issue-ready-to-merge"
-                      className={`mt-3 flex items-center justify-between gap-3 rounded-md border px-3 py-2 text-[11px] transition-colors hover:border-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background ${toneClass}`}
+                      className={`mt-3 flex items-center justify-between gap-3 rounded-md border px-3 py-2 text-label transition-colors hover:border-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background ${toneClass}`}
                     >
                       <span className="min-w-0">
-                        <span className="block text-[10px] uppercase tracking-wider opacity-70">
+                        <span className="block text-label uppercase tracking-wider opacity-70">
                           {readiness.label}
                         </span>
-                        <span className="block truncate text-[12px] leading-5">
+                        <span className="block truncate text-body leading-5">
                           {readiness.detail}
                         </span>
                       </span>
@@ -2040,13 +2040,13 @@ function IssuesPage() {
                     target="_blank"
                     rel="noreferrer noopener"
                     data-testid="issue-external-pr"
-                    className="mt-3 flex items-center justify-between gap-3 rounded-md border border-warning-border bg-warning-muted px-3 py-2 text-[11px] text-warning-foreground transition-colors hover:border-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+                    className="mt-3 flex items-center justify-between gap-3 rounded-md border border-warning-border bg-warning-muted px-3 py-2 text-label text-warning-foreground transition-colors hover:border-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
                   >
                     <span className="min-w-0">
-                      <span className="block text-[10px] uppercase tracking-wider opacity-70">
+                      <span className="block text-label uppercase tracking-wider opacity-70">
                         Linked external PR
                       </span>
-                      <span className="block truncate text-[12px] leading-5">
+                      <span className="block truncate text-body leading-5">
                         {selectedIssue.externalWorkPrRepo ?? selectedIssue.repo} #{selectedIssue.externalWorkPrNumber}
                       </span>
                     </span>
@@ -2065,7 +2065,7 @@ function IssuesPage() {
                         disabled={clearFailuresMutation.isPending}
                         title="Clear failed issue work attempts"
                         data-testid="button-clear-issue-failures"
-                        className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-destructive/50 bg-background/40 px-2.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-destructive transition-colors hover:bg-destructive hover:text-background focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
+                        className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-destructive/50 bg-background/40 px-2.5 py-0.5 text-label font-medium uppercase tracking-wider text-destructive transition-colors hover:bg-destructive hover:text-background focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         {clearFailuresMutation.isPending ? (
                           <>
@@ -2081,7 +2081,7 @@ function IssuesPage() {
                       </button>
                     )}
                   >
-                    <div className="max-h-80 overflow-auto whitespace-pre-wrap px-3 py-2 text-[11px] leading-5 text-destructive">
+                    <div className="max-h-80 overflow-auto whitespace-pre-wrap px-3 py-2 text-label leading-5 text-destructive">
                       {selectedIssue.lastError}
                     </div>
                   </DetailPanel>
@@ -2101,20 +2101,20 @@ function IssuesPage() {
                     )}
                   >
                     <div className="px-3 py-2">
-                      <div className="text-[12px] leading-5 text-foreground/85">
+                      <div className="text-body leading-5 text-foreground/85">
                         {selectedIssue.evaluationSummary ?? selectedIssue.autoWorkBlockedReason ?? "Evaluate this issue before auto-mode can work it."}
                       </div>
                       <div className="mt-2 flex flex-wrap gap-1.5">
-                        <span className="border border-border/60 px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+                        <span className="border border-border/60 px-2 py-0.5 text-label uppercase tracking-wider text-muted-foreground">
                           auto: {selectedIssue.autoWorkEligible ? "enabled" : "blocked"}
                         </span>
                         {typeof selectedIssue.evaluationConfidence === "number" && (
-                          <span className="border border-border/60 px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+                          <span className="border border-border/60 px-2 py-0.5 text-label uppercase tracking-wider text-muted-foreground">
                             confidence: {formatEvaluationConfidence(selectedIssue.evaluationConfidence)}
                           </span>
                         )}
                         {selectedIssue.evaluationUpdatedAt && (
-                          <span className="border border-border/60 px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+                          <span className="border border-border/60 px-2 py-0.5 text-label uppercase tracking-wider text-muted-foreground">
                             evaluated: {formatDateTime(selectedIssue.evaluationUpdatedAt)}
                           </span>
                         )}
@@ -2122,7 +2122,7 @@ function IssuesPage() {
                       {selectedIssue.evaluationSafetyFlags && selectedIssue.evaluationSafetyFlags.length > 0 && (
                         <div className="mt-2 flex flex-wrap gap-1.5">
                           {selectedIssue.evaluationSafetyFlags.map((flag) => (
-                            <span key={flag} className="border border-destructive/40 px-2 py-0.5 text-[10px] uppercase tracking-wider text-destructive">
+                            <span key={flag} className="border border-destructive/40 px-2 py-0.5 text-label uppercase tracking-wider text-destructive">
                               {flag}
                             </span>
                           ))}
@@ -2131,7 +2131,7 @@ function IssuesPage() {
                     </div>
                   </DetailPanel>
                 )}
-                <div className="mt-3 text-[11px] uppercase tracking-wider text-muted-foreground">
+                <div className="mt-3 text-label uppercase tracking-wider text-muted-foreground">
                   Issue body
                 </div>
                 {selectedIssue.bodyHtml ? (
@@ -2141,7 +2141,7 @@ function IssuesPage() {
                     dangerouslySetInnerHTML={{ __html: selectedIssue.bodyHtml }}
                   />
                 ) : (
-                  <pre className="mt-2 whitespace-pre-wrap break-words border border-border/60 bg-background p-4 text-[12px] leading-6 text-muted-foreground">
+                  <pre className="mt-2 whitespace-pre-wrap break-words border border-border/60 bg-background p-4 text-body leading-6 text-muted-foreground">
                     {selectedIssue.body?.trim() || "No body provided."}
                   </pre>
                 )}
@@ -2149,7 +2149,7 @@ function IssuesPage() {
               </div>
             </>
           ) : (
-            <div className="flex flex-1 items-center justify-center text-[12px] text-muted-foreground">
+            <div className="flex flex-1 items-center justify-center text-body text-muted-foreground">
               Select an issue from the left panel.
             </div>
           )}

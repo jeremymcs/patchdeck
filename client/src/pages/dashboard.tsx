@@ -2,7 +2,7 @@ import { useMemo, useRef, type KeyboardEvent, type RefObject } from "react";
 import { Link, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, ExternalLink, GitPullRequest, ListTodo, Loader2 } from "lucide-react";
-import type { ActivityItem, ActivitySnapshot, BackgroundJobKind, Config, IssueListPage, PR } from "@shared/schema";
+import type { ActivityItem, ActivitySnapshot, Config, IssueListPage, PR } from "@shared/schema";
 import { fetchJson } from "@/lib/queryClient";
 import { AppHeader } from "@/components/AppHeader";
 import { UpdateBanner } from "@/components/UpdateBanner";
@@ -13,6 +13,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ACTIVITY_POLL_INTERVAL_MS } from "@/lib/polling";
 import { getActivityIdleReason } from "@/lib/activityIdle";
 import { formatActivityDetail, formatActivityLabel } from "@/lib/activityDisplay";
+import { getActivityTargetRoute } from "@/lib/activityTargetRoute";
 
 type PRBreakdown = {
   total: number;
@@ -44,25 +45,6 @@ function buildPRBreakdown(prs: PR[]): PRBreakdown {
   return result;
 }
 
-function activityTargetRoute(kind: BackgroundJobKind): string | null {
-  switch (kind) {
-    case "babysit_pr":
-    case "answer_pr_question":
-      return "/prs";
-    case "evaluate_issue":
-    case "verify_issue":
-    case "work_issue":
-      return "/issues";
-    case "process_release_run":
-      return "/releases";
-    case "sync_watched_repos":
-    case "heal_deployment":
-    case "generate_social_changelog":
-    default:
-      return null;
-  }
-}
-
 function ActivityRow({ item, accent, leadingIcon, timeRef }: {
   item: ActivityItem;
   accent?: "destructive" | "warning" | "neutral";
@@ -70,7 +52,7 @@ function ActivityRow({ item, accent, leadingIcon, timeRef }: {
   timeRef?: "queuedAt" | "startedAt" | "updatedAt";
 }) {
   const [, setLocation] = useLocation();
-  const route = activityTargetRoute(item.kind);
+  const route = getActivityTargetRoute(item.kind);
   const timestamp = timeRef === "queuedAt"
     ? item.queuedAt
     : timeRef === "startedAt"
@@ -81,8 +63,8 @@ function ActivityRow({ item, accent, leadingIcon, timeRef }: {
   const detail = formatActivityDetail(item.detail);
 
   const labelClass = accent === "destructive"
-    ? "inline-flex items-center gap-1 truncate text-[12px] font-medium text-destructive"
-    : "inline-flex items-center gap-1 truncate text-[12px] text-foreground";
+    ? "inline-flex items-center gap-1 truncate text-body font-medium text-destructive"
+    : "inline-flex items-center gap-1 truncate text-body text-foreground";
 
   const handleNavigate = () => {
     if (!route) return;
@@ -121,21 +103,21 @@ function ActivityRow({ item, accent, leadingIcon, timeRef }: {
           {leadingIcon}
           {label}
         </span>
-        <span className="font-mono text-[10px] text-muted-foreground">{formatRelative(timestamp)}</span>
+        <span className="font-mono text-label text-muted-foreground">{formatRelative(timestamp)}</span>
       </div>
       {detail && (
-        <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{detail}</div>
+        <div className="mt-0.5 truncate text-label text-muted-foreground">{detail}</div>
       )}
       {errorMessage && (
         <div
           title={errorMessage}
-          className="mt-1 line-clamp-2 break-words text-[11px] leading-snug text-destructive/85"
+          className="mt-1 line-clamp-2 break-words text-label leading-snug text-destructive/85"
         >
           {errorMessage}
         </div>
       )}
       {(route || item.targetUrl) && (
-        <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground">
+        <div className="mt-1 flex flex-wrap items-center gap-2 text-label uppercase tracking-wider text-muted-foreground">
           {route && (
             <span className="inline-flex items-center gap-1 text-primary">
               open {route === "/prs" ? "PR" : route === "/issues" ? "issue" : "page"} →
@@ -225,16 +207,16 @@ function KpiCell({
         aria-label="Jump to failed activity"
         className={`${baseClass} text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring`}
       >
-        <div className="text-[10px] font-medium uppercase tracking-wider opacity-80">{label}</div>
-        <div className="font-mono text-xl leading-none">{value}</div>
+        <div className="text-label font-medium uppercase tracking-wider opacity-80">{label}</div>
+        <div className="font-mono text-display leading-none">{value}</div>
       </button>
     );
   }
 
   return (
     <div data-testid={testId} className={baseClass}>
-      <div className="text-[10px] font-medium uppercase tracking-wider opacity-80">{label}</div>
-      <div className="font-mono text-xl leading-none">{value}</div>
+      <div className="text-label font-medium uppercase tracking-wider opacity-80">{label}</div>
+      <div className="font-mono text-display leading-none">{value}</div>
     </div>
   );
 }
@@ -249,7 +231,7 @@ function RepoCard({ stats }: { stats: RepoStats }) {
       chip={(
         <Link
           href={linkHref}
-          className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground underline decoration-border underline-offset-2 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+          className="font-mono text-label uppercase tracking-wider text-muted-foreground underline decoration-border underline-offset-2 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
         >
           open →
         </Link>
@@ -257,7 +239,7 @@ function RepoCard({ stats }: { stats: RepoStats }) {
     >
       <div className="space-y-2 px-3 py-2.5">
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider text-muted-foreground">
+          <span className="inline-flex items-center gap-1 text-label uppercase tracking-wider text-muted-foreground">
             <GitPullRequest className="h-3 w-3" /> PRs
           </span>
           <StatusChip tone="neutral" label={`${prCounts.total} total`} />
@@ -275,7 +257,7 @@ function RepoCard({ stats }: { stats: RepoStats }) {
           )}
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider text-muted-foreground">
+          <span className="inline-flex items-center gap-1 text-label uppercase tracking-wider text-muted-foreground">
             <ListTodo className="h-3 w-3" /> Issues
           </span>
           <StatusChip tone="neutral" label={`${issueCount} open`} />
@@ -299,11 +281,11 @@ function DashboardActivityPanel({
           title="Failed"
           tone={activities.failed.length > 0 ? "destructive" : "neutral"}
           testId="dashboard-activity-failed"
-          chip={<span className="font-mono text-[10px] text-muted-foreground">{activities.failed.length}</span>}
+          chip={<span className="font-mono text-label text-muted-foreground">{activities.failed.length}</span>}
         >
           <div className="max-h-72 overflow-y-auto">
             {activities.failed.length === 0 ? (
-              <div className="px-3 py-2 text-[12px] text-muted-foreground">No failures.</div>
+              <div className="px-3 py-2 text-body text-muted-foreground">No failures.</div>
             ) : (
               activities.failed.slice(0, 12).map((item) => (
                 <ActivityRow
@@ -322,11 +304,11 @@ function DashboardActivityPanel({
         title="In progress"
         tone={activities.inProgress.length > 0 ? "warning" : "neutral"}
         testId="dashboard-activity-in-progress"
-        chip={<span className="font-mono text-[10px] text-muted-foreground">{activities.inProgress.length}</span>}
+        chip={<span className="font-mono text-label text-muted-foreground">{activities.inProgress.length}</span>}
       >
         <div className="max-h-48 overflow-y-auto">
           {activities.inProgress.length === 0 ? (
-            <div className="px-3 py-2 text-[12px] text-muted-foreground">{idleReason ?? "No active jobs."}</div>
+            <div className="px-3 py-2 text-body text-muted-foreground">{idleReason ?? "No active jobs."}</div>
           ) : (
             activities.inProgress.slice(0, 8).map((item) => (
               <ActivityRow
@@ -343,11 +325,11 @@ function DashboardActivityPanel({
       <DetailPanel
         title="Queued"
         testId="dashboard-activity-queued"
-        chip={<span className="font-mono text-[10px] text-muted-foreground">{activities.queued.length}</span>}
+        chip={<span className="font-mono text-label text-muted-foreground">{activities.queued.length}</span>}
       >
         <div className="max-h-48 overflow-y-auto">
           {activities.queued.length === 0 ? (
-            <div className="px-3 py-2 text-[12px] text-muted-foreground">{idleReason ? "No work is queued." : "Queue is empty."}</div>
+            <div className="px-3 py-2 text-body text-muted-foreground">{idleReason ? "No work is queued." : "Queue is empty."}</div>
           ) : (
             activities.queued.slice(0, 8).map((item) => (
               <ActivityRow key={item.id} item={item} timeRef="queuedAt" />
@@ -463,7 +445,7 @@ export default function Dashboard() {
 
           <div className="grid gap-4 lg:grid-cols-[1fr_24rem]">
             <section aria-label="Repository overview">
-              <div className="border-b border-border pb-2 text-[11px] uppercase tracking-wider text-muted-foreground">
+              <div className="border-b border-border pb-2 text-label uppercase tracking-wider text-muted-foreground">
                 Repositories
                 {watchedRepos.length > 0 && (
                   <span className="ml-2 font-mono text-foreground/80">({watchedRepos.length})</span>
@@ -478,13 +460,13 @@ export default function Dashboard() {
               ) : watchedRepos.length === 0 ? (
                 <div
                   data-testid="dashboard-empty-repos"
-                  className="mt-3 flex flex-col items-start gap-2 rounded-md border border-dashed border-border bg-muted/10 px-4 py-6 text-[12px] text-muted-foreground"
+                  className="mt-3 flex flex-col items-start gap-2 rounded-md border border-dashed border-border bg-muted/10 px-4 py-6 text-body text-muted-foreground"
                 >
                   <AlertTriangle className="h-4 w-4 text-warning-foreground" />
                   <div>No repositories are being watched yet.</div>
                   <Link
                     href="/settings"
-                    className="text-[11px] uppercase tracking-wider text-primary underline decoration-border underline-offset-2 hover:text-primary/90"
+                    className="text-label uppercase tracking-wider text-primary underline decoration-border underline-offset-2 hover:text-primary/90"
                   >
                     Add a repo in settings →
                   </Link>
@@ -499,7 +481,7 @@ export default function Dashboard() {
             </section>
 
             <aside aria-label="Activity">
-              <div className="border-b border-border pb-2 text-[11px] uppercase tracking-wider text-muted-foreground">
+              <div className="border-b border-border pb-2 text-label uppercase tracking-wider text-muted-foreground">
                 Activity
               </div>
               <div className="mt-3">

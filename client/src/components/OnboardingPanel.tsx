@@ -156,7 +156,7 @@ export function getOnboardingPanelState(status: OnboardingStatus) {
 
 function InlineCode({ children }: { children: string }) {
   return (
-    <code className="rounded-md border border-border bg-muted/30 px-1 py-0.5 text-[11px] font-mono">
+    <code className="rounded-md border border-border bg-muted/30 px-1 py-0.5 text-label font-mono">
       {children}
     </code>
   );
@@ -165,10 +165,10 @@ function InlineCode({ children }: { children: string }) {
 function Step({ number, children }: { number: number; children: ReactNode }) {
   return (
     <div className="flex gap-2.5">
-      <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center border border-border text-[10px] text-muted-foreground">
+      <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center border border-border text-label text-muted-foreground">
         {number}
       </span>
-      <div className="flex-1 text-[12px] leading-relaxed">{children}</div>
+      <div className="flex-1 text-body leading-relaxed">{children}</div>
     </div>
   );
 }
@@ -185,17 +185,17 @@ function StepCard({
   return (
     <div className={`border px-3 py-3 ${step.complete ? "border-border bg-background/60" : "border-warning-border bg-warning-muted"}`}>
       <div className="flex gap-3">
-        <span className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center border text-[10px] ${step.complete ? "border-border text-foreground" : "border-warning-border text-warning-foreground"}`}>
+        <span className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center border text-label ${step.complete ? "border-border text-foreground" : "border-warning-border text-warning-foreground"}`}>
           {step.complete ? "✓" : index}
         </span>
         <div className="min-w-0 flex-1 space-y-1.5">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[11px] font-medium uppercase tracking-wider">{step.title}</span>
-            <span className={`border px-1.5 py-0 text-[10px] uppercase tracking-wider ${step.complete ? "border-border text-muted-foreground" : "border-warning-border text-warning-foreground"}`}>
+            <span className="text-label font-medium uppercase tracking-wider">{step.title}</span>
+            <span className={`border px-1.5 py-0 text-label uppercase tracking-wider ${step.complete ? "border-border text-muted-foreground" : "border-warning-border text-warning-foreground"}`}>
               {step.complete ? "done" : "next"}
             </span>
           </div>
-          <p className="text-[12px] text-muted-foreground">{step.description}</p>
+          <p className="text-body text-muted-foreground">{step.description}</p>
           {children}
         </div>
       </div>
@@ -334,11 +334,11 @@ export function OnboardingPanel() {
           className="flex items-center gap-2 text-left"
         >
           <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-foreground" />
-          <span className="text-[11px] font-medium uppercase tracking-wider">
+          <span className="text-label font-medium uppercase tracking-wider">
             Getting started
           </span>
-          <span className="text-[11px] text-muted-foreground">{summary}</span>
-          <span className="text-[10px] text-muted-foreground">{expanded ? "▲" : "▼"}</span>
+          <span className="text-label text-muted-foreground">{summary}</span>
+          <span className="text-label text-muted-foreground">{expanded ? "▲" : "▼"}</span>
         </button>
         <button
           onClick={() => {
@@ -347,7 +347,7 @@ export function OnboardingPanel() {
             }
             setDismissedKey(dismissalKey);
           }}
-          className="text-[10px] uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
+          className="text-label uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
         >
           dismiss
         </button>
@@ -356,10 +356,10 @@ export function OnboardingPanel() {
       {expanded && (
         <div className="border-t border-border px-4 py-4 space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
+            <div className="text-label uppercase tracking-wider text-muted-foreground">
               Setup checklist
             </div>
-            <div className="text-[11px] text-muted-foreground">
+            <div className="text-label text-muted-foreground">
               {completedCount} of {steps.length} complete
             </div>
           </div>
@@ -370,9 +370,9 @@ export function OnboardingPanel() {
                 {step.id === "github" && !step.complete && (
                   <div className="space-y-2 pt-1">
                     {displayStatus.githubError && !isTransientGitHubWarning(displayStatus.githubError) && (
-                      <p className="text-[12px] text-destructive">{displayStatus.githubError}</p>
+                      <p className="text-body text-destructive">{displayStatus.githubError}</p>
                     )}
-                    <div className="space-y-1.5 text-[12px] text-muted-foreground">
+                    <div className="space-y-1.5 text-body text-muted-foreground">
                       <Step number={1}>
                         Run <InlineCode>gh auth login</InlineCode> on this machine, set <InlineCode>GITHUB_TOKEN</InlineCode>, or add a saved token in <Link href="/settings" className="underline underline-offset-2">settings</Link>.
                       </Step>
@@ -384,7 +384,7 @@ export function OnboardingPanel() {
                 )}
 
                 {step.id === "repo" && !step.complete && (
-                  <div className="pt-1 text-[12px] text-muted-foreground">
+                  <div className="pt-1 text-body text-muted-foreground">
                     The left sidebar is the real entry point. Use <span className="text-foreground">Add</span> for a PR URL or <span className="text-foreground">Watch</span> for an <InlineCode>owner/repo</InlineCode> slug, then choose whether that watched repo should track only your PRs or your whole team.
                   </div>
                 )}
@@ -392,10 +392,10 @@ export function OnboardingPanel() {
                 {step.id === "workflow" && !step.complete && accessibleRepos.length > 0 && (
                   <div className="space-y-2 pt-1">
                     <div className="space-y-2 border border-border bg-muted/40 px-3 py-2">
-                      <p className="text-[12px] text-muted-foreground">
+                      <p className="text-body text-muted-foreground">
                         These are GitHub Actions that run on every PR and post review comments. PatchDeck reads those comments, decides which need code changes, and queues safe fixes. Pick whichever review tool fits your stack.
                       </p>
-                      <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px]">
+                      <div className="flex flex-wrap gap-x-3 gap-y-1 text-label">
                         {REVIEW_PROVIDER_GUIDES.map((provider) => (
                           <a
                             key={provider.href}
@@ -416,11 +416,11 @@ export function OnboardingPanel() {
                             href={`https://github.com/${repoStatus.repo}`}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="block truncate text-[11px] font-medium underline underline-offset-2"
+                            className="block truncate text-label font-medium underline underline-offset-2"
                           >
                             {repoStatus.repo}
                           </a>
-                          <p className="text-[11px] text-muted-foreground">
+                          <p className="text-label text-muted-foreground">
                             No reviewer Action installed on this repo yet.
                           </p>
                         </div>
@@ -435,7 +435,7 @@ export function OnboardingPanel() {
                               type="button"
                               onClick={() => installWorkflowMutation.mutate({ repo: repoStatus.repo, tool })}
                               disabled={installWorkflowMutation.isPending || globalDrainMode}
-                              className="border border-border px-2 py-1 text-[10px] uppercase tracking-wider transition-colors hover:bg-foreground hover:text-background disabled:opacity-40"
+                              className="border border-border px-2 py-1 text-label uppercase tracking-wider transition-colors hover:bg-foreground hover:text-background disabled:opacity-40"
                             >
                               {globalDrainMode ? "Paused" : isPending ? "Adding…" : `Add ${REVIEW_TOOL_LABELS[tool]} Action`}
                             </button>
@@ -450,10 +450,10 @@ export function OnboardingPanel() {
                 {step.id === "workflow" && step.complete && reposWithReview.length > 0 && (
                   <div className="space-y-2 pt-1">
                     <div className="space-y-2 border border-border bg-muted/40 px-3 py-2">
-                      <p className="text-[12px] text-muted-foreground">
+                      <p className="text-body text-muted-foreground">
                         These are GitHub Actions that run on every PR and post review comments. PatchDeck reads those comments, decides which need code changes, and queues safe fixes. Pick whichever review tool fits your stack.
                       </p>
-                      <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px]">
+                      <div className="flex flex-wrap gap-x-3 gap-y-1 text-label">
                         {REVIEW_PROVIDER_GUIDES.map((provider) => (
                           <a
                             key={provider.href}
@@ -475,7 +475,7 @@ export function OnboardingPanel() {
                         return (
                           <span
                             key={repoStatus.repo}
-                            className="border border-border px-2 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground"
+                            className="border border-border px-2 py-0.5 text-label uppercase tracking-wider text-muted-foreground"
                           >
                             {repoStatus.repo} · {detectedTools}
                           </span>
@@ -490,13 +490,13 @@ export function OnboardingPanel() {
 
           {inaccessibleRepos.length > 0 && !isTransientGitHubWarning(displayStatus.githubError) && (
             <div className="space-y-3 border border-destructive/30 bg-destructive/5 px-3 py-3">
-              <div className="text-[11px] font-medium uppercase tracking-wider text-destructive">
+              <div className="text-label font-medium uppercase tracking-wider text-destructive">
                 Repository access issues
               </div>
               <div className="space-y-2">
                 {inaccessibleRepos.map((repoStatus) => (
                   <div key={repoStatus.repo} className="space-y-1">
-                    <div className="text-[11px] font-medium">
+                    <div className="text-label font-medium">
                       <a
                         href={`https://github.com/${repoStatus.repo}`}
                         target="_blank"
@@ -506,7 +506,7 @@ export function OnboardingPanel() {
                         {repoStatus.repo}
                       </a>
                     </div>
-                    <p className="text-[12px] text-destructive">
+                    <p className="text-body text-destructive">
                       Cannot access this repository: {repoStatus.error ?? "unknown error"}
                     </p>
                   </div>

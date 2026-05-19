@@ -787,6 +787,34 @@ export class MemStorage implements IStorage {
     return this.cloneBackgroundJob(updated);
   }
 
+  async deferBackgroundJob(
+    id: string,
+    leaseToken: string,
+    error: string,
+    availableAt: string,
+    updatedAt: string,
+  ): Promise<BackgroundJob | undefined> {
+    const existing = this.backgroundJobs.get(id);
+    if (!existing || existing.status !== "leased" || existing.leaseToken !== leaseToken) {
+      return undefined;
+    }
+
+    const updated = applyBackgroundJobUpdate(existing, {
+      status: "queued",
+      availableAt,
+      leaseOwner: null,
+      leaseToken: null,
+      leaseExpiresAt: null,
+      heartbeatAt: null,
+      attemptCount: Math.max(0, existing.attemptCount - 1),
+      lastError: error,
+      completedAt: null,
+      updatedAt,
+    });
+    this.backgroundJobs.set(id, updated);
+    return this.cloneBackgroundJob(updated);
+  }
+
   async cancelBackgroundJob(
     id: string,
     leaseToken: string,

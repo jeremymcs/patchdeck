@@ -32,8 +32,8 @@ export function DetailHeader({
   failed = false,
 }: DetailHeaderProps) {
   const titleClass = titleMultiline
-    ? "line-clamp-2 break-words text-[15px] font-semibold leading-snug tracking-tight"
-    : "line-clamp-2 break-words text-[15px] font-semibold leading-snug tracking-tight sm:block sm:truncate";
+    ? "line-clamp-2 break-words text-title font-semibold leading-snug tracking-tight"
+    : "line-clamp-2 break-words text-title font-semibold leading-snug tracking-tight sm:block sm:truncate";
   const accentClass = accentTone ? ` border-t-2 ${toneHeaderAccentClass(accentTone)}` : "";
   const failedBg = toneFailedBgClass(failed);
 
@@ -52,7 +52,7 @@ export function DetailHeader({
                 href={externalLink.href}
                 target="_blank"
                 rel="noreferrer noopener"
-                className="inline-flex max-w-full shrink-0 items-center gap-1 font-mono text-[11px] text-muted-foreground underline decoration-border underline-offset-2 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+                className="inline-flex max-w-full shrink-0 items-center gap-1 font-mono text-label text-muted-foreground underline decoration-border underline-offset-2 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
               >
                 <ExternalLink className="h-3 w-3" aria-hidden="true" />
                 <span className="min-w-0 truncate">{externalLink.label}</span>

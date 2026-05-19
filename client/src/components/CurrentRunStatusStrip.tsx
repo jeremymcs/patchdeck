@@ -35,9 +35,9 @@ export function CurrentRunStatusStrip({ run, testId }: CurrentRunStatusStripProp
   return (
     <div
       data-testid={testId}
-      className={`mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 border px-3 py-2 text-[11px] ${statusClass(run.status)}`}
+      className={`mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 border px-3 py-2 text-label ${statusClass(run.status)}`}
     >
-      <span className="inline-flex items-center gap-1 text-[10px] font-medium uppercase tracking-wider">
+      <span className="inline-flex items-center gap-1 text-label font-medium uppercase tracking-wider">
         <StatusIcon status={run.status} />
         {formatCurrentRunStatus(run.status)}
       </span>

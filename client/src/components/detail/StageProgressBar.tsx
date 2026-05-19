@@ -53,7 +53,7 @@ export function StageProgressBar({
           );
         })}
       </div>
-      <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+      <span className="font-mono text-label uppercase tracking-wider text-muted-foreground">
         {doneCount}/{stages.length}
       </span>
     </div>
