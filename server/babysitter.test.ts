@@ -7953,6 +7953,81 @@ test("babysitPR falls back to status-task fixes after CI healing escalates", asy
   assert.ok(!logs.some((log) => log.phase === "evaluate.status" && log.message.includes("Skipping legacy status-task evaluation")));
 });
 
+test("babysitPR clears stale failed test state when current checks pass", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig({ autoUpdateDocs: false });
+  const pr = await storage.addPR({
+    number: 51,
+    title: "Already green",
+    repo: "alex-morgan-o/lolodex",
+    branch: "feature/already-green",
+    author: "octocat",
+    url: "https://github.com/alex-morgan-o/lolodex/pull/51",
+    status: "watching",
+    feedbackItems: [],
+    accepted: 0,
+    rejected: 0,
+    flagged: 0,
+    testsPassed: false,
+    lintPassed: null,
+    mergeableState: "clean",
+    lastChecked: null,
+  });
+  const backgroundJobQueue = new BackgroundJobQueue(storage);
+  const scheduledJobs: string[] = [];
+  const babysitter = new PRBabysitter(
+    storage,
+    {
+      ...makeWatcherGitHubService(),
+      fetchPullSummary: async () => makePullSummary(pr, {
+        headSha: "green-head",
+        headRef: pr.branch,
+        branch: pr.branch,
+        mergeableState: "clean",
+      }),
+      fetchCheckSnapshotsForRef: async (_octokit: unknown, _repo: unknown, prId: string, headSha: string) => [
+        makeCheckSnapshot({
+          prId,
+          sha: headSha,
+          status: "completed",
+          conclusion: "success",
+          description: "Check run success",
+        }),
+      ],
+      listFailingStatuses: async () => [],
+    },
+    {
+      resolveAgent: async () => "codex",
+      evaluateFixNecessityWithAgent: async () => {
+        throw new Error("green checks should not need agent evaluation");
+      },
+      applyFixesWithAgent: async () => {
+        throw new Error("green checks should not need a worktree");
+      },
+      runCommand: async () => {
+        throw new Error("green checks should not need git commands");
+      },
+    },
+    undefined,
+    async (kind, targetId, dedupeKey, payload, options) => {
+      scheduledJobs.push(kind);
+      return backgroundJobQueue.enqueue(kind, targetId, dedupeKey, payload, options);
+    },
+  );
+
+  await babysitter.babysitPR(pr.id, "codex");
+
+  const updated = await storage.getPR(pr.id);
+  const jobs = await storage.listBackgroundJobs({ kind: "babysit_pr" });
+  const logs = await storage.getLogs(pr.id);
+
+  assert.equal(updated?.testsPassed, true);
+  assert.equal(jobs.length, 0);
+  assert.deepEqual(scheduledJobs, []);
+  assert.ok(logs.some((log) => log.message.includes("Checked PR #51; no necessary fixes identified")));
+  assert.ok(!logs.some((log) => log.message.includes("queued follow-up monitoring")));
+});
+
 test("babysitPR reruns cancelled GitHub Actions checks and queues monitoring", async () => {
   const storage = new MemStorage();
   await storage.updateConfig({ autoUpdateDocs: false });

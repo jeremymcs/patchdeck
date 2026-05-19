@@ -1466,6 +1466,27 @@ function isRerunnableCancelledGitHubActionsSnapshot(snapshot: CheckSnapshot): bo
     && Boolean(snapshot.targetUrl?.includes("/actions/runs/"));
 }
 
+function isPassingCheckSnapshot(snapshot: CheckSnapshot): boolean {
+  if (snapshot.provider === "github.commit_status") {
+    return snapshot.status === "success";
+  }
+
+  if (snapshot.provider === "github.check_run") {
+    return snapshot.status === "completed"
+      && (snapshot.conclusion === "success" || snapshot.conclusion === "neutral" || snapshot.conclusion === "skipped");
+  }
+
+  return false;
+}
+
+function getObservedTestsPassed(checkSnapshots: CheckSnapshot[]): true | null {
+  if (checkSnapshots.length > 0 && checkSnapshots.every(isPassingCheckSnapshot)) {
+    return true;
+  }
+
+  return null;
+}
+
 function summarizeGitHubActionsReruns(reruns: GitHubActionsRerun[]): string {
   return reruns
     .map((rerun) => `run ${rerun.runId} (${rerun.contexts.join(", ")})`)
@@ -3601,6 +3622,17 @@ export class PRBabysitter {
             observedAt,
           }));
       const failingCheckSnapshots = checkSnapshots.filter((snapshot) => isFailingCheckSnapshot(snapshot));
+      const observedTestsPassed = getObservedTestsPassed(checkSnapshots);
+      if (observedTestsPassed !== null && pr.testsPassed !== observedTestsPassed) {
+        const updatedPr = await this.storage.updatePR(pr.id, {
+          testsPassed: observedTestsPassed,
+          prStage: "tests",
+          lastChecked: new Date().toISOString(),
+        });
+        if (updatedPr) {
+          pr = updatedPr;
+        }
+      }
       const classifiedHealingFailures = classifyCIFailures(failingCheckSnapshots);
       const healableHealingFailures = classifiedHealingFailures.filter((failure) => failure.classification === "healable_in_branch");
       const blockedHealingFailures = classifiedHealingFailures.filter((failure) => failure.classification === "blocked_external");
