@@ -1362,20 +1362,6 @@ export default function Dashboard() {
     },
   });
 
-  const updateConfigMutation = useMutation({
-    mutationFn: async (updates: Partial<Config>) => {
-      const res = await apiRequest("PATCH", "/api/config", updates);
-      return res.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/config"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/onboarding/status"] });
-    },
-    onError: (error) => {
-      showMutationError("Could not update settings", error);
-    },
-  });
-
   const clearFailedActivitiesMutation = useMutation({
     mutationFn: async () => {
       const res = await apiRequest("DELETE", "/api/activities/failed");
@@ -1431,23 +1417,7 @@ export default function Dashboard() {
         )}
         actions={(
           <>
-            <label htmlFor="dashboard-coding-agent" className="text-label uppercase tracking-wider text-muted-foreground">Agent</label>
-            <select
-              id="dashboard-coding-agent"
-              value={config?.codingAgent ?? "codex"}
-              onChange={(e) => {
-                const newAgent = e.target.value as Config["codingAgent"];
-                updateConfigMutation.mutate({
-                  codingAgent: newAgent,
-                });
-              }}
-              disabled={updateConfigMutation.isPending}
-              data-testid="select-coding-agent"
-              className="cursor-pointer rounded-md border border-border bg-transparent px-2 py-1 text-label transition-colors focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <option value="codex">codex</option>
-              <option value="claude">claude</option>
-            </select>
+
             {activeErrorCount > 0 && (
               <button
                 type="button"
