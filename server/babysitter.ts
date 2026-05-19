@@ -274,6 +274,10 @@ function maxPrStage(current: PRStage | undefined, candidate: PRStage): PRStage {
   return currentIdx >= candidateIdx ? current : candidate;
 }
 
+function isClosedPullSummary(pullSummary: GitHubPullSummary): boolean {
+  return pullSummary.merged || Boolean(pullSummary.mergedAt || pullSummary.closedAt);
+}
+
 function countDecisions(items: FeedbackItem[]): {
   accepted: number;
   rejected: number;
@@ -1931,6 +1935,69 @@ export class PRBabysitter {
     }
   }
 
+  private async archivePRFromPullSummary(
+    pr: PR,
+    pullSummary: GitHubPullSummary,
+    options?: {
+      runId?: string | null;
+      phase?: string | null;
+      feedback?: {
+        items: FeedbackItem[];
+        accepted: number;
+        rejected: number;
+        flagged: number;
+      };
+    },
+  ): Promise<PR | undefined> {
+    const now = this.now().toISOString();
+    const updates: Partial<PR> = {
+      number: pullSummary.number,
+      title: pullSummary.title,
+      body: pullSummary.body,
+      bodyHtml: pullSummary.bodyHtml,
+      repo: pullSummary.repoFullName,
+      branch: pullSummary.branch,
+      author: pullSummary.author,
+      url: pullSummary.url,
+      mergeableState: pullSummary.mergeableState,
+      status: "archived",
+      prStage: "done",
+      lastChecked: now,
+      lastSyncAttemptedAt: now,
+      lastSyncSucceededAt: now,
+      lastSyncError: null,
+    };
+
+    if (options?.feedback) {
+      updates.feedbackItems = options.feedback.items;
+      updates.accepted = options.feedback.accepted;
+      updates.rejected = options.feedback.rejected;
+      updates.flagged = options.feedback.flagged;
+    }
+
+    const archived = await this.storage.updatePR(pr.id, updates);
+    await this.supersedeActiveHealingSessionsForArchivedPr(pr.id);
+    await this.storage.addLog(
+      pr.id,
+      "info",
+      pullSummary.merged
+        ? `PR #${pr.number} was merged on GitHub — archived`
+        : `PR #${pr.number} is no longer open on GitHub — archived`,
+      {
+        runId: options?.runId ?? null,
+        phase: options?.phase ?? null,
+        metadata: {
+          merged: pullSummary.merged,
+          mergedAt: pullSummary.mergedAt,
+          closedAt: pullSummary.closedAt,
+          mergeCommitSha: pullSummary.mergeCommitSha,
+        },
+      },
+    );
+
+    return archived;
+  }
+
   getActiveRunCount(): number {
     return this.inProgress.size;
   }
@@ -2167,8 +2234,9 @@ export class PRBabysitter {
     let refreshedAuthor = pr.author;
     let refreshedUrl = pr.url;
     let refreshedMergeableState = pr.mergeableState;
+    let pullSummary: GitHubPullSummary | null = null;
     try {
-      const pullSummary = await this.github.fetchPullSummary(octokit, parsed);
+      pullSummary = await this.github.fetchPullSummary(octokit, parsed);
       refreshedTitle = pullSummary.title;
       refreshedBody = pullSummary.body;
       refreshedBodyHtml = pullSummary.bodyHtml;
@@ -2179,6 +2247,20 @@ export class PRBabysitter {
       refreshedMergeableState = pullSummary.mergeableState;
     } catch {
       // Non-fatal: keep existing PR metadata if the summary fetch fails.
+    }
+
+    if (pullSummary && isClosedPullSummary(pullSummary)) {
+      const archived = await this.archivePRFromPullSummary(pr, pullSummary, {
+        runId: options?.runId ?? null,
+        phase,
+        feedback: {
+          items: merged,
+          accepted: counters.accepted,
+          rejected: counters.rejected,
+          flagged: counters.flagged,
+        },
+      });
+      return archived ?? pr;
     }
 
     const candidateStage: PRStage = counters.accepted + counters.rejected + counters.flagged > 0
@@ -3318,6 +3400,36 @@ export class PRBabysitter {
         lastError: null,
       });
 
+      const prBeforeRun = await this.storage.getPR(prId);
+      if (!prBeforeRun) {
+        throw new Error("PR not found");
+      }
+      const parsedRepoBeforeRun = parseRepoSlug(prBeforeRun.repo);
+      if (!parsedRepoBeforeRun) {
+        throw new Error(`Invalid repository slug: ${prBeforeRun.repo}`);
+      }
+
+      const config = await this.storage.getConfig();
+      const octokit = await this.github.buildOctokit(config);
+      const preflightPullSummary = await this.github.fetchPullSummary(octokit, {
+        owner: parsedRepoBeforeRun.owner,
+        repo: parsedRepoBeforeRun.repo,
+        number: prBeforeRun.number,
+      });
+      if (isClosedPullSummary(preflightPullSummary)) {
+        await this.archivePRFromPullSummary(prBeforeRun, preflightPullSummary, {
+          runId,
+          phase: "run",
+        });
+        await updateRunRecord({
+          status: "completed",
+          phase: preflightPullSummary.merged ? "run.pr_merged" : "run.pr_closed",
+          initialHeadSha: preflightPullSummary.headSha || runRecord.initialHeadSha,
+          lastError: null,
+        });
+        return;
+      }
+
       await this.storage.updatePR(prId, {
         status: "processing",
         prStage: "applying",
@@ -3328,7 +3440,6 @@ export class PRBabysitter {
         metadata: { preferredAgent, recoveryMode },
       });
 
-      const config = await this.storage.getConfig();
       const selectedAgent = forcedResolvedAgent || preferredAgent;
       await this.ensureAgentHealthy(selectedAgent, [prId]);
 
@@ -3442,7 +3553,6 @@ export class PRBabysitter {
         }
       };
 
-      const octokit = await this.github.buildOctokit(config);
       const parsedPr: ParsedPRUrl = {
         owner: parsedRepo.owner,
         repo: parsedRepo.repo,

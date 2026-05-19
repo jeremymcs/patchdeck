@@ -115,3 +115,15 @@ test("buildPRReadinessChecks explains why a PR is not ready", () => {
   ]);
   assert.match(checks.find((check) => check.key === "comments")?.detail ?? "", /1 tracked feedback item/);
 });
+
+test("buildPRReadinessChecks reports queued automation instead of idle", () => {
+  const checks = buildPRReadinessChecks(makePr({ status: "error" }), {
+    label: "up next",
+    detail: "starts in ~5m",
+  });
+
+  const workState = checks.find((check) => check.key === "work-state");
+  assert.equal(workState?.label, "Automation queued");
+  assert.equal(workState?.passed, false);
+  assert.equal(workState?.detail, "starts in ~5m");
+});

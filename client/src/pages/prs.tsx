@@ -1270,7 +1270,7 @@ export default function Dashboard() {
   const selectedPRWatchEnabled = selectedPRSummary ? isPRWatchEnabled(selectedPRSummary) : true;
   const selectedFailedActivity = selectedPRSummary ? latestActivityForTarget(activities.failed, selectedPRSummary.id) : undefined;
   const selectedPRQueueStatus = selectedPRSummary ? queueStatusById.get(selectedPRSummary.id) ?? null : null;
-  const selectedPRErrorMessage = selectedPRSummary?.status === "error"
+  const selectedPRErrorMessage = selectedPRSummary?.status === "error" && !selectedPRQueueStatus
     ? selectedFailedActivity?.lastError ?? getPRFeedbackFailureReason(selectedPR) ?? "Automation stopped on this PR. Check the activity log for the full failure context."
     : null;
   const activeErrorCount = activities.failed.length + activities.warnings.length;
@@ -1291,7 +1291,7 @@ export default function Dashboard() {
     eligibleCount: eligiblePRCount,
     trackedLabel: "PR",
   });
-  const selectedPRReadinessChecks = selectedPR ? buildPRReadinessChecks(selectedPR) : [];
+  const selectedPRReadinessChecks = selectedPR ? buildPRReadinessChecks(selectedPR, selectedPRQueueStatus) : [];
 
   const applyMutation = useMutation({
     mutationFn: async (id: string) => {
@@ -1599,7 +1599,7 @@ export default function Dashboard() {
                   queueStatus={queueStatusById.get(pr.id) ?? null}
                   issueLink={issueLinkedPRByKey.get(prIssueLinkKey(pr.repo, pr.number)) ?? null}
                   failureMessage={
-                    pr.status === "error"
+                    pr.status === "error" && !queueStatusById.get(pr.id)
                       ? latestActivityForTarget(activities.failed, pr.id)?.lastError ?? getPRFeedbackFailureReason(pr)
                       : null
                   }
@@ -1613,6 +1613,7 @@ export default function Dashboard() {
           {selectedPR ? (
             <>
               {(() => {
+                const selectedPRFailed = selectedPR.status === "error" && !selectedPRQueueStatus;
                 const metaItems: MetaItem[] = [
                   { key: "status", content: <span>work: <span className="text-foreground">{formatPRWorkState(selectedPR.status, selectedPR.prStage)}</span></span> },
                   { key: "author", content: <span>author: <span className="text-foreground/80">{formatGitHubUsername(selectedPR.author)}</span></span> },
@@ -1647,7 +1648,7 @@ export default function Dashboard() {
               <DetailHeader
                 title={selectedPR.title}
                 accentTone="primary"
-                failed={selectedPR.status === "error"}
+                failed={selectedPRFailed}
                 stageBar={<StageProgressBar stages={buildPRStages(selectedPR)} testId="pr-stage-progress" />}
                 titleSuffix={(
                   <>

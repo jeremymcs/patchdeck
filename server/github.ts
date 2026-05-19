@@ -58,6 +58,10 @@ export type GitHubPullSummary = {
   baseSha: string;
   mergeable: boolean | null;
   mergeableState: string | null;
+  merged: boolean;
+  mergedAt: string | null;
+  closedAt: string | null;
+  mergeCommitSha: string | null;
 };
 
 export type GitHubIssueSummary = {
@@ -1563,6 +1567,10 @@ export async function fetchPullSummary(
     baseSha: pull.base?.sha || "",
     mergeable: typeof pull.mergeable === "boolean" ? pull.mergeable : null,
     mergeableState: typeof pull.mergeable_state === "string" ? pull.mergeable_state : null,
+    merged: Boolean(pull.merged_at),
+    mergedAt: pull.merged_at || null,
+    closedAt: pull.closed_at || null,
+    mergeCommitSha: pull.merge_commit_sha || null,
   };
 }
 
@@ -2304,6 +2312,10 @@ function mapPullToSummary(pull: GitHubPullListItem, repo: ParsedRepoSlug): GitHu
     baseSha: pull.base?.sha || "",
     mergeable: null,
     mergeableState: null,
+    merged: false,
+    mergedAt: null,
+    closedAt: null,
+    mergeCommitSha: null,
   };
 }
 

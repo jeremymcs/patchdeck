@@ -40,6 +40,8 @@ function makePullSummary(pr: { url: string }, overrides?: Record<string, unknown
   return {
     number: 106,
     title: "Verbose PR",
+    body: null,
+    bodyHtml: null,
     branch: "feature/verbose",
     author: "octocat",
     url: pr.url,
@@ -53,6 +55,10 @@ function makePullSummary(pr: { url: string }, overrides?: Record<string, unknown
     baseSha: "base123",
     mergeable: true as boolean | null,
     mergeableState: "clean" as string | null,
+    merged: false,
+    mergedAt: null,
+    closedAt: null,
+    mergeCommitSha: null,
     ...overrides,
   };
 }
@@ -5735,6 +5741,92 @@ test("babysitPR logs metadata when skipping a duplicate in-progress run", async 
   assert.equal(typeof skipLog?.metadata?.activeRunId, "string");
   assert.equal(typeof skipLog?.metadata?.activeStartedAt, "string");
   assert.equal(typeof skipLog?.metadata?.activeAgeMs, "number");
+});
+
+test("runQueuedBabysitPR archives merged PRs instead of running or rescheduling work", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig({ autoUpdateDocs: false });
+  const queue = new BackgroundJobQueue(storage);
+  const existingItem = makeFeedbackItem();
+  const mergedAt = "2026-05-18T18:36:32.000Z";
+  const pr = await storage.addPR({
+    number: 6300,
+    title: "Merged PR",
+    repo: "alex-morgan-o/lolodex",
+    branch: "feature/merged",
+    author: "octocat",
+    url: "https://github.com/alex-morgan-o/lolodex/pull/6300",
+    status: "watching",
+    feedbackItems: [existingItem],
+    accepted: 0,
+    rejected: 0,
+    flagged: 0,
+    testsPassed: null,
+    lintPassed: null,
+    mergeableState: "blocked",
+    lastChecked: null,
+  });
+
+  const babysitter = new PRBabysitter(
+    storage,
+    makeWatcherGitHubService({
+      fetchFeedbackItemsForPR: async () => {
+        throw new Error("feedback sync should not run for an already merged PR");
+      },
+      fetchPullSummary: async () => makePullSummary(pr, {
+        number: 6300,
+        title: "Merged PR",
+        branch: "feature/merged",
+        headRef: "feature/merged",
+        headSha: "merged-head",
+        mergeable: false,
+        mergeableState: "blocked",
+        merged: true,
+        mergedAt,
+        closedAt: mergedAt,
+        mergeCommitSha: "merge123",
+      }),
+      listFailingStatuses: async () => {
+        throw new Error("CI status checks should not run for an already merged PR");
+      },
+    }),
+    {
+      checkAgentHealth: async () => {
+        throw new Error("agent health should not be checked for an already merged PR");
+      },
+      resolveAgent: async () => {
+        throw new Error("agent should not resolve for an already merged PR");
+      },
+      ciPollIntervalMs: 0,
+      evaluateFixNecessityWithAgent: async () => {
+        throw new Error("agent should not evaluate an already merged PR");
+      },
+      applyFixesWithAgent: async () => {
+        throw new Error("agent should not apply fixes to an already merged PR");
+      },
+      runCommand: makeGitRunCommand(),
+    },
+    undefined,
+    (kind, targetId, dedupeKey, payload, options) => queue.enqueue(kind, targetId, dedupeKey, payload, options),
+  );
+
+  await babysitter.runQueuedBabysitPR(pr.id, "claude");
+
+  const updated = await storage.getPR(pr.id);
+  assert.equal(updated?.status, "archived");
+  assert.equal(updated?.prStage, "done");
+  assert.equal(updated?.mergeableState, "blocked");
+
+  const [run] = await storage.listAgentRuns({ prId: pr.id });
+  assert.equal(run?.status, "completed");
+  assert.equal(run?.phase, "run.pr_merged");
+  assert.equal(run?.initialHeadSha, "merged-head");
+
+  const queuedJobs = await storage.listBackgroundJobs({ kind: "babysit_pr" });
+  assert.equal(queuedJobs.length, 0);
+
+  const logs = await storage.getLogs(pr.id);
+  assert.ok(logs.some((log) => log.message.includes("was merged on GitHub — archived")));
 });
 
 test("runQueuedBabysitPR rejects when evaluation auth fails after recording the run failure", async () => {

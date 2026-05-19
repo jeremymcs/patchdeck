@@ -8,6 +8,11 @@ export type PRReadinessCheck = {
   detail: string;
 };
 
+export type PRReadinessWorkStatus = {
+  label: string;
+  detail: string | null;
+} | null;
+
 export function isGitHubReadyToMerge(pr: Pick<PRSummary, "mergeableState">): boolean {
   return pr.mergeableState === "clean";
 }
@@ -37,18 +42,26 @@ export function isPRDetailReadyToMerge(
 
 export function buildPRReadinessChecks(
   pr: Pick<PR, "status" | "testsPassed" | "lintPassed" | "mergeableState" | "feedbackItems">,
+  workStatus: PRReadinessWorkStatus = null,
 ): PRReadinessCheck[] {
   const feedbackResolved = arePRFeedbackItemsResolved(pr.feedbackItems);
   const unresolvedCount = pr.feedbackItems.filter((item) =>
     item.status !== "resolved" && item.status !== "rejected"
   ).length;
+  const workActive = pr.status === "processing" || workStatus !== null;
 
   return [
     {
       key: "work-state",
-      label: "Automation idle",
-      passed: pr.status !== "processing",
-      detail: pr.status === "processing" ? "A work run is still active." : "No active work run.",
+      label: workStatus?.label === "running"
+        ? "Automation running"
+        : workStatus
+          ? "Automation queued"
+          : "Automation idle",
+      passed: !workActive,
+      detail: workStatus
+        ? workStatus.detail ?? "A work run is queued."
+        : pr.status === "processing" ? "A work run is still active." : "No active work run.",
     },
     {
       key: "tests",
