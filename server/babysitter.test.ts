@@ -1148,6 +1148,17 @@ test("syncAndBabysitTrackedRepos enqueues no babysit_pr jobs while the core budg
     await babysitter.syncAndBabysitTrackedRepos();
     const jobs = await storage.listBackgroundJobs({ kind: "babysit_pr", status: "queued" });
     assert.equal(jobs.length, 0, "no new babysit jobs are enqueued while the budget is tight");
+    const deferredSweeps = await storage.listBackgroundJobs({ kind: "sync_watched_repos", status: "queued" });
+    assert.equal(deferredSweeps.length, 1, "budget pressure schedules a later backfill");
+    assert.equal(deferredSweeps[0]?.payload.deferredReason, "core budget reserve");
+    assert.equal(
+      deferredSweeps[0]?.payload.activityDetail,
+      "Waiting for GitHub core budget before refilling PR work queue",
+    );
+    assert.ok(
+      new Date(deferredSweeps[0]?.availableAt ?? 0).getTime() - Date.now() > 50_000,
+      "budget backfill should use a longer cooldown than normal batch pacing",
+    );
   } finally {
     clearRateLimitStateForTests();
   }

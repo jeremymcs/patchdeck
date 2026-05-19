@@ -1842,6 +1842,10 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
     }
 
     if (job.kind === "babysit_pr") {
+      if (job.payload.monitorFollowUp === true && payloadDescription) {
+        return normalizeActivityDescription(payloadDescription);
+      }
+
       const pr = context.prsById.get(job.targetId);
       if (pr) {
         return {

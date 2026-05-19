@@ -41,6 +41,7 @@ import { prStatusTone, toneRailClass } from "@/lib/statusTones";
 import { ACTIVITY_POLL_INTERVAL_MS, getUiPollIntervalMs } from "@/lib/polling";
 import { getActivityIdleReason } from "@/lib/activityIdle";
 import { formatPRWorkState } from "@/lib/statusCopy";
+import { PR_LIST_STALE_MS, readCachedPRs, writeCachedPRs } from "@/lib/prListCache";
 
 type GitHubRateLimitState = {
   limited: boolean;
@@ -1143,16 +1144,38 @@ export default function Dashboard() {
     refetchInterval: 5000,
   });
   const uiPollIntervalMs = getUiPollIntervalMs(config);
+  const cachedActivePRs = useMemo(() => readCachedPRs("active"), []);
+  const cachedArchivedPRs = useMemo(() => readCachedPRs("archived"), []);
 
-  const { data: prs = [], isLoading } = useQuery<PRSummary[]>({
+  const activePRsQuery = useQuery<PRSummary[]>({
     queryKey: ["/api/prs"],
+    initialData: cachedActivePRs?.data,
+    initialDataUpdatedAt: cachedActivePRs?.updatedAt,
+    staleTime: PR_LIST_STALE_MS,
     refetchInterval: 3000,
   });
 
-  const { data: archivedPRs = [], isLoading: isLoadingArchived } = useQuery<PRSummary[]>({
+  const archivedPRsQuery = useQuery<PRSummary[]>({
     queryKey: ["/api/prs/archived"],
+    initialData: cachedArchivedPRs?.data,
+    initialDataUpdatedAt: cachedArchivedPRs?.updatedAt,
+    staleTime: PR_LIST_STALE_MS,
     refetchInterval: 10000,
   });
+  const { data: prs = [], isLoading } = activePRsQuery;
+  const { data: archivedPRs = [], isLoading: isLoadingArchived } = archivedPRsQuery;
+
+  useEffect(() => {
+    if (activePRsQuery.status === "success") {
+      writeCachedPRs("active", activePRsQuery.data);
+    }
+  }, [activePRsQuery.status, activePRsQuery.data]);
+
+  useEffect(() => {
+    if (archivedPRsQuery.status === "success") {
+      writeCachedPRs("archived", archivedPRsQuery.data);
+    }
+  }, [archivedPRsQuery.status, archivedPRsQuery.data]);
 
   const { data: runtimeState } = useQuery<RuntimeState>({
     queryKey: ["/api/runtime"],

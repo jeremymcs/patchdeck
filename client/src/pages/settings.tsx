@@ -85,6 +85,21 @@ type GitHubRateLimitState = {
   resetAt: string | null;
   recentlyLimited: boolean;
   lastLimitedAt: string | null;
+  resources?: {
+    core?: GitHubRateLimitResourceState;
+    graphql?: GitHubRateLimitResourceState;
+    search?: GitHubRateLimitResourceState;
+  };
+};
+
+type GitHubRateLimitResourceState = {
+  limited: boolean;
+  resetAt: string | null;
+  recentlyLimited: boolean;
+  lastLimitedAt: string | null;
+  budget: { remaining: number; limit: number; percentRemaining: number; resetAt: string | null } | null;
+  belowReserve: boolean;
+  belowFloor: boolean;
 };
 
 type GitHubAuthStatus = {
@@ -436,6 +451,10 @@ export default function Settings() {
     queryKey: ["/api/github-rate-limit"],
     refetchInterval: uiPollIntervalMs,
   });
+  const githubBudgetRows = (["core", "graphql", "search"] as const).map((resource) => ({
+    resource,
+    state: githubRateLimit?.resources?.[resource],
+  }));
   const { data: githubAuthStatus } = useQuery<GitHubAuthStatus>({
     queryKey: ["/api/github-auth/status"],
     refetchInterval: uiPollIntervalMs,
@@ -1749,6 +1768,33 @@ export default function Settings() {
                     : "GitHub rate limit was hit recently. Sync may be delayed."}
                 </div>
               ) : null}
+              <div className="grid gap-3 text-label sm:grid-cols-3" data-testid="runtime-github-budget">
+                {githubBudgetRows.map(({ resource, state }) => {
+                  const budget = state?.budget ?? null;
+                  const tone = state?.belowFloor
+                    ? "border-destructive text-destructive"
+                    : state?.belowReserve
+                      ? "border-warning-border text-warning-foreground"
+                      : "border-border text-muted-foreground";
+                  return (
+                    <div key={resource} className={`border-l-2 pl-2 ${tone}`}>
+                      <div className="uppercase tracking-wider">{resource}</div>
+                      <div className="mt-1 text-body text-foreground">
+                        {budget ? `${budget.remaining}/${budget.limit}` : "unknown"}
+                      </div>
+                      <div className="mt-0.5 uppercase tracking-wider">
+                        {state?.belowFloor
+                          ? "floor"
+                          : state?.belowReserve
+                            ? "reserve"
+                            : budget
+                              ? `${budget.percentRemaining}% left`
+                              : "not observed"}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="text-body">Automation</div>

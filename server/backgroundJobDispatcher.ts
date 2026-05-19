@@ -25,6 +25,16 @@ export class TerminalBackgroundJobError extends Error {
   }
 }
 
+export class DeferBackgroundJobError extends Error {
+  readonly availableAt: Date;
+
+  constructor(message: string, availableAt: Date) {
+    super(message);
+    this.name = "DeferBackgroundJobError";
+    this.availableAt = availableAt;
+  }
+}
+
 export class BackgroundJobDispatcher {
   private readonly storage: IStorage;
   private readonly queue: BackgroundJobQueue;
@@ -278,6 +288,15 @@ export class BackgroundJobDispatcher {
             now,
           });
           return;
+        case "defer":
+          await this.queue.defer({
+            jobId: job.id,
+            leaseToken,
+            error: summarizeError(error),
+            now,
+            availableAt: error instanceof DeferBackgroundJobError ? error.availableAt : now,
+          });
+          return;
         case "retry":
           await this.queue.retry({
             jobId: job.id,
@@ -308,9 +327,12 @@ export class BackgroundJobDispatcher {
     }
   }
 
-  private resolveFailureAction(job: BackgroundJob, error: unknown): "cancel" | "retry" | "fail" {
+  private resolveFailureAction(job: BackgroundJob, error: unknown): "cancel" | "defer" | "retry" | "fail" {
     if (error instanceof CancelBackgroundJobError) {
       return "cancel";
+    }
+    if (error instanceof DeferBackgroundJobError) {
+      return "defer";
     }
     if (error instanceof TerminalBackgroundJobError) {
       return "fail";

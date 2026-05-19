@@ -16,6 +16,21 @@ type GitHubRateLimitState = {
   resetAt: string | null;
   recentlyLimited: boolean;
   lastLimitedAt: string | null;
+  resources?: {
+    core?: GitHubRateLimitResourceState;
+    graphql?: GitHubRateLimitResourceState;
+    search?: GitHubRateLimitResourceState;
+  };
+};
+
+type GitHubRateLimitResourceState = {
+  limited: boolean;
+  resetAt: string | null;
+  recentlyLimited: boolean;
+  lastLimitedAt: string | null;
+  budget: { remaining: number; limit: number; percentRemaining: number; resetAt: string | null } | null;
+  belowReserve: boolean;
+  belowFloor: boolean;
 };
 
 const PRIMARY_NAV_ITEMS: Array<{ section: AppHeaderSection; label: string; href: string }> = [
@@ -295,6 +310,9 @@ function GitHubRateLimitNotice() {
   });
   const explicitlyLimited = githubRateLimit?.limited === true;
   const recentlyLimited = githubRateLimit?.recentlyLimited === true;
+  const coreBudget = githubRateLimit?.resources?.core?.budget ?? null;
+  const coreBudgetTight = githubRateLimit?.resources?.core?.belowReserve === true;
+  const coreBudgetFloor = githubRateLimit?.resources?.core?.belowFloor === true;
   const { data: activities } = useQuery<ActivitySnapshot>({
     queryKey: ["/api/activities"],
     refetchInterval: ACTIVITY_POLL_INTERVAL_MS,
@@ -307,7 +325,7 @@ function GitHubRateLimitNotice() {
       .find((message) => message.toLowerCase().includes("rate limit")) ?? null
     : null;
 
-  if (!explicitlyLimited && !recentlyLimited && !activityRateLimitMessage) {
+  if (!explicitlyLimited && !recentlyLimited && !coreBudgetTight && !activityRateLimitMessage) {
     return null;
   }
 
@@ -319,6 +337,10 @@ function GitHubRateLimitNotice() {
     ? resetTime
       ? `GitHub rate limited until ${resetTime}`
       : "GitHub rate limited"
+    : coreBudgetFloor
+      ? "GitHub budget floor"
+    : coreBudgetTight
+      ? "GitHub budget reserve"
     : recentlyLimited
       ? "GitHub rate limit hit recently"
     : "GitHub rate limit hit in recent activity";
@@ -327,6 +349,14 @@ function GitHubRateLimitNotice() {
     ? resetTime
       ? `GitHub rate limit active until ${resetTime}. Open settings for token configuration.`
       : "GitHub rate limit active. Open settings for token configuration."
+    : coreBudgetFloor
+      ? coreBudget
+        ? `GitHub core budget is ${coreBudget.remaining}/${coreBudget.limit} (${coreBudget.percentRemaining}%). All GitHub jobs are waiting.`
+        : "GitHub core budget is below the hard floor. GitHub jobs are waiting."
+    : coreBudgetTight
+      ? coreBudget
+        ? `GitHub core budget is ${coreBudget.remaining}/${coreBudget.limit} (${coreBudget.percentRemaining}%). Passive PR monitor jobs are deferring.`
+        : "GitHub core budget is in reserve. Passive PR monitor jobs are deferring."
     : activityRateLimitMessage ?? "GitHub rate limit errors detected in recent activity. Open settings for token configuration.";
 
   return (

@@ -140,6 +140,32 @@ test("runtime queueBabysit records durable PR work intent", async () => {
   assert.ok(logs.some((log) => log.message === "Queued PR work resumed this PR after a failed run"));
 });
 
+test("runtime activity preserves monitor follow-up labels", async () => {
+  const storage = new MemStorage();
+  const runtime = createAppRuntime({
+    storage,
+    startBackgroundServices: false,
+    startWatcher: false,
+  });
+  const pr = await seedPR(storage);
+  await storage.enqueueBackgroundJob({
+    kind: "babysit_pr",
+    targetId: pr.id,
+    dedupeKey: `babysit_pr:${pr.id}:monitor:test`,
+    payload: {
+      monitorFollowUp: true,
+      activityLabel: "Monitoring PR #42",
+      activityDetail: "acme/widgets - feat: add widget",
+      activityTargetUrl: pr.url,
+    },
+  });
+
+  const activities = await runtime.listActivities();
+
+  assert.equal(activities.queued[0]?.label, "Monitoring PR #42");
+  assert.equal(activities.queued[0]?.detail, "acme/widgets - feat: add widget");
+});
+
 test("runtime queueBabysit uses repo agent override when configured", async () => {
   const storage = new MemStorage();
   const runtime = createAppRuntime({

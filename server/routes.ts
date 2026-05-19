@@ -273,6 +273,16 @@ export async function registerRoutes(
       resetAt: snapshot.resetAt ? snapshot.resetAt.toISOString() : null,
       recentlyLimited: snapshot.recentlyLimited,
       lastLimitedAt: snapshot.lastLimitedAt ? snapshot.lastLimitedAt.toISOString() : null,
+      budget: snapshot.budget
+        ? {
+            remaining: snapshot.budget.remaining,
+            limit: snapshot.budget.limit,
+            percentRemaining: Math.round((snapshot.budget.remaining / snapshot.budget.limit) * 100),
+            resetAt: snapshot.budget.resetAt ? snapshot.budget.resetAt.toISOString() : null,
+          }
+        : null,
+      belowReserve: snapshot.belowReserve,
+      belowFloor: snapshot.belowFloor,
     });
     res.json({
       limited: state.limited,

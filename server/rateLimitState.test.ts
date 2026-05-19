@@ -20,6 +20,9 @@ test("getRateLimitState reports unlimited by default", () => {
   assert.equal(state.resetAt, null);
   assert.equal(state.recentlyLimited, false);
   assert.equal(state.lastLimitedAt, null);
+  assert.equal(state.resources.core.budget, null);
+  assert.equal(state.resources.core.belowReserve, false);
+  assert.equal(state.resources.core.belowFloor, false);
 });
 
 test("markRateLimited with unix seconds sets a future reset", () => {
@@ -122,6 +125,25 @@ test("recordResourceBudget keeps the latest observation per resource", () => {
   assert.deepEqual(getResourceBudget("core"), { remaining: 4200, limit: 5000 });
   recordResourceBudget("core", 900, 5000);
   assert.deepEqual(getResourceBudget("core"), { remaining: 900, limit: 5000 });
+});
+
+test("getRateLimitState includes the latest resource budget and reserve state", () => {
+  const resetAt = new Date(Date.now() + 600_000);
+  recordResourceBudget("core", 900, 5000, resetAt);
+
+  const state = getRateLimitState();
+
+  assert.deepEqual(state.resources.core.budget, { remaining: 900, limit: 5000, resetAt });
+  assert.equal(state.resources.core.belowReserve, true);
+  assert.equal(state.resources.core.belowFloor, false);
+});
+
+test("expired resource budgets stop gating background work after the reset time", () => {
+  recordResourceBudget("core", 900, 5000, new Date(Date.now() - 1_000));
+
+  assert.equal(getResourceBudget("core"), null);
+  assert.equal(isResourceBudgetBelowReserve("core"), false);
+  assert.equal(isResourceBudgetBelowFloor("core"), false);
 });
 
 test("recordResourceBudget tracks core and graphql budgets independently", () => {

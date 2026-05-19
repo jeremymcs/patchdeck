@@ -11,6 +11,9 @@ export type ResourceSnapshot = {
   resetAt: Date | null;
   recentlyLimited: boolean;
   lastLimitedAt: Date | null;
+  budget: ResourceBudget | null;
+  belowReserve: boolean;
+  belowFloor: boolean;
 };
 
 export type RateLimitSnapshot = ResourceSnapshot & {
@@ -37,7 +40,7 @@ const state: Record<RateLimitResource, ResourceState> = {
   search: { resetAt: null, lastLimitedAt: null },
 };
 
-export type ResourceBudget = { remaining: number; limit: number };
+export type ResourceBudget = { remaining: number; limit: number; resetAt?: Date | null };
 
 const budgets: Record<RateLimitResource, ResourceBudget | null> = {
   core: null,
@@ -100,15 +103,34 @@ export function markRateLimited(
 
 function snapshotResource(resource: RateLimitResource, now: number): ResourceSnapshot {
   const entry = state[resource];
+  const budget = getResourceBudget(resource);
+  const belowReserve = isResourceBudgetBelowReserve(resource);
+  const belowFloor = isResourceBudgetBelowFloor(resource);
   const recentlyLimited = entry.lastLimitedAt !== null
     && (now - entry.lastLimitedAt.getTime()) <= RECENT_RATE_LIMIT_WINDOW_MS;
   if (entry.resetAt && entry.resetAt.getTime() <= now) {
     entry.resetAt = null;
   }
   if (!entry.resetAt) {
-    return { limited: false, resetAt: null, recentlyLimited, lastLimitedAt: entry.lastLimitedAt };
+    return {
+      limited: false,
+      resetAt: null,
+      recentlyLimited,
+      lastLimitedAt: entry.lastLimitedAt,
+      budget,
+      belowReserve,
+      belowFloor,
+    };
   }
-  return { limited: true, resetAt: entry.resetAt, recentlyLimited, lastLimitedAt: entry.lastLimitedAt };
+  return {
+    limited: true,
+    resetAt: entry.resetAt,
+    recentlyLimited,
+    lastLimitedAt: entry.lastLimitedAt,
+    budget,
+    belowReserve,
+    belowFloor,
+  };
 }
 
 export function getRateLimitState(resource?: RateLimitResource): RateLimitSnapshot {
@@ -131,12 +153,23 @@ export function getRateLimitState(resource?: RateLimitResource): RateLimitSnapsh
         .reduce((a, b) => (a.getTime() >= b.getTime() ? a : b))
     : null;
   const recentlyLimited = RESOURCES.some((r) => resources[r].recentlyLimited);
+  const belowReserve = RESOURCES.some((r) => resources[r].belowReserve);
+  const belowFloor = RESOURCES.some((r) => resources[r].belowFloor);
   const lastLimitedAt = RESOURCES
     .map((r) => resources[r].lastLimitedAt)
     .filter((d): d is Date => d !== null)
     .sort((a, b) => b.getTime() - a.getTime())[0] ?? null;
 
-  return { limited, resetAt, recentlyLimited, lastLimitedAt, resources };
+  return {
+    limited,
+    resetAt,
+    recentlyLimited,
+    lastLimitedAt,
+    budget: null,
+    belowReserve,
+    belowFloor,
+    resources,
+  };
 }
 
 export function clearRateLimited(resource: RateLimitResource = "core"): void {
@@ -156,15 +189,31 @@ export function recordResourceBudget(
   resource: RateLimitResource,
   remaining: number,
   limit: number,
+  reset?: Date | number,
 ): void {
   if (!Number.isFinite(remaining) || !Number.isFinite(limit) || limit <= 0) {
     return;
   }
-  budgets[resource] = { remaining: Math.max(0, remaining), limit };
+  const resetAt = parseReset(reset);
+  budgets[resource] = {
+    remaining: Math.max(0, remaining),
+    limit,
+    ...(resetAt ? { resetAt } : {}),
+  };
+}
+
+function readFreshResourceBudget(resource: RateLimitResource): ResourceBudget | null {
+  const budget = budgets[resource];
+  if (!budget) return null;
+  if (budget.resetAt && budget.resetAt.getTime() <= Date.now()) {
+    budgets[resource] = null;
+    return null;
+  }
+  return budget;
 }
 
 export function getResourceBudget(resource: RateLimitResource): ResourceBudget | null {
-  const budget = budgets[resource];
+  const budget = readFreshResourceBudget(resource);
   return budget ? { ...budget } : null;
 }
 
@@ -175,7 +224,7 @@ export function getResourceBudget(resource: RateLimitResource): ResourceBudget |
  * budget is unknown — an unobserved budget must not block work.
  */
 export function isResourceBudgetBelowReserve(resource: RateLimitResource): boolean {
-  const budget = budgets[resource];
+  const budget = readFreshResourceBudget(resource);
   if (!budget) return false;
   return budget.remaining <= budget.limit * BUDGET_RESERVE_FRACTION;
 }
@@ -187,7 +236,7 @@ export function isResourceBudgetBelowReserve(resource: RateLimitResource): boole
  * zero. Returns false when the budget is unknown.
  */
 export function isResourceBudgetBelowFloor(resource: RateLimitResource): boolean {
-  const budget = budgets[resource];
+  const budget = readFreshResourceBudget(resource);
   if (!budget) return false;
   return budget.remaining <= budget.limit * BUDGET_FLOOR_FRACTION;
 }

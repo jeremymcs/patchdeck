@@ -1117,8 +1117,10 @@ function attachRateLimitHook(
       if (responseResource === "core" || responseResource === "graphql") {
         const limitRaw = response.headers?.["x-ratelimit-limit"];
         const limit = typeof limitRaw === "string" ? Number.parseInt(limitRaw, 10) : Number.NaN;
+        const resetRaw = response.headers?.["x-ratelimit-reset"];
+        const reset = typeof resetRaw === "string" ? Number.parseInt(resetRaw, 10) : undefined;
         if (Number.isFinite(remaining) && Number.isFinite(limit)) {
-          recordResourceBudget(responseResource, remaining, limit);
+          recordResourceBudget(responseResource, remaining, limit, reset);
         }
       }
       if (Number.isFinite(remaining) && remaining > 0) {

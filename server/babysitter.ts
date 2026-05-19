@@ -95,6 +95,7 @@ const QUIET_REPO_COOLDOWN_MS = 10 * 60_000;
 // later sweeps (babysit_pr jobs are dedupe-keyed, so nothing is lost).
 const MAX_BABYSIT_ENQUEUES_PER_SWEEP = 10;
 const DEFERRED_BABYSIT_SWEEP_DELAY_MS = 15_000;
+const DEFERRED_BABYSIT_BUDGET_DELAY_MS = 60_000;
 const DEFERRED_BABYSIT_TARGET_PREFIX = "runtime:deferred-babysit:";
 const PR_MONITOR_FOLLOW_UP_DELAY_MS = 60_000;
 const AUTHENTICATED_LOGIN_CACHE_TTL_MS = 10 * 60_000;
@@ -1646,7 +1647,7 @@ export class PRBabysitter {
     return null;
   }
 
-  private async scheduleDeferredBabysitSweep(): Promise<void> {
+  private async scheduleDeferredBabysitSweep(reason: string = "active batch drain"): Promise<void> {
     if (!this.scheduleBackgroundJob) {
       return;
     }
@@ -1659,7 +1660,9 @@ export class PRBabysitter {
       return;
     }
 
-    const availableAt = new Date(this.now().getTime() + DEFERRED_BABYSIT_SWEEP_DELAY_MS);
+    const budgetReserve = reason === "core budget reserve";
+    const delayMs = budgetReserve ? DEFERRED_BABYSIT_BUDGET_DELAY_MS : DEFERRED_BABYSIT_SWEEP_DELAY_MS;
+    const availableAt = new Date(this.now().getTime() + delayMs);
     const targetId = `${DEFERRED_BABYSIT_TARGET_PREFIX}${availableAt.getTime()}-${this.deferredBabysitSweepSequence++}`;
     await this.scheduleBackgroundJob(
       "sync_watched_repos",
@@ -1670,10 +1673,14 @@ export class PRBabysitter {
       {
         ...buildActivityPayload({
           label: "Backfilling deferred PR work",
-          detail: "Refilling PR work queue after the active batch drains",
+          detail: budgetReserve
+            ? "Waiting for GitHub core budget before refilling PR work queue"
+            : "Refilling PR work queue after the active batch drains",
           targetUrl: null,
         }),
         deferredBabysitBackfill: true,
+        deferredReason: reason,
+        cooldownMs: delayMs,
       },
       {
         availableAt,
@@ -2834,17 +2841,18 @@ export class PRBabysitter {
         }
       }
       if (babysitDeferred > 0) {
-        await this.scheduleDeferredBabysitSweep();
+        const deferredReason = babysitBudgetTight
+          ? "core budget reserve"
+          : inFlightBabysitJobs >= maxConcurrentBabysitRuns
+            ? "concurrency cap"
+            : "per-sweep cap";
+        await this.scheduleDeferredBabysitSweep(deferredReason);
         log.info(
           {
             repo: repoSlug,
             deferred: babysitDeferred,
             enqueued: babysitEnqueues,
-            reason: babysitBudgetTight
-              ? "core budget reserve"
-              : inFlightBabysitJobs >= maxConcurrentBabysitRuns
-                ? "concurrency cap"
-                : "per-sweep cap",
+            reason: deferredReason,
           },
           "Deferred PR work to a later sweep to pace GitHub usage",
         );

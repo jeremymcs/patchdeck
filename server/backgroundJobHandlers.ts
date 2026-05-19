@@ -2,7 +2,7 @@ import type { BackgroundJob, DeploymentPlatform } from "@shared/schema";
 import type { CodingAgent } from "./agentRunner";
 import { resolveRepoAgentRuntimeSettings, resolveRepoCodingAgent } from "./agentSettings";
 import { TerminalBabysitterError, type PRBabysitter } from "./babysitter";
-import { CancelBackgroundJobError, TerminalBackgroundJobError, type BackgroundJobHandlers } from "./backgroundJobDispatcher";
+import { CancelBackgroundJobError, DeferBackgroundJobError, TerminalBackgroundJobError, type BackgroundJobHandlers } from "./backgroundJobDispatcher";
 import { createAdapter } from "./deploymentAdapters";
 import type { DeploymentHealingManager } from "./deploymentHealingManager";
 import { runDeploymentHealingRepair } from "./deploymentHealingAgent";
@@ -23,9 +23,12 @@ import { decomposeIssueBody, hashIssueBody } from "./issueDecompose";
 import { verifySubtasksAgainstPr } from "./issueVerify";
 import { runIssueWorkRepair } from "./issueWorkAgent";
 import { answerPRQuestion } from "./prQuestionAgent";
+import { getRateLimitState } from "./rateLimitState";
 import type { ReleaseManager } from "./releaseManager";
 import { runWithRequestPriority } from "./requestPriority";
 import type { IStorage } from "./storage";
+
+const PASSIVE_MONITOR_BUDGET_DEFER_MS = 60_000;
 
 type BackgroundJobHandlerDeps = {
   buildOctokitFn?: typeof buildOctokit;
@@ -55,6 +58,39 @@ function wait(ms: number): Promise<void> {
 
 function shouldPostInitialIssueWorkNotice(job: BackgroundJob): boolean {
   return job.attemptCount <= 1;
+}
+
+function resolvePassiveMonitorDefer(): { reason: string; availableAt: Date } | null {
+  const core = getRateLimitState("core");
+  if (!core.limited && !core.belowReserve && !core.belowFloor) {
+    return null;
+  }
+
+  const resetAtMs = core.resetAt?.getTime() ?? null;
+  const availableAt = resetAtMs && resetAtMs > Date.now()
+    ? new Date(Math.max(resetAtMs, Date.now() + 30_000))
+    : new Date(Date.now() + PASSIVE_MONITOR_BUDGET_DEFER_MS);
+
+  if (core.limited) {
+    return {
+      reason: core.resetAt
+        ? `GitHub core rate limit active until ${core.resetAt.toISOString()}; passive PR monitor deferred`
+        : "GitHub core rate limit active; passive PR monitor deferred",
+      availableAt,
+    };
+  }
+
+  if (core.belowFloor) {
+    return {
+      reason: "GitHub core budget is below the hard floor; passive PR monitor deferred",
+      availableAt,
+    };
+  }
+
+  return {
+    reason: "GitHub core budget is in reserve; passive PR monitor deferred",
+    availableAt,
+  };
 }
 
 export function createBackgroundJobHandlers(params: {
@@ -139,6 +175,13 @@ export function createBackgroundJobHandlers(params: {
         const pr = await storage.getPR(job.targetId);
         if (!pr) {
           throw new CancelBackgroundJobError(`PR ${job.targetId} no longer exists`);
+        }
+
+        if (job.payload.monitorFollowUp === true) {
+          const defer = resolvePassiveMonitorDefer();
+          if (defer) {
+            throw new DeferBackgroundJobError(defer.reason, defer.availableAt);
+          }
         }
 
         const config = await storage.getConfig();
