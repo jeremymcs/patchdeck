@@ -43,6 +43,7 @@ import { ACTIVITY_POLL_INTERVAL_MS, getUiPollIntervalMs } from "@/lib/polling";
 import { getActivityIdleReason } from "@/lib/activityIdle";
 import { formatPRWorkState } from "@/lib/statusCopy";
 import { PR_LIST_STALE_MS, readCachedPRs, writeCachedPRs } from "@/lib/prListCache";
+import { getSafePRWorkContract } from "@/lib/prWorkContractView";
 
 type GitHubRateLimitState = {
   limited: boolean;
@@ -474,6 +475,7 @@ const PRRow = memo(function PRRow({
 }) {
   const checkedAt = formatClock(pr.lastChecked);
   const watchEnabled = isPRWatchEnabled(pr);
+  const workContract = getSafePRWorkContract(pr.workContract);
   return (
     <div
       onClick={() => onSelect(pr.id)}
@@ -530,9 +532,9 @@ const PRRow = memo(function PRRow({
             </a>
             <span>{formatGitHubUsername(pr.author)}</span>
             <span>{formatPRWorkState(pr.status, pr.prStage)}</span>
-            {pr.workContract.blocker && (
-              <span title={pr.workContract.reason ?? undefined}>
-                why: {formatPRWorkBlocker(pr.workContract.blocker)}
+            {workContract.blocker && (
+              <span title={workContract.reason ?? undefined}>
+                why: {formatPRWorkBlocker(workContract.blocker)}
               </span>
             )}
             <QueueStatusBadge status={queueStatus} />
@@ -1331,6 +1333,7 @@ export default function Dashboard() {
   const selectedPRWatchEnabled = selectedPRSummary ? isPRWatchEnabled(selectedPRSummary) : true;
   const selectedFailedActivity = selectedPRSummary ? latestActivityForTarget(activities.failed, selectedPRSummary.id) : undefined;
   const selectedPRQueueStatus = selectedPRSummary ? queueStatusById.get(selectedPRSummary.id) ?? null : null;
+  const selectedPRWorkContract = selectedPR ? getSafePRWorkContract(selectedPR.workContract) : null;
   const selectedPRErrorMessage = selectedPRSummary?.status === "error" && !selectedPRQueueStatus
     ? selectedFailedActivity?.lastError ?? getPRFeedbackFailureReason(selectedPR) ?? "Automation stopped on this PR. Check the activity log for the full failure context."
     : null;
@@ -1761,7 +1764,7 @@ export default function Dashboard() {
                     <MergeReadinessChecklist
                       checks={selectedPRReadinessChecks}
                       ready={isPRDetailReadyToMerge(selectedPR)}
-                      contract={selectedPR.workContract}
+                      contract={selectedPRWorkContract ?? getSafePRWorkContract(null)}
                     />
                     {isPRDetailReadyToMerge(selectedPR) && (
                       <ReadyToMergeIndicator
