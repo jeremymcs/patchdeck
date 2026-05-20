@@ -261,13 +261,17 @@ test("full app QA route matrix is wired through the hash router", async () => {
 
   assertHasExpression(sourceFile, "hash router", /\buseHashLocation\b/);
   assertHasRoutes(sourceFile, [
-    { label: "dashboard", path: "/", component: "Dashboard" },
-    { label: "settings", path: "/settings", component: "Settings" },
-    { label: "releases", path: "/releases", component: "Releases" },
-    { label: "issues", path: "/issues", component: "Issues" },
-    { label: "logs", path: "/logs", component: "Logs" },
-    { label: "not found fallback", component: "NotFound" },
+    { label: "dashboard", path: "/", component: "DashboardRoute" },
+    { label: "PRs", path: "/prs", component: "PRsRoute" },
+    { label: "settings", path: "/settings", component: "SettingsRoute" },
+    { label: "releases", path: "/releases", component: "ReleasesRoute" },
+    { label: "issues", path: "/issues", component: "IssuesRoute" },
+    { label: "logs", path: "/logs", component: "LogsRoute" },
+    { label: "not found fallback", component: "NotFoundRoute" },
   ]);
+  assertHasExpression(sourceFile, "route runtime crash containment", /<PageErrorBoundary\s+pageName="Pull requests">[\s\S]*<PRs\s*\/>[\s\S]*<\/PageErrorBoundary>/);
+  assertHasExpression(sourceFile, "issues runtime crash containment", /<PageErrorBoundary\s+pageName="Issues">[\s\S]*<Issues\s*\/>[\s\S]*<\/PageErrorBoundary>/);
+  assertHasExpression(sourceFile, "not found runtime crash containment", /<PageErrorBoundary\s+pageName="Not found">[\s\S]*<NotFound\s*\/>[\s\S]*<\/PageErrorBoundary>/);
   assertHasExpression(notFoundSourceFile, "shared header", /<AppHeader\s+active="dashboard"/);
   assertHasStringValue(notFoundSourceFile, "not found panel test id", "not-found-panel");
 });
