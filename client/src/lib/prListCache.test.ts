@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { PRSummary } from "@shared/schema";
+import { prWorkContractSchema, type PRSummary } from "@shared/schema";
 import {
   PR_LIST_CACHE_RETENTION_MS,
   PR_LIST_STALE_MS,
@@ -46,6 +46,7 @@ const samplePR: PRSummary = {
   lastSyncSucceededAt: null,
   lastSyncError: null,
   watchEnabled: true,
+  workContract: prWorkContractSchema.parse({}),
   addedAt: "2026-05-18T12:00:00.000Z",
 };
 

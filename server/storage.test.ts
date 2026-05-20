@@ -10,6 +10,7 @@ import { DEFAULT_CONFIG } from "./defaultConfig";
 import { getCodeFactoryPaths } from "./paths";
 import { SQLITE_LOCK_TIMEOUT_MS, SqliteStorage } from "./sqliteStorage";
 import { MemStorage } from "./memoryStorage";
+import { markPRWorkQueuedContract } from "@shared/prWorkContract";
 
 function createRawDatabase(root: string): DatabaseSync {
   const db = new DatabaseSync(getCodeFactoryPaths(root).stateDbPath, {
@@ -578,6 +579,54 @@ test("SqliteStorage defaults watchEnabled to true for new PRs", async () => {
     assert.equal(reloaded?.watchEnabled, true);
   } finally {
     storage.close();
+  }
+});
+
+test("SqliteStorage persists PR work contract state", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "codefactory-storage-"));
+  const first = new SqliteStorage(root);
+
+  let prId: string;
+  try {
+    const pr = await first.addPR({
+      number: 108,
+      title: "Contracted work",
+      repo: "alex-morgan-o/lolodex",
+      branch: "feature/contract",
+      author: "octocat",
+      url: "https://github.com/alex-morgan-o/lolodex/pull/108",
+      status: "watching",
+      feedbackItems: [],
+      accepted: 0,
+      rejected: 0,
+      flagged: 0,
+      testsPassed: null,
+      lintPassed: null,
+      lastChecked: null,
+    });
+    prId = pr.id;
+    await first.updatePR(pr.id, {
+      workContract: markPRWorkQueuedContract(pr.workContract, {
+        now: new Date("2026-05-19T12:00:00.000Z"),
+        availableAt: new Date("2026-05-19T12:05:00.000Z"),
+        leaseOwner: "claude",
+      }),
+    });
+  } finally {
+    first.close();
+  }
+
+  const second = new SqliteStorage(root);
+  try {
+    const reloaded = await second.getPR(prId!);
+    assert.equal(reloaded?.workContract.intent, "make_merge_ready");
+    assert.equal(reloaded?.workContract.phase, "fixing");
+    assert.equal(reloaded?.workContract.blocker, "automation_queued");
+    assert.equal(reloaded?.workContract.nextActionAt, "2026-05-19T12:05:00.000Z");
+    assert.equal(reloaded?.workContract.attemptCount, 1);
+    assert.equal(reloaded?.workContract.leaseOwner, "claude");
+  } finally {
+    second.close();
   }
 });
 

@@ -26,6 +26,7 @@ import type {
 } from "@shared/schema";
 import { z } from "zod";
 import { addPRSchema, askQuestionSchema } from "@shared/schema";
+import { derivePRWorkContract, markPRWorkQueuedContract } from "@shared/prWorkContract";
 import type { IStorage } from "./storage";
 import { getDefaultStorage } from "./storage";
 import { PRBabysitter } from "./babysitter";
@@ -596,12 +597,42 @@ function latestRunLog(logs: LogEntry[], runId: string): LogEntry | undefined {
   return undefined;
 }
 
+function currentRunStatusFromPRJob(job: BackgroundJob | undefined): CurrentRunStatus | null {
+  if (!job || (job.status !== "queued" && job.status !== "leased")) {
+    return null;
+  }
+
+  const activity = readActivityPayload(job.payload);
+  const preferredAgent = job.payload.preferredAgent;
+  const phase = job.status === "queued" ? "pr.queued" : "pr.running";
+  return {
+    id: job.id,
+    status: job.status === "queued" ? "queued" : "running",
+    phase,
+    label: job.status === "queued" ? "PR work queued" : "PR work running",
+    detail: activity?.detail ?? job.lastError,
+    agent: preferredAgent === "codex" || preferredAgent === "claude" ? preferredAgent : null,
+    startedAt: job.createdAt,
+    updatedAt: job.updatedAt,
+    lastError: job.lastError,
+  };
+}
+
 async function deriveCurrentPrRun(pr: PR | PRSummary, storage: IStorage, logs?: LogEntry[]): Promise<CurrentRunStatus | null> {
+  const jobs = await storage.listBackgroundJobs({
+    kind: "babysit_pr",
+    targetId: pr.id,
+  });
+  const queuedJobRun = currentRunStatusFromPRJob(getLatestBackgroundJob(jobs.filter((job) => job.status === "queued")));
+  if (queuedJobRun) return queuedJobRun;
+
   const runs = await storage.listAgentRuns({ prId: pr.id });
   const latestRun = runs
     .slice()
     .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())[0];
-  if (!latestRun) return null;
+  if (!latestRun) {
+    return currentRunStatusFromPRJob(getLatestBackgroundJob(jobs.filter((job) => job.status === "leased")));
+  }
 
   const prLogs = logs ?? await storage.getLogs(pr.id);
   const detailLog = latestRunLog(prLogs, latestRun.id);
@@ -619,11 +650,18 @@ async function deriveCurrentPrRun(pr: PR | PRSummary, storage: IStorage, logs?: 
 }
 
 async function attachDerivedPrStage<T extends PR | PRSummary>(pr: T, storage: IStorage): Promise<T> {
-  const withCurrentRun = async (updates: Pick<PR, "prStage">): Promise<T> => ({
-    ...pr,
-    ...updates,
-    currentRun: await deriveCurrentPrRun(pr, storage),
-  });
+  const withCurrentRun = async (updates: Pick<PR, "prStage">, logs?: LogEntry[]): Promise<T> => {
+    const currentRun = await deriveCurrentPrRun(pr, storage, logs);
+    const nextPr = {
+      ...pr,
+      ...updates,
+      currentRun,
+    };
+    return {
+      ...nextPr,
+      workContract: derivePRWorkContract(nextPr, { currentRun }),
+    };
+  };
 
   if (pr.status === "watching") {
     return withCurrentRun({ prStage: "feedback_synced" });
@@ -632,11 +670,7 @@ async function attachDerivedPrStage<T extends PR | PRSummary>(pr: T, storage: IS
     return withCurrentRun({ prStage: "done" });
   }
   const logs = await storage.getLogs(pr.id);
-  return {
-    ...pr,
-    prStage: derivePrStageFromLogs(logs),
-    currentRun: await deriveCurrentPrRun(pr, storage, logs),
-  };
+  return withCurrentRun({ prStage: derivePrStageFromLogs(logs) }, logs);
 }
 
 function issueWorkStageFromLogs(
@@ -2003,7 +2037,7 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
   };
 
   const queueBabysitWithAgent = async (pr: PR, preferredAgent: Config["codingAgent"]) => {
-    await scheduleBackgroundJob(
+    const job = await scheduleBackgroundJob(
       "babysit_pr",
       pr.id,
       buildBackgroundJobDedupeKey("babysit_pr", pr.id),
@@ -2016,6 +2050,14 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
         }),
       },
     );
+    await storage.updatePR(pr.id, {
+      workContract: markPRWorkQueuedContract(pr.workContract, {
+        now: new Date(),
+        availableAt: new Date(job.availableAt),
+        reason: "PR work is queued.",
+        leaseOwner: preferredAgent,
+      }),
+    });
   };
 
   const activatePRWorkIntent = async (pr: PR, config: Config): Promise<{ pr: PR; config: Config }> => {
