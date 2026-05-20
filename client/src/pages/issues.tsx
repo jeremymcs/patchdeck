@@ -1,4 +1,4 @@
-import { Component, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { AlertTriangle, CheckCircle2, CircleDashed, CircleSlash, ExternalLink, Loader2, PanelRightClose, PanelRightOpen, Plus, RefreshCw, ShieldCheck, Trash2, Wrench, X } from "lucide-react";
 import { apiRequest, fetchJson, queryClient } from "@/lib/queryClient";
@@ -730,40 +730,6 @@ function IssueLogPanel({
       </div>
     </div>
   );
-}
-
-type IssuesErrorBoundaryState = {
-  hasError: boolean;
-  message: string;
-};
-
-class IssuesErrorBoundary extends Component<{ children: ReactNode }, IssuesErrorBoundaryState> {
-  state: IssuesErrorBoundaryState = {
-    hasError: false,
-    message: "",
-  };
-
-  static getDerivedStateFromError(error: unknown): IssuesErrorBoundaryState {
-    return {
-      hasError: true,
-      message: error instanceof Error ? error.message : String(error),
-    };
-  }
-
-  render() {
-    if (this.state.hasError) {
-      return (
-        <div className="flex min-h-screen items-center justify-center bg-background p-6">
-          <div className="max-w-2xl border border-destructive/40 bg-destructive/10 p-4 text-body text-destructive">
-            <div className="text-label uppercase tracking-wider text-destructive/80">Issues UI runtime error</div>
-            <pre className="mt-2 whitespace-pre-wrap break-words">{this.state.message || "Unknown render error"}</pre>
-          </div>
-        </div>
-      );
-    }
-
-    return this.props.children;
-  }
 }
 
 function IssuesPage() {
@@ -2171,9 +2137,5 @@ function IssuesPage() {
 }
 
 export default function Issues() {
-  return (
-    <IssuesErrorBoundary>
-      <IssuesPage />
-    </IssuesErrorBoundary>
-  );
+  return <IssuesPage />;
 }
