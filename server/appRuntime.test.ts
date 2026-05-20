@@ -106,6 +106,11 @@ test("runtime queueBabysit enqueues a babysit job using the configured agent", a
   assert.equal(jobs[0]?.payload.activityLabel, "Working PR #42");
   assert.equal(jobs[0]?.payload.activityDetail, "acme/widgets - feat: add widget");
   assert.equal(jobs[0]?.payload.activityTargetUrl, pr.url);
+
+  const selected = await runtime.getPR(pr.id);
+  assert.equal(selected?.currentRun?.status, "queued");
+  assert.equal(selected?.workContract.phase, "fixing");
+  assert.equal(selected?.workContract.blocker, "automation_queued");
 });
 
 test("runtime queueBabysit records durable PR work intent", async () => {
@@ -124,6 +129,12 @@ test("runtime queueBabysit records durable PR work intent", async () => {
 
   assert.equal(updated.status, "watching");
   assert.equal(updated.watchEnabled, true);
+  assert.equal(updated.workContract.intent, "make_merge_ready");
+  assert.equal(updated.workContract.phase, "fixing");
+  assert.equal(updated.workContract.blocker, "automation_queued");
+  assert.equal(updated.workContract.attemptCount, 1);
+  assert.ok(updated.workContract.lastAttemptAt);
+  assert.ok(updated.workContract.staleAfter);
 
   const config = await storage.getConfig();
   assert.deepEqual(config.watchedRepos, ["acme/widgets"]);

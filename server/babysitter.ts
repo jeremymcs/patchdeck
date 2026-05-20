@@ -1,7 +1,8 @@
 import { randomUUID } from "crypto";
 import { access } from "fs/promises";
 import path from "path";
-import type { AgentRun, CheckSnapshot, FeedbackItem, HealingSession, PR, PRStage } from "@shared/schema";
+import type { AgentRun, CheckSnapshot, FeedbackItem, HealingSession, PR, PRStage, PRWorkBlocker } from "@shared/schema";
+import { markPRWorkMonitoringContract, markPRWorkQueuedContract } from "@shared/prWorkContract";
 import type { IStorage } from "./storage";
 import {
   applyFixesWithAgent,
@@ -1459,6 +1460,40 @@ function getPRNotMergeReadyReason(pr: PR): string | null {
   return null;
 }
 
+function getPRWorkBlockerForReason(reason: string): PRWorkBlocker {
+  const normalized = reason.toLowerCase();
+  if (normalized.includes("rate limit") || normalized.includes("budget")) {
+    return "rate_limited";
+  }
+  if (normalized.includes("test") || normalized.includes("lint") || normalized.includes("ci")) {
+    return "checks_failed";
+  }
+  if (normalized.includes("feedback") || normalized.includes("comment") || normalized.includes("review")) {
+    return "review_feedback";
+  }
+  if (normalized.includes("conflict")) {
+    return "merge_conflict";
+  }
+  if (normalized.includes("mergeable state is") || normalized.includes("pending")) {
+    return "checks_pending";
+  }
+  if (normalized.includes("permission") || normalized.includes("auth")) {
+    return "missing_permissions";
+  }
+  if (normalized.includes("running") || normalized.includes("failed")) {
+    return "automation_stalled";
+  }
+  return "unknown_needs_triage";
+}
+
+function parseJobAvailableAt(value: string | undefined, fallback: Date): Date {
+  if (!value) {
+    return fallback;
+  }
+  const parsed = new Date(value);
+  return Number.isFinite(parsed.getTime()) ? parsed : fallback;
+}
+
 function isRerunnableCancelledGitHubActionsSnapshot(snapshot: CheckSnapshot): boolean {
   return snapshot.provider === "github.check_run"
     && snapshot.status === "completed"
@@ -1747,6 +1782,14 @@ export class PRBabysitter {
         availableAt,
       },
     );
+    await this.storage.updatePR(pr.id, {
+      workContract: markPRWorkMonitoringContract(pr.workContract, {
+        now: this.now(),
+        blocker: getPRWorkBlockerForReason(reason),
+        reason,
+        nextActionAt: availableAt,
+      }),
+    });
 
     await this.storage.addLog(pr.id, "info", `PR is not merge-ready; queued follow-up monitoring because ${reason}`, {
       phase: "watcher",
@@ -2831,6 +2874,26 @@ export class PRBabysitter {
             || babysitEnqueues >= MAX_BABYSIT_ENQUEUES_PER_SWEEP
             || inFlightBabysitJobs >= maxConcurrentBabysitRuns
           ) {
+            const deferredReason = babysitBudgetTight
+              ? "core budget reserve"
+              : inFlightBabysitJobs >= maxConcurrentBabysitRuns
+                ? "concurrency cap"
+                : "per-sweep cap";
+            const deferredDelayMs = babysitBudgetTight
+              ? DEFERRED_BABYSIT_BUDGET_DELAY_MS
+              : DEFERRED_BABYSIT_SWEEP_DELAY_MS;
+            const blocker = babysitBudgetTight ? "rate_limited" : "automation_stalled";
+            const reason = `Deferred automatic PR work because of ${deferredReason}.`;
+            if (local.workContract.blocker !== blocker || local.workContract.reason !== reason) {
+              await this.storage.updatePR(local.id, {
+                workContract: markPRWorkMonitoringContract(local.workContract, {
+                  now: this.now(),
+                  blocker,
+                  reason,
+                  nextActionAt: new Date(this.now().getTime() + deferredDelayMs),
+                }),
+              });
+            }
             babysitDeferred += 1;
             continue;
           }
@@ -2840,7 +2903,7 @@ export class PRBabysitter {
             phase: "watcher",
             metadata: { repo: repoSlug },
           });
-          await this.scheduleBackgroundJob(
+          const job = await this.scheduleBackgroundJob(
             "babysit_pr",
             local.id,
             buildBackgroundJobDedupeKey("babysit_pr", local.id),
@@ -2853,6 +2916,14 @@ export class PRBabysitter {
               }),
             },
           );
+          await this.storage.updatePR(local.id, {
+            workContract: markPRWorkQueuedContract(local.workContract, {
+              now: this.now(),
+              availableAt: parseJobAvailableAt(job.availableAt, this.now()),
+              reason: "Watcher queued automatic PR work.",
+              leaseOwner: currentConfig.codingAgent as CodingAgent,
+            }),
+          });
         } else {
           await this.storage.addLog(local.id, "info", "Watcher queued automatic PR work", {
             phase: "watcher",

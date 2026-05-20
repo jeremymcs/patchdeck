@@ -8178,6 +8178,12 @@ test("babysitPR queues follow-up monitoring when PR remains not merge-ready", as
   assert.equal(jobs[0]?.payload.monitorFollowUp, true);
   assert.equal(jobs[0]?.payload.monitorReason, "GitHub mergeable state is blocked");
 
+  const updatedPr = await storage.getPR(pr.id);
+  assert.equal(updatedPr?.workContract.phase, "monitoring");
+  assert.equal(updatedPr?.workContract.blocker, "checks_pending");
+  assert.equal(updatedPr?.workContract.reason, "GitHub mergeable state is blocked");
+  assert.equal(updatedPr?.workContract.nextActionAt, "2026-05-18T10:01:00.000Z");
+
   const logs = await storage.getLogs(pr.id);
   assert.ok(logs.some((log) => log.message.includes("queued follow-up monitoring")));
 });

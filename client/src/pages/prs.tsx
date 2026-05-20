@@ -4,7 +4,8 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import * as Collapsible from "@radix-ui/react-collapsible";
 import { AlertTriangle, Bot, CheckCircle2, ChevronDown, ChevronUp, CircleDashed, Loader2, PanelRightClose, PanelRightOpen, Pause, Play, PlayCircle, RefreshCw } from "lucide-react";
 import { queryClient, apiRequest, fetchJson } from "@/lib/queryClient";
-import type { ActivityItem, ActivitySnapshot, Config, FeedbackItem, HealingSession, Issue, IssueListPage, LogEntry, OperatorWarning, PR, PRQuestion, PRSummary, RuntimeState, WatchedRepo } from "@shared/schema";
+import type { ActivityItem, ActivitySnapshot, Config, FeedbackItem, HealingSession, Issue, IssueListPage, LogEntry, OperatorWarning, PR, PRQuestion, PRSummary, PRWorkContract, RuntimeState, WatchedRepo } from "@shared/schema";
+import { formatPRWorkBlocker, formatPRWorkPhase } from "@shared/prWorkContract";
 import { AppHeader } from "@/components/AppHeader";
 import { OnboardingPanel } from "@/components/OnboardingPanel";
 import { UpdateBanner } from "@/components/UpdateBanner";
@@ -55,6 +56,11 @@ function formatClock(timestamp: string | null): string | null {
   }
 
   return new Date(timestamp).toLocaleTimeString("en-US", { hour12: false });
+}
+
+function formatContractTime(timestamp: string | null): string | null {
+  const clock = formatClock(timestamp);
+  return clock ? `at ${clock}` : null;
 }
 
 function formatGitHubUsername(username?: string | null): string {
@@ -337,10 +343,13 @@ function ReadyToMergeIndicator({
 function MergeReadinessChecklist({
   checks,
   ready,
+  contract,
 }: {
   checks: ReturnType<typeof buildPRReadinessChecks>;
   ready: boolean;
+  contract: PRWorkContract;
 }) {
+  const nextAction = formatContractTime(contract.nextActionAt);
   return (
     <div
       className={`mt-2 rounded-md border px-3 py-2 text-label ${
@@ -357,6 +366,30 @@ function MergeReadinessChecklist({
         <div className="rounded-md border border-current/40 px-1.5 py-0 text-label uppercase tracking-wider">
           {ready ? "ready" : "not ready"}
         </div>
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-current/20 pt-2 text-label">
+        <span className="font-medium uppercase tracking-wider text-foreground">Contract</span>
+        <span>
+          intent: <span className="text-foreground">{contract.intent.replaceAll("_", " ")}</span>
+        </span>
+        <span>
+          phase: <span className="text-foreground">{formatPRWorkPhase(contract.phase)}</span>
+        </span>
+        {contract.blocker && (
+          <span>
+            why: <span className="text-foreground">{formatPRWorkBlocker(contract.blocker)}</span>
+          </span>
+        )}
+        {nextAction && (
+          <span>
+            next: <span className="font-mono text-foreground">{nextAction}</span>
+          </span>
+        )}
+        {contract.reason && (
+          <span className="min-w-0 flex-1 truncate" title={contract.reason}>
+            {contract.reason}
+          </span>
+        )}
       </div>
       <div className="mt-2 grid gap-1 sm:grid-cols-2">
         {checks.map((check) => (
@@ -497,6 +530,11 @@ const PRRow = memo(function PRRow({
             </a>
             <span>{formatGitHubUsername(pr.author)}</span>
             <span>{formatPRWorkState(pr.status, pr.prStage)}</span>
+            {pr.workContract.blocker && (
+              <span title={pr.workContract.reason ?? undefined}>
+                why: {formatPRWorkBlocker(pr.workContract.blocker)}
+              </span>
+            )}
             <QueueStatusBadge status={queueStatus} />
             {!watchEnabled && <WatchPausedIndicator />}
             <span>{pr.accepted + pr.rejected + pr.flagged} triaged</span>
@@ -1723,6 +1761,7 @@ export default function Dashboard() {
                     <MergeReadinessChecklist
                       checks={selectedPRReadinessChecks}
                       ready={isPRDetailReadyToMerge(selectedPR)}
+                      contract={selectedPR.workContract}
                     />
                     {isPRDetailReadyToMerge(selectedPR) && (
                       <ReadyToMergeIndicator

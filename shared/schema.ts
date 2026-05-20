@@ -7,6 +7,36 @@ export type PRStatus = z.infer<typeof prStatusEnum>;
 export const prStageEnum = z.enum(["feedback_synced", "triaged", "applying", "tests", "done"]);
 export type PRStage = z.infer<typeof prStageEnum>;
 
+export const prWorkIntentEnum = z.enum(["make_merge_ready"]);
+export type PRWorkIntent = z.infer<typeof prWorkIntentEnum>;
+
+export const prWorkPhaseEnum = z.enum([
+  "monitoring",
+  "fixing",
+  "waiting_ci",
+  "waiting_review",
+  "ready",
+  "blocked",
+]);
+export type PRWorkPhase = z.infer<typeof prWorkPhaseEnum>;
+
+export const prWorkBlockerEnum = z.enum([
+  "automation_queued",
+  "automation_running",
+  "automation_stalled",
+  "checks_failed",
+  "checks_pending",
+  "draft_pr",
+  "external_ci_failure",
+  "lease_stale",
+  "merge_conflict",
+  "missing_permissions",
+  "rate_limited",
+  "review_feedback",
+  "unknown_needs_triage",
+]);
+export type PRWorkBlocker = z.infer<typeof prWorkBlockerEnum>;
+
 export const triageDecision = z.enum(["accept", "reject", "flag"]);
 export type TriageDecision = z.infer<typeof triageDecision>;
 
@@ -70,6 +100,20 @@ export const currentRunStatusSchema = z.object({
 });
 export type CurrentRunStatus = z.infer<typeof currentRunStatusSchema>;
 
+export const prWorkContractSchema = z.object({
+  intent: prWorkIntentEnum.default("make_merge_ready"),
+  phase: prWorkPhaseEnum.default("monitoring"),
+  blocker: prWorkBlockerEnum.nullable().default(null),
+  reason: z.string().nullable().default(null),
+  nextActionAt: z.string().nullable().default(null),
+  lastAttemptAt: z.string().nullable().default(null),
+  attemptCount: z.number().int().nonnegative().default(0),
+  leaseOwner: z.string().nullable().default(null),
+  staleAfter: z.string().nullable().default(null),
+  updatedAt: z.string().nullable().default(null),
+});
+export type PRWorkContract = z.infer<typeof prWorkContractSchema>;
+
 export const prSchema = z.object({
   id: z.string(),
   number: z.number(),
@@ -96,6 +140,7 @@ export const prSchema = z.object({
   watchEnabled: z.boolean().default(true),
   docsAssessment: docsAssessmentSchema.nullable().optional(),
   currentRun: currentRunStatusSchema.nullable().optional(),
+  workContract: prWorkContractSchema.default({}),
   addedAt: z.string(),
 });
 export type PR = z.infer<typeof prSchema>;
