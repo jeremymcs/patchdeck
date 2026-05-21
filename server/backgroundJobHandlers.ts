@@ -1,8 +1,11 @@
-import type { BackgroundJob, DeploymentPlatform } from "@shared/schema";
+import type { BackgroundJob, DeploymentPlatform, PR } from "@shared/schema";
+import { markPRWorkQueuedContract } from "@shared/prWorkContract";
 import type { CodingAgent } from "./agentRunner";
 import { resolveRepoAgentRuntimeSettings, resolveRepoCodingAgent } from "./agentSettings";
 import { TerminalBabysitterError, type PRBabysitter } from "./babysitter";
 import { CancelBackgroundJobError, DeferBackgroundJobError, TerminalBackgroundJobError, type BackgroundJobHandlers } from "./backgroundJobDispatcher";
+import { buildBackgroundJobDedupeKey, type ScheduleBackgroundJob } from "./backgroundJobQueue";
+import { buildActivityPayload } from "./activityPayload";
 import { createAdapter } from "./deploymentAdapters";
 import type { DeploymentHealingManager } from "./deploymentHealingManager";
 import { runDeploymentHealingRepair } from "./deploymentHealingAgent";
@@ -99,6 +102,7 @@ export function createBackgroundJobHandlers(params: {
   releaseManager?: Pick<ReleaseManager, "processReleaseRun">;
   deploymentHealingManager?: DeploymentHealingManager;
   questionAnswerer?: typeof answerPRQuestion;
+  scheduleBackgroundJob?: ScheduleBackgroundJob;
   deps?: BackgroundJobHandlerDeps;
 }): BackgroundJobHandlers {
   const storage = params.storage;
@@ -106,6 +110,7 @@ export function createBackgroundJobHandlers(params: {
   const releaseManager = params.releaseManager;
   const deploymentHealingManager = params.deploymentHealingManager;
   const questionAnswerer = params.questionAnswerer ?? answerPRQuestion;
+  const scheduleBackgroundJob = params.scheduleBackgroundJob;
   const buildOctokitFn = params.deps?.buildOctokitFn ?? buildOctokit;
   const createAdapterFn = params.deps?.createAdapterFn ?? createAdapter;
   const runIssueWorkRepairFn = params.deps?.runIssueWorkRepairFn ?? runIssueWorkRepair;
@@ -209,6 +214,50 @@ export function createBackgroundJobHandlers(params: {
         ...metadata,
         stage,
       },
+    });
+  }
+
+  async function trackIssueWorkPr(params: {
+    repo: string;
+    prNumber: number;
+    title: string;
+    body: string;
+    branch: string;
+    author: string;
+    url: string;
+  }): Promise<PR> {
+    const existing = await storage.getPRByRepoAndNumber(params.repo, params.prNumber);
+    if (existing) {
+      return await storage.updatePR(existing.id, {
+        title: params.title,
+        body: params.body,
+        repo: params.repo,
+        branch: params.branch,
+        author: params.author,
+        url: params.url,
+        status: "watching",
+        watchEnabled: true,
+      }) ?? existing;
+    }
+
+    return storage.addPR({
+      number: params.prNumber,
+      title: params.title,
+      body: params.body,
+      bodyHtml: null,
+      repo: params.repo,
+      branch: params.branch,
+      author: params.author,
+      url: params.url,
+      status: "watching",
+      feedbackItems: [],
+      accepted: 0,
+      rejected: 0,
+      flagged: 0,
+      testsPassed: null,
+      lintPassed: null,
+      mergeableState: null,
+      lastChecked: null,
     });
   }
 
@@ -456,6 +505,9 @@ export function createBackgroundJobHandlers(params: {
       const githubToken = await resolveGitHubAuthTokenFn(config);
       const progressRepliesEnabled = config.postGitHubProgressReplies;
       const targetId = `${issue.repoFullName}#${issue.number}`;
+      const repoSettings = await storage.getRepoSettings(issue.repoFullName);
+      const agent = resolveRepoCodingAgent(config, repoSettings);
+      const agentSettings = resolveRepoAgentRuntimeSettings(config, repoSettings);
       const baseMetadata = {
         repo: issue.repoFullName,
         issueNumber: issue.number,
@@ -494,9 +546,6 @@ export function createBackgroundJobHandlers(params: {
           `Running issue repair for ${issue.repoFullName}#${issue.number}`,
           baseMetadata,
         );
-        const repoSettings = await storage.getRepoSettings(issue.repoFullName);
-        const agent = resolveRepoCodingAgent(config, repoSettings);
-        const agentSettings = resolveRepoAgentRuntimeSettings(config, repoSettings);
 
         const bodyHash = hashIssueBody(issue.body);
         const existingSubtasks = await storage.getIssueSubtasks(targetId);
@@ -640,23 +689,89 @@ export function createBackgroundJobHandlers(params: {
         },
       );
 
+      const prTitle = `fix(issue): ${issue.title}`;
+      const prBody = buildPullRequestBody({
+        repoFullName: issue.repoFullName,
+        issueNumber: issue.number,
+        issueTitle: issue.title,
+        issueUrl: issue.url,
+        summary: repairResult.summary,
+        author: issue.author,
+        branch: repairResult.fixBranch,
+        subtasks: repairResult.subtasks,
+      });
       const pr = await octokit.pulls.create({
         owner: parsedRepo.owner,
         repo: parsedRepo.repo,
-        title: `fix(issue): ${issue.title}`,
+        title: prTitle,
         head: repairResult.fixBranch,
         base: baseBranch,
-        body: buildPullRequestBody({
-          repoFullName: issue.repoFullName,
-          issueNumber: issue.number,
-          issueTitle: issue.title,
-          issueUrl: issue.url,
-          summary: repairResult.summary,
-          author: issue.author,
-          branch: repairResult.fixBranch,
-          subtasks: repairResult.subtasks,
-        }),
+        body: prBody,
       });
+
+      const trackedPr = await trackIssueWorkPr({
+        repo: issue.repoFullName,
+        prNumber: pr.data.number,
+        title: prTitle,
+        body: prBody,
+        branch: repairResult.fixBranch,
+        author: issue.author,
+        url: pr.data.html_url,
+      });
+
+      if (scheduleBackgroundJob) {
+        await scheduleBackgroundJob(
+          "verify_issue",
+          targetId,
+          buildBackgroundJobDedupeKey("verify_issue", targetId),
+          {
+            repo: issue.repoFullName,
+            issueNumber: issue.number,
+            issueTitle: issue.title,
+            issueUrl: issue.url,
+            workPrNumber: pr.data.number,
+            workPrUrl: pr.data.html_url,
+            ...buildActivityPayload({
+              label: `Verifying issue #${issue.number}`,
+              detail: `${issue.repoFullName} - ${issue.title}`,
+              targetUrl: pr.data.html_url,
+            }),
+          },
+        );
+
+        const babysitJob = await scheduleBackgroundJob(
+          "babysit_pr",
+          trackedPr.id,
+          buildBackgroundJobDedupeKey("babysit_pr", trackedPr.id),
+          {
+            preferredAgent: agent,
+            ...buildActivityPayload({
+              label: `Working PR #${trackedPr.number}`,
+              detail: `${trackedPr.repo} - ${trackedPr.title}`,
+              targetUrl: trackedPr.url,
+            }),
+          },
+        );
+
+        await storage.updatePR(trackedPr.id, {
+          workContract: markPRWorkQueuedContract(trackedPr.workContract, {
+            now: new Date(),
+            availableAt: new Date(babysitJob.availableAt),
+            reason: "Issue work opened this PR; queued PR verification and monitoring.",
+            leaseOwner: agent,
+          }),
+        });
+
+        await storage.addLog(trackedPr.id, "info", `Issue work handoff queued verification and PR babysitter for #${pr.data.number}`, {
+          phase: "issue_handoff",
+          metadata: {
+            repo: issue.repoFullName,
+            issueNumber: issue.number,
+            issueTargetId: targetId,
+            verifyTargetId: targetId,
+          },
+        });
+      }
 
       await octokit.issues.createComment({
         owner: parsedRepo.owner,

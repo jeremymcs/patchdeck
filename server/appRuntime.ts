@@ -982,6 +982,7 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       babysitter,
       releaseManager,
       deploymentHealingManager,
+      scheduleBackgroundJob,
     }),
     onReclaimedJobs: (jobs) => {
       for (const job of jobs) {
