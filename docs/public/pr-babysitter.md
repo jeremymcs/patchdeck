@@ -79,7 +79,7 @@ For a detected platform, the deployment-healing flow is:
 4. Run the configured coding agent from the merge SHA, push a `deploy-fix/<platform>-<timestamp>` branch, and open a follow-up PR back to the merged base branch.
 5. Mark the session as `fix_submitted` on success or `escalated` when monitoring times out or the repair attempt cannot be completed automatically.
 
-Deployment-healing sessions move through `monitoring`, `failed`, `fixing`, `fix_submitted`, and `escalated`. Operator visibility is currently API- and MCP-based via `GET /api/deployment-healing-sessions`, `GET /api/deployment-healing-sessions/:id`, `list_deployment_healing_sessions`, and `get_deployment_healing_session`; there is no dedicated dashboard panel yet.
+Deployment-healing sessions move through `monitoring`, `failed`, `fixing`, `fix_submitted`, and `escalated`. Operator visibility is available on the dashboard Deployments page, through `GET /api/deployment-healing-sessions` and `GET /api/deployment-healing-sessions/:id`, and through the MCP `list_deployment_healing_sessions` and `get_deployment_healing_session` tools.
 
 Deployment healing requires the matching platform CLI to be installed and authenticated on the same machine as patchdeck:
 
