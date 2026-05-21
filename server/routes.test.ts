@@ -1187,6 +1187,31 @@ test("POST /api/repos/release queues a manual release run for the requested repo
   }
 });
 
+test("GET /api/repos/release-preview returns the next manual release candidate", async () => {
+  const storage = new MemStorage();
+  const harness = await createHarness(storage, {
+    releaseManager: makeReleaseManagerForRoutes(storage),
+  });
+
+  try {
+    const response = await fetch(`${harness.baseUrl}/api/repos/release-preview?repo=acme/widgets`);
+    const body = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.equal(body.state, "ready");
+    assert.equal(body.repo, "acme/widgets");
+    assert.equal(body.triggerPr.number, 42);
+    assert.equal(body.includedPrs.length, 1);
+    assert.deepEqual(body.candidateVersions, {
+      patch: "v1.2.4",
+      minor: "v1.2.4",
+      major: "v1.2.4",
+    });
+  } finally {
+    await harness.close();
+  }
+});
+
 test("POST /api/repos/release reports drain reason and does not queue release work", async () => {
   const storage = new MemStorage();
   const harness = await createHarness(storage, {

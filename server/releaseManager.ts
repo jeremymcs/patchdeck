@@ -1,5 +1,5 @@
 import type { Octokit } from "@octokit/rest";
-import type { Config, ReleaseRun, ReleaseRunIncludedPR } from "@shared/schema";
+import type { Config, ReleasePreview, ReleaseRun, ReleaseRunIncludedPR } from "@shared/schema";
 import type { CodingAgent } from "./agentRunner";
 import { resolveRepoAgentRuntimeSettings, resolveRepoCodingAgent } from "./agentSettings";
 import { parseRepoSlug } from "./github";
@@ -222,6 +222,62 @@ export class ReleaseManager {
 
     this.scheduleProcessing(created);
     return created;
+  }
+
+  async previewManualRepoRelease(repoInput: string): Promise<ReleasePreview> {
+    const parsedRepo = parseRepoSlug(repoInput);
+    if (!parsedRepo) {
+      throw new Error(`Invalid repository slug: ${repoInput}`);
+    }
+
+    const repo = `${parsedRepo.owner}/${parsedRepo.repo}`;
+    const config = await this.storage.getConfig();
+    const octokit = await this.github.buildOctokit(config);
+    const baseBranch = await this.github.getDefaultBranch(octokit, parsedRepo);
+    const latestTag = await this.github.findLatestSemverReleaseTag(octokit, parsedRepo);
+    const unreleased = await this.github.listUnreleasedMergedPulls(octokit, parsedRepo, {
+      baseBranch,
+    });
+    const triggerPr = [...unreleased].sort((a, b) => Date.parse(a.mergedAt) - Date.parse(b.mergedAt)).at(-1);
+
+    if (!triggerPr) {
+      return {
+        repo,
+        baseBranch,
+        latestTag,
+        state: "empty",
+        triggerPr: null,
+        includedPrs: [],
+        candidateVersions: null,
+        existingRunId: null,
+        existingRunStatus: null,
+      };
+    }
+
+    const includedPulls = this.github.listMergedPullsForReleaseCandidate
+      ? await this.github.listMergedPullsForReleaseCandidate(octokit, parsedRepo, {
+        baseBranch,
+        untilMergedAt: triggerPr.mergedAt,
+        triggerPr,
+      })
+      : [triggerPr];
+    const existing = await this.storage.getReleaseRunByTrigger(repo, triggerPr.number, triggerPr.mergeSha);
+
+    return {
+      repo,
+      baseBranch,
+      latestTag,
+      state: "ready",
+      triggerPr: toIncludedPR(triggerPr),
+      includedPrs: includedPulls.map(toIncludedPR),
+      candidateVersions: {
+        patch: this.github.bumpReleaseTag(latestTag, "patch"),
+        minor: this.github.bumpReleaseTag(latestTag, "minor"),
+        major: this.github.bumpReleaseTag(latestTag, "major"),
+      },
+      existingRunId: existing?.id ?? null,
+      existingRunStatus: existing?.status ?? null,
+    };
   }
 
   async retryReleaseRun(id: string): Promise<ReleaseRun | undefined> {
