@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { ExternalLink, Loader2, RefreshCw } from "lucide-react";
-import { apiRequest, queryClient } from "@/lib/queryClient";
+import { apiRequest, fetchJson, queryClient } from "@/lib/queryClient";
 import { AppHeader } from "@/components/AppHeader";
 import { GitHubReleaseCard } from "@/components/GitHubReleaseCard";
 import { SocialPostGenerator } from "@/components/SocialPostGenerator";
 import { UpdateBanner } from "@/components/UpdateBanner";
 import { toast } from "@/hooks/use-toast";
-import type { GitHubRelease, ReleaseRun, RepoGitHubReleases, RuntimeState } from "@shared/schema";
+import type { GitHubRelease, ReleasePreview, ReleaseRun, RepoGitHubReleases, RuntimeState } from "@shared/schema";
 
 type ReleaseRunStatus = ReleaseRun["status"];
 
@@ -84,6 +84,87 @@ function CopyButton({ text }: { text: string }) {
     >
       {copied ? "copied" : "copy"}
     </button>
+  );
+}
+
+function ReleasePreviewPanel({
+  preview,
+  loading,
+}: {
+  preview?: ReleasePreview;
+  loading: boolean;
+}) {
+  if (loading && !preview) {
+    return (
+      <div className="mb-4 rounded-md border border-border px-4 py-3 text-body text-muted-foreground">
+        Loading release preview…
+      </div>
+    );
+  }
+
+  if (!preview) return null;
+
+  if (preview.state === "empty") {
+    return (
+      <div className="mb-4 rounded-md border border-border px-4 py-3" data-testid="release-readiness-preview">
+        <div className="text-label font-medium uppercase tracking-wider text-muted-foreground">Release preview</div>
+        <div className="mt-1 text-body text-muted-foreground">
+          No unreleased merged pull requests found for <span className="font-mono text-foreground">{preview.repo}</span>.
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <section className="mb-4 rounded-md border border-border px-4 py-3" data-testid="release-readiness-preview">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div className="text-label font-medium uppercase tracking-wider text-muted-foreground">Release preview</div>
+          <a
+            href={preview.triggerPr?.url}
+            target="_blank"
+            rel="noreferrer"
+            className="mt-1 block text-body font-medium text-foreground hover:text-primary"
+          >
+            Next trigger: #{preview.triggerPr?.number} {preview.triggerPr?.title}
+          </a>
+        </div>
+        <div className="text-right font-mono text-label text-muted-foreground">
+          <div>base {preview.baseBranch}</div>
+          <div>latest {preview.latestTag ?? "none"}</div>
+        </div>
+      </div>
+
+      {preview.candidateVersions && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {(["patch", "minor", "major"] as const).map((bump) => (
+            <span key={bump} className="rounded-md border border-border px-2 py-1 text-label uppercase tracking-wider text-muted-foreground">
+              {bump} <span className="font-mono text-foreground">{preview.candidateVersions?.[bump]}</span>
+            </span>
+          ))}
+        </div>
+      )}
+
+      <div className="mt-3 grid gap-1 text-label">
+        <div className="text-label uppercase tracking-wider text-muted-foreground">
+          Included PRs <span className="font-mono text-foreground">{preview.includedPrs.length}</span>
+        </div>
+        {preview.includedPrs.slice(0, 6).map((pr) => (
+          <a key={`${pr.number}-${pr.mergeSha}`} href={pr.url} target="_blank" rel="noreferrer" className="truncate text-muted-foreground hover:text-foreground">
+            <span className="font-mono">#{pr.number}</span> {pr.title}
+          </a>
+        ))}
+        {preview.includedPrs.length > 6 && (
+          <div className="text-muted-foreground">+{preview.includedPrs.length - 6} more included PRs</div>
+        )}
+      </div>
+
+      <div className="mt-3 text-label text-muted-foreground">
+        {preview.existingRunId
+          ? `Existing release run ${preview.existingRunId.slice(0, 8)} is ${preview.existingRunStatus}.`
+          : "Manual release will evaluate this candidate before publishing."}
+      </div>
+    </section>
   );
 }
 
@@ -412,6 +493,12 @@ export default function Releases() {
 
   const selectedRuns = selectedRepo ? runsByRepo.get(selectedRepo) ?? [] : [];
   const selectedOrphans = selectedRepo ? orphansByRepo.get(selectedRepo) ?? [] : [];
+  const { data: releasePreview, isFetching: isFetchingReleasePreview } = useQuery<ReleasePreview>({
+    queryKey: ["/api/repos/release-preview", selectedRepo],
+    enabled: Boolean(selectedRepo) && runtimeState !== undefined,
+    queryFn: async () => fetchJson<ReleasePreview>(`/api/repos/release-preview?repo=${encodeURIComponent(selectedRepo ?? "")}`),
+    staleTime: 5 * 60 * 1000,
+  });
 
   const handleSyncGitHub = () => {
     queryClient.invalidateQueries({ queryKey: ["/api/github-releases"] });
@@ -507,14 +594,16 @@ export default function Releases() {
             </div>
           ) : (
             <div className="p-6">
-              <div className="mb-4 flex items-baseline justify-between">
-                <h2 className="text-title font-semibold tracking-tight">{selectedRepo}</h2>
-                <span className="font-mono text-label text-muted-foreground">
-                  {selectedRuns.length} pipeline · {selectedOrphans.length} external
-                </span>
-              </div>
+	              <div className="mb-4 flex items-baseline justify-between">
+	                <h2 className="text-title font-semibold tracking-tight">{selectedRepo}</h2>
+	                <span className="font-mono text-label text-muted-foreground">
+	                  {selectedRuns.length} pipeline · {selectedOrphans.length} external
+	                </span>
+	              </div>
 
-              {selectedRuns.length === 0 && selectedOrphans.length === 0 ? (
+	              <ReleasePreviewPanel preview={releasePreview} loading={isFetchingReleasePreview} />
+
+	              {selectedRuns.length === 0 && selectedOrphans.length === 0 ? (
                 <div className="rounded-md border border-border px-4 py-8 text-center">
                   <p className="text-body text-muted-foreground">No release activity yet.</p>
                   <p className="mt-1 text-body text-muted-foreground">
