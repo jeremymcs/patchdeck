@@ -556,6 +556,7 @@ const PRRow = memo(function PRRow({
   const checkedAt = formatClock(pr.lastChecked);
   const watchEnabled = isPRWatchEnabled(pr);
   const workContract = getSafePRWorkContract(pr.workContract);
+  const railTone = isPRSummaryReadyToMerge(pr) ? "success" : prStatusTone(pr);
   return (
     <div
       onClick={() => onSelect(pr.id)}
@@ -574,8 +575,8 @@ const PRRow = memo(function PRRow({
       data-testid={`pr-row-${pr.id}`}
       className={`w-full cursor-pointer border-b border-border px-4 py-3 text-left transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${
         isSelected
-          ? "border-l-[3px] border-l-primary bg-muted"
-          : `border-l-2 ${toneRailClass(prStatusTone(pr))}`
+          ? `border-l-[3px] ${toneRailClass(railTone)} bg-muted`
+          : `border-l-2 ${toneRailClass(railTone)}`
       }`}
     >
       <div className="flex items-start gap-3">
