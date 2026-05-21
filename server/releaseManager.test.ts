@@ -174,6 +174,83 @@ test("ReleaseManager enqueues a manual repo release from the latest unreleased m
   assert.equal(await manager.waitForIdle(), true);
 });
 
+test("ReleaseManager previews the next manual release candidate without queueing work", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig(makeConfig());
+  const { manager } = createQueuedManager({ storage });
+
+  const preview = await manager.previewManualRepoRelease("jeremymcs/patchdeck");
+  const jobs = await storage.listBackgroundJobs({
+    kind: "process_release_run",
+    status: "queued",
+  });
+
+  assert.equal(preview.state, "ready");
+  assert.equal(preview.repo, "jeremymcs/patchdeck");
+  assert.equal(preview.baseBranch, "main");
+  assert.equal(preview.latestTag, "v1.2.3");
+  assert.equal(preview.triggerPr?.number, 71);
+  assert.equal(preview.includedPrs.length, 2);
+  assert.deepEqual(preview.candidateVersions, {
+    patch: "v1.2.4",
+    minor: "v1.3.0",
+    major: "v2.0.0",
+  });
+  assert.equal(preview.existingRunId, null);
+  assert.equal(jobs.length, 0);
+});
+
+test("ReleaseManager previews empty release state when no merged PRs are unreleased", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig(makeConfig());
+  const { manager } = createQueuedManager({
+    storage,
+    github: {
+      listUnreleasedMergedPulls: async () => [],
+    },
+  });
+
+  const preview = await manager.previewManualRepoRelease("jeremymcs/patchdeck");
+
+  assert.equal(preview.state, "empty");
+  assert.equal(preview.triggerPr, null);
+  assert.deepEqual(preview.includedPrs, []);
+  assert.equal(preview.candidateVersions, null);
+});
+
+test("ReleaseManager preview links an existing release run for the same trigger", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig(makeConfig());
+  const existing = await storage.createReleaseRun({
+    repo: "jeremymcs/patchdeck",
+    baseBranch: "main",
+    triggerPrNumber: 71,
+    triggerPrTitle: "Release automation",
+    triggerPrUrl: "https://github.com/jeremymcs/patchdeck/pull/71",
+    triggerMergeSha: "abc123",
+    triggerMergedAt: "2026-03-28T15:00:00.000Z",
+    source: "manual",
+    status: "published",
+    decisionReason: null,
+    recommendedBump: "patch",
+    proposedVersion: "v1.2.4",
+    releaseTitle: "Release v1.2.4",
+    releaseNotes: "Notes",
+    includedPrs: [],
+    targetSha: "abc123",
+    githubReleaseId: 123,
+    githubReleaseUrl: "https://github.com/jeremymcs/patchdeck/releases/tag/v1.2.4",
+    error: null,
+    completedAt: "2026-03-28T18:00:00.000Z",
+  });
+  const { manager } = createQueuedManager({ storage });
+
+  const preview = await manager.previewManualRepoRelease("jeremymcs/patchdeck");
+
+  assert.equal(preview.existingRunId, existing.id);
+  assert.equal(preview.existingRunStatus, "published");
+});
+
 test("ReleaseManager publishes manual release runs when auto-release settings are disabled", async () => {
   const storage = new MemStorage();
   await storage.updateConfig(makeConfig({

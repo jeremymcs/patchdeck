@@ -17,6 +17,7 @@ import type {
   PRSummary,
   PRQuestion,
   ReleaseRun,
+  ReleasePreview,
   ReleaseSocialPost,
   RepoGitHubReleases,
   RuntimeState,
@@ -150,6 +151,7 @@ export type AppRuntime = {
   syncRepos(options?: { fullSweep?: boolean; scope?: RepoSyncScope }): Promise<{ ok: true }>;
   listIssueCoverage(): Promise<IssueCoverage[]>;
   createManualRelease(repoInput: string): Promise<ReleaseRun>;
+  previewManualRelease(repoInput: string): Promise<ReleasePreview>;
   listPRs(view?: "active" | "archived"): Promise<PRSummary[]>;
   getPR(id: string): Promise<PR | null>;
   addPR(url: string): Promise<PR>;
@@ -2415,6 +2417,15 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
 
       notifyChange();
       return release;
+    },
+
+    async previewManualRelease(repoInput) {
+      const parsedRepo = parseRepoSlug(repoInput);
+      if (!parsedRepo) {
+        throw new AppRuntimeError(400, "Invalid repository. Use owner/repo or https://github.com/owner/repo");
+      }
+
+      return releaseManager.previewManualRepoRelease(formatRepoSlug(parsedRepo));
     },
 
     async listIssues(input) {

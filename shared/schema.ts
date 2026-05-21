@@ -642,6 +642,23 @@ export const releaseRunSchema = z.object({
 });
 export type ReleaseRun = z.infer<typeof releaseRunSchema>;
 
+export const releasePreviewSchema = z.object({
+  repo: z.string(),
+  baseBranch: z.string(),
+  latestTag: z.string().nullable(),
+  state: z.enum(["ready", "empty"]),
+  triggerPr: releaseRunIncludedPRSchema.nullable(),
+  includedPrs: z.array(releaseRunIncludedPRSchema),
+  candidateVersions: z.object({
+    patch: z.string(),
+    minor: z.string(),
+    major: z.string(),
+  }).nullable(),
+  existingRunId: z.string().nullable(),
+  existingRunStatus: releaseRunStatusEnum.nullable(),
+});
+export type ReleasePreview = z.infer<typeof releasePreviewSchema>;
+
 export const deploymentPlatformEnum = z.enum(["vercel", "railway"]);
 export type DeploymentPlatform = z.infer<typeof deploymentPlatformEnum>;
 
