@@ -28,9 +28,10 @@ When answering a question, the agent receives:
 - PR metadata such as title, number, repository, branch, author, URL, status, and last check time.
 - Current test/lint pass/fail fields when known.
 - Feedback items stored on the PR, including status, decision, author, file, line, and a body excerpt.
+- Changed files, bounded patch excerpts, and recent commit summaries fetched from GitHub when authentication is available.
 - The most recent 50 activity log entries for the PR.
 
-The Q&A agent does not fetch the full diff, commit history, external docs, or issue trackers unless that information is already present in the stored PR context or logs.
+The Q&A agent does not fetch external documentation or issue trackers unless that information is already present in the stored PR context or logs. Very large diffs are bounded before they are sent to the agent.
 
 ## Use Cases
 

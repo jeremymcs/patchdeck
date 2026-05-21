@@ -22,7 +22,7 @@ import { buildIssueReplyBody, buildIssueVerifyComment, buildIssueWorkStatusComme
 import { decomposeIssueBody, hashIssueBody } from "./issueDecompose";
 import { verifySubtasksAgainstPr } from "./issueVerify";
 import { runIssueWorkRepair } from "./issueWorkAgent";
-import { answerPRQuestion } from "./prQuestionAgent";
+import { answerPRQuestion, type PRQuestionRepositoryContext } from "./prQuestionAgent";
 import { getRateLimitState } from "./rateLimitState";
 import type { ReleaseManager } from "./releaseManager";
 import { runWithRequestPriority } from "./requestPriority";
@@ -111,6 +111,60 @@ export function createBackgroundJobHandlers(params: {
   const runIssueWorkRepairFn = params.deps?.runIssueWorkRepairFn ?? runIssueWorkRepair;
   const resolveGitHubAuthTokenFn = params.deps?.resolveGitHubAuthTokenFn ?? resolveGitHubAuthToken;
   const runDeploymentHealingRepairFn = params.deps?.runDeploymentHealingRepairFn ?? runDeploymentHealingRepair;
+
+  async function buildQuestionRepositoryContext(prUrl: string): Promise<PRQuestionRepositoryContext | null> {
+    const parsed = parsePRUrl(prUrl);
+    if (!parsed) return null;
+
+    try {
+      const octokit = await buildOctokitFn(await storage.getConfig());
+      const [filesResponse, commitsResponse] = await Promise.all([
+        octokit.pulls.listFiles({
+          owner: parsed.owner,
+          repo: parsed.repo,
+          pull_number: parsed.number,
+          per_page: 100,
+        }),
+        octokit.pulls.listCommits({
+          owner: parsed.owner,
+          repo: parsed.repo,
+          pull_number: parsed.number,
+          per_page: 30,
+        }),
+      ]);
+
+      const changedFiles = filesResponse.data.map((file) => {
+        const patch = typeof file.patch === "string" && file.patch.trim()
+          ? `\n${file.patch.split("\n").slice(0, 80).join("\n")}`
+          : "";
+        return [
+          `- ${file.filename} (${file.status}, +${file.additions}/-${file.deletions}, ${file.changes} changes)`,
+          patch,
+        ].join("");
+      }).join("\n\n");
+
+      const commits = commitsResponse.data.map((commit) => {
+        const message = commit.commit.message.split("\n")[0] ?? "";
+        const author = commit.commit.author?.name ?? commit.author?.login ?? "unknown";
+        return `- ${commit.sha.slice(0, 7)} ${message} (${author})`;
+      }).join("\n");
+
+      return {
+        changedFiles,
+        commits,
+        note: filesResponse.data.length >= 100
+          ? "Only the first 100 changed files were included."
+          : undefined,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        changedFiles: "(unavailable)",
+        commits: "(unavailable)",
+        note: `Could not fetch live GitHub change context: ${message.slice(0, 300)}`,
+      };
+    }
+  }
 
   async function postIssueWorkStatusComment(
     octokit: {
@@ -661,6 +715,7 @@ export function createBackgroundJobHandlers(params: {
         question: question.question,
         preferredAgent: resolveRepoCodingAgent(config, repoSettings),
         agentSettings: resolveRepoAgentRuntimeSettings(config, repoSettings),
+        repositoryContext: pr ? await buildQuestionRepositoryContext(pr.url) : null,
       });
     },
 
