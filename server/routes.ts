@@ -481,6 +481,15 @@ export async function registerRoutes(
     }
   });
 
+  app.get("/api/repos/release-preview", async (req, res) => {
+    try {
+      const repo = z.string().min(1).parse(req.query.repo);
+      res.json(await runtime.previewManualRelease(repo));
+    } catch (error: unknown) {
+      sendAppAwareError(res, error);
+    }
+  });
+
   app.get("/api/prs", async (_req, res) => {
     res.json(await runtime.listPRs("active"));
   });
