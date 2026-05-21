@@ -1384,6 +1384,26 @@ export default function Settings() {
                 defaultValue={DEFAULT_SETTING_VALUES.healingCooldownSeconds}
                 disabled={updateConfigMutation.isPending}
               />
+              <label className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-body">Automatic deployment healing</div>
+                  <div className="text-label text-muted-foreground">
+                    Monitor supported post-merge deployments and open follow-up fix PRs when they fail.
+                  </div>
+                </div>
+                <input
+                  type="checkbox"
+                  aria-label="Automatic deployment healing"
+                  checked={config?.autoHealDeployments ?? false}
+                  onChange={(e) =>
+                    updateConfigMutation.mutate({
+                      autoHealDeployments: e.target.checked,
+                    })
+                  }
+                  disabled={updateConfigMutation.isPending}
+                  className="h-4 w-4 accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+                />
+              </label>
               <SettingRow
                 label="Deployment check delay (seconds)"
                 description="Wait before checking a freshly produced deployment"

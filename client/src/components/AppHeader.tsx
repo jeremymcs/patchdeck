@@ -10,7 +10,7 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { toast } from "@/hooks/use-toast";
 import { ACTIVITY_POLL_INTERVAL_MS, getUiPollIntervalMs } from "@/lib/polling";
 
-type AppHeaderSection = "dashboard" | "prs" | "issues" | "releases" | "logs" | "settings";
+type AppHeaderSection = "dashboard" | "prs" | "issues" | "releases" | "deployments" | "logs" | "settings";
 type GitHubRateLimitState = {
   limited: boolean;
   resetAt: string | null;
@@ -38,6 +38,7 @@ const PRIMARY_NAV_ITEMS: Array<{ section: AppHeaderSection; label: string; href:
   { section: "issues", label: "Issues", href: "/issues" },
   { section: "prs", label: "PRs", href: "/prs" },
   { section: "releases", label: "Releases", href: "/releases" },
+  { section: "deployments", label: "Deployments", href: "/deployments" },
 ];
 
 const SECONDARY_NAV_ITEMS: Array<{ section: AppHeaderSection; label: string; href: string }> = [
