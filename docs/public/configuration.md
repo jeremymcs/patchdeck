@@ -71,7 +71,7 @@ The settings page in the dashboard provides a UI for:
 - **GitHub progress replies** — Toggle whether the babysitter posts public Accepted/running/completed status replies while working through review comments.
 - **Babysitter run concurrency** — Set how many `babysit_pr` jobs can be in-flight (`queued` + `leased`) across watcher sweeps.
 - **CI healing** — Enable autonomous CI repair and tune retry/session limits.
-- **Deployment healing** — Not yet exposed in the dashboard; use `PATCH /api/config` for the deployment-healing keys listed below.
+- **Deployment healing** — Enable post-merge deployment monitoring and tune the deployment-healing timing keys listed below.
 - **Theme** — Toggle between light and dark mode.
 
 ### Agent Health and Drain Mode
@@ -186,7 +186,7 @@ Deployment healing also requires the matching platform CLI on the machine runnin
 - Install and authenticate `vercel` to heal Vercel deployments.
 - Install and authenticate `railway` to heal Railway deployments.
 
-Deployment session history is exposed through `GET /api/deployment-healing-sessions`, `GET /api/deployment-healing-sessions/:id`, and the matching MCP read tools. The dashboard settings page and MCP `update_config` tool do not yet expose these deployment-healing knobs; use `PATCH /api/config` for them.
+Deployment session history is exposed on the dashboard Deployments page, through `GET /api/deployment-healing-sessions`, `GET /api/deployment-healing-sessions/:id`, and the matching MCP read tools.
 
 ## Build & Deploy
 
