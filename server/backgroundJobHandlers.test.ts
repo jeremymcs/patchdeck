@@ -364,6 +364,8 @@ test("work_issue handler opens a PR after a successful repair run", async () => 
 
   const handlers = createBackgroundJobHandlers({
     storage,
+    scheduleBackgroundJob: (kind, targetId, dedupeKey, payload, options) =>
+      queue.enqueue(kind, targetId, dedupeKey, payload, options),
     deps: {
       buildOctokitFn: async () => octokit as never,
       resolveGitHubAuthTokenFn: async () => "gho_token",
@@ -411,6 +413,28 @@ test("work_issue handler opens a PR after a successful repair run", async () => 
   assert.match(String(commentsCreated[2]?.body), /Worked issue #17 into PR #88/);
   assert.match(String(commentsCreated[2]?.body), /## Verification/);
   assert.match(String(commentsCreated[2]?.body), /## Pull Request/);
+
+  const trackedPr = await storage.getPRByRepoAndNumber("acme/widgets", 88);
+  assert.ok(trackedPr);
+  assert.equal(trackedPr.branch, "issue/17-fix-the-toggle-123");
+  assert.equal(trackedPr.status, "watching");
+  assert.equal(trackedPr.workContract.phase, "fixing");
+  assert.equal(trackedPr.workContract.blocker, "automation_queued");
+
+  const verifyJobs = await storage.listBackgroundJobs({
+    kind: "verify_issue",
+    targetId: "acme/widgets#17",
+  });
+  assert.equal(verifyJobs.length, 1);
+  assert.equal(verifyJobs[0]?.payload.workPrNumber, 88);
+  assert.equal(verifyJobs[0]?.payload.workPrUrl, "https://github.com/acme/widgets/pull/88");
+
+  const babysitJobs = await storage.listBackgroundJobs({
+    kind: "babysit_pr",
+    targetId: trackedPr.id,
+  });
+  assert.equal(babysitJobs.length, 1);
+  assert.equal(babysitJobs[0]?.payload.preferredAgent, "claude");
 
   const issueLogs = await storage.getLogs("acme/widgets#17");
   assert.deepEqual(
