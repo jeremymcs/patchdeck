@@ -9,6 +9,7 @@ import Dashboard from "@/pages/dashboard";
 import PRs from "@/pages/prs";
 import Settings from "@/pages/settings";
 import Releases from "@/pages/releases";
+import Deployments from "@/pages/deployments";
 import Issues from "@/pages/issues";
 import Logs from "@/pages/logs";
 import NotFound from "@/pages/not-found";
@@ -47,6 +48,14 @@ function ReleasesRoute() {
   );
 }
 
+function DeploymentsRoute() {
+  return (
+    <PageErrorBoundary pageName="Deployments">
+      <Deployments />
+    </PageErrorBoundary>
+  );
+}
+
 function IssuesRoute() {
   return (
     <PageErrorBoundary pageName="Issues">
@@ -78,6 +87,7 @@ function AppRouter() {
       <Route path="/prs" component={PRsRoute} />
       <Route path="/settings" component={SettingsRoute} />
       <Route path="/releases" component={ReleasesRoute} />
+      <Route path="/deployments" component={DeploymentsRoute} />
       <Route path="/issues" component={IssuesRoute} />
       <Route path="/logs" component={LogsRoute} />
       <Route component={NotFoundRoute} />

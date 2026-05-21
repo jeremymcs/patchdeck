@@ -265,12 +265,14 @@ test("full app QA route matrix is wired through the hash router", async () => {
     { label: "PRs", path: "/prs", component: "PRsRoute" },
     { label: "settings", path: "/settings", component: "SettingsRoute" },
     { label: "releases", path: "/releases", component: "ReleasesRoute" },
+    { label: "deployments", path: "/deployments", component: "DeploymentsRoute" },
     { label: "issues", path: "/issues", component: "IssuesRoute" },
     { label: "logs", path: "/logs", component: "LogsRoute" },
     { label: "not found fallback", component: "NotFoundRoute" },
   ]);
   assertHasExpression(sourceFile, "route runtime crash containment", /<PageErrorBoundary\s+pageName="Pull requests">[\s\S]*<PRs\s*\/>[\s\S]*<\/PageErrorBoundary>/);
   assertHasExpression(sourceFile, "issues runtime crash containment", /<PageErrorBoundary\s+pageName="Issues">[\s\S]*<Issues\s*\/>[\s\S]*<\/PageErrorBoundary>/);
+  assertHasExpression(sourceFile, "deployments runtime crash containment", /<PageErrorBoundary\s+pageName="Deployments">[\s\S]*<Deployments\s*\/>[\s\S]*<\/PageErrorBoundary>/);
   assertHasExpression(sourceFile, "not found runtime crash containment", /<PageErrorBoundary\s+pageName="Not found">[\s\S]*<NotFound\s*\/>[\s\S]*<\/PageErrorBoundary>/);
   assertHasExpression(notFoundSourceFile, "shared header", /<AppHeader\s+active="dashboard"/);
   assertHasStringValue(notFoundSourceFile, "not found panel test id", "not-found-panel");
@@ -290,6 +292,7 @@ test("dashboard keeps the QA-tested PR, repo, feedback, and side-panel workflows
     ["run-now action", "button-apply"],
     ["pause-resume watch action", "button-toggle-watch"],
     ["selected PR current run", "selected-pr-current-run"],
+    ["PR automation status panel", "pr-automation-status-panel"],
     ["PR merge readiness checklist", "pr-merge-readiness-checklist"],
     ["CI healing panel", "panel-ci-healing"],
     ["ask agent tab", "tab-ask"],
@@ -318,6 +321,7 @@ test("dashboard keeps the QA-tested PR, repo, feedback, and side-panel workflows
   assertHasExpression(sourceFile, "dashboard error scroll action", /\bscrollToDashboardErrors\b/);
   assertHasExpression(sourceFile, "dashboard errors panel component", /\bDashboardErrorsPanel\b/);
   assertHasExpression(sourceFile, "PR current run strip", /\bCurrentRunStatusStrip\b/);
+  assertHasExpression(sourceFile, "PR automation status component", /\bAutomationStatusPanel\b/);
 
   for (const [label, endpoint] of [
     ["active PR API", "/api/prs"],
@@ -560,6 +564,21 @@ test("releases route keeps the QA-tested list, expand, copy, retry, and GitHub l
   assertHasExpression(releases.sourceFile, "github releases cache window", /staleTime:\s*5\s*\*\s*60\s*\*\s*1000/);
   assertHasTestId(releases.sourceFile, "release readiness preview panel", "release-readiness-preview");
   assertHasExpression(releases.sourceFile, "github releases sync guard", /disabled=\{isFetchingGitHub \|\| runtimeState === undefined\}/);
+});
+
+test("deployments route keeps deployment healing visibility wired", async () => {
+  const { sourceFile } = await parseProjectFile("client/src/pages/deployments.tsx");
+  const { sourceFile: settingsSourceFile } = await parseProjectFile("client/src/pages/settings.tsx");
+  const { sourceFile: headerSourceFile } = await parseProjectFile("client/src/components/AppHeader.tsx");
+
+  assertHasQueryKey(sourceFile, "deployment healing sessions query", "/api/deployment-healing-sessions");
+  assertHasTestId(sourceFile, "deployment session card", "deployment-healing-session-card");
+  assertHasTestId(sourceFile, "deployment empty state", "deployment-healing-empty-state");
+  assertHasStringValue(sourceFile, "follow-up PR label", "Follow-up PR");
+  assertHasExpression(sourceFile, "deployment log field", /\bdeploymentLog\b/);
+  assertHasStringValue(settingsSourceFile, "deployment healing toggle", "Automatic deployment healing");
+  assertHasExpression(settingsSourceFile, "deployment healing config key", /\bautoHealDeployments\b/);
+  assertHasStringValue(headerSourceFile, "deployments nav item", "/deployments");
 });
 
 test("onboarding panel keeps the QA-tested GitHub setup poll and install actions wired", async () => {
