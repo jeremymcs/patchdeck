@@ -13,13 +13,14 @@ export async function answerPRQuestion(params: {
   question: string;
   preferredAgent: CodingAgent;
   agentSettings?: AgentRuntimeSettings;
+  repositoryContext?: PRQuestionRepositoryContext | null;
 }): Promise<void> {
-  const { storage, prId, questionId, question, preferredAgent, agentSettings } = params;
+  const { storage, prId, questionId, question, preferredAgent, agentSettings, repositoryContext } = params;
 
   await storage.updateQuestion(questionId, { status: "answering" });
 
   try {
-    const context = await buildPRContext(storage, prId);
+    const context = await buildPRContext(storage, prId, repositoryContext ?? null);
     const agent = await resolveAgent(preferredAgent);
     const prompt = buildPrompt(context, question);
 
@@ -77,9 +78,25 @@ type PRContext = {
   lastChecked: string | null;
   feedbackSummary: string;
   recentLogs: string;
+  repositoryContext: string;
 };
 
-async function buildPRContext(storage: IStorage, prId: string): Promise<PRContext> {
+export type PRQuestionRepositoryContext = {
+  changedFiles: string;
+  commits: string;
+  note?: string;
+};
+
+function truncateForPrompt(value: string, maxLength: number) {
+  if (value.length <= maxLength) return value;
+  return `${value.slice(0, maxLength - 25).trimEnd()}\n[truncated for context]`;
+}
+
+async function buildPRContext(
+  storage: IStorage,
+  prId: string,
+  repositoryContext: PRQuestionRepositoryContext | null,
+): Promise<PRContext> {
   const pr = await storage.getPR(prId);
   if (!pr) throw new Error("PR not found");
 
@@ -113,6 +130,16 @@ async function buildPRContext(storage: IStorage, prId: string): Promise<PRContex
     lastChecked: pr.lastChecked,
     feedbackSummary: feedbackLines.length > 0 ? feedbackLines.join("\n") : "(no feedback items)",
     recentLogs: recentLogs || "(no recent activity)",
+    repositoryContext: repositoryContext
+      ? [
+        repositoryContext.note ? `Note: ${repositoryContext.note}` : "",
+        "Changed files and patch excerpts:",
+        truncateForPrompt(repositoryContext.changedFiles || "(no changed files available)", 12000),
+        "",
+        "Recent commits:",
+        truncateForPrompt(repositoryContext.commits || "(no commit context available)", 4000),
+      ].filter(Boolean).join("\n")
+      : "(repository diff and commit context unavailable)",
   };
 }
 
@@ -135,6 +162,9 @@ function buildPrompt(ctx: PRContext, question: string): string {
     "",
     "## Feedback Items",
     ctx.feedbackSummary,
+    "",
+    "## Repository Change Context",
+    ctx.repositoryContext,
     "",
     "## Recent Activity Logs (most recent 50 entries)",
     ctx.recentLogs,

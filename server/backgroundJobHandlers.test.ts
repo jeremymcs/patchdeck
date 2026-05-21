@@ -58,7 +58,7 @@ test("answer_pr_question handler delegates for non-terminal questions", async ()
     `answer_pr_question:${question.id}`,
     { prId },
   );
-  const calls: Array<{ prId: string; questionId: string; question: string; preferredAgent: string }> = [];
+  const calls: Array<{ prId: string; questionId: string; question: string; preferredAgent: string; changedFiles?: string }> = [];
 
   const handlers = createBackgroundJobHandlers({
     storage,
@@ -68,7 +68,29 @@ test("answer_pr_question handler delegates for non-terminal questions", async ()
         questionId: params.questionId,
         question: params.question,
         preferredAgent: params.preferredAgent,
+        changedFiles: params.repositoryContext?.changedFiles,
       });
+    },
+    deps: {
+      resolveGitHubAuthTokenFn: async () => "token",
+      buildOctokitFn: () => ({
+        pulls: {
+          listFiles: async () => ({
+            data: [
+              { filename: "src/widget.ts", status: "modified", additions: 10, deletions: 2, changes: 12, patch: "@@ -1 +1 @@\n-old\n+new" },
+            ],
+          }),
+          listCommits: async () => ({
+            data: [
+              {
+                sha: "abcdef123456",
+                commit: { message: "feat: add widget\n\nbody", author: { name: "Alice" } },
+                author: { login: "alice" },
+              },
+            ],
+          }),
+        },
+      }) as never,
     },
   });
 
@@ -80,6 +102,7 @@ test("answer_pr_question handler delegates for non-terminal questions", async ()
     questionId: question.id,
     question: "What changed?",
     preferredAgent: "claude",
+    changedFiles: "- src/widget.ts (modified, +10/-2, 12 changes)\n@@ -1 +1 @@\n-old\n+new",
   });
 });
 

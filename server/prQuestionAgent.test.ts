@@ -58,6 +58,35 @@ async function withFakeAgent(
   }
 }
 
+async function withCapturingFakeAgent(
+  run: (promptPath: string) => Promise<void>,
+): Promise<void> {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), "fake-agent-bin-"));
+  const promptPath = path.join(tempRoot, "prompt.txt");
+  const fakeClaudePath = path.join(tempRoot, "claude");
+  const originalPath = process.env.PATH;
+
+  try {
+    await writeFile(
+      fakeClaudePath,
+      [
+        "#!/usr/bin/env node",
+        "const fs = require('node:fs');",
+        `fs.writeFileSync(${JSON.stringify(promptPath)}, process.argv[process.argv.length - 1] || '', 'utf8');`,
+        "process.stdout.write('Answer from captured context');",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    await chmod(fakeClaudePath, 0o755);
+    process.env.PATH = [tempRoot, originalPath].filter(Boolean).join(path.delimiter);
+    await run(promptPath);
+  } finally {
+    process.env.PATH = originalPath;
+    await rm(tempRoot, { recursive: true, force: true });
+  }
+}
+
 describe("answerPRQuestion", () => {
   it("sets status to 'error' when the PR does not exist", async () => {
     const storage = new MemStorage();
@@ -270,6 +299,31 @@ describe("answerPRQuestion", () => {
       assert.equal(updated.status, "error");
       assert.match(updated.error ?? "", /empty response/i);
       assert.equal(updated.answer, null);
+    });
+  });
+
+  it("includes bounded repository change context in the agent prompt", async () => {
+    await withCapturingFakeAgent(async (promptPath) => {
+      const storage = new MemStorage();
+      const prId = await seedPR(storage);
+      const q = await storage.addQuestion(prId, "What changed?");
+
+      await answerPRQuestion({
+        storage,
+        prId,
+        questionId: q.id,
+        question: q.question,
+        preferredAgent: "claude",
+        repositoryContext: {
+          changedFiles: "- src/widget.ts (modified, +10/-2, 12 changes)\n@@ -1 +1 @@\n-old\n+new",
+          commits: "- abcdef1 feat: add widget (Alice)",
+        },
+      });
+
+      const prompt = await import("node:fs/promises").then((fs) => fs.readFile(promptPath, "utf8"));
+      assert.match(prompt, /## Repository Change Context/);
+      assert.match(prompt, /src\/widget\.ts/);
+      assert.match(prompt, /abcdef1 feat: add widget/);
     });
   });
 });
