@@ -292,6 +292,7 @@ test("dashboard keeps the QA-tested PR, repo, feedback, and side-panel workflows
     ["run-now action", "button-apply"],
     ["pause-resume watch action", "button-toggle-watch"],
     ["selected PR current run", "selected-pr-current-run"],
+    ["PR automation status panel", "pr-automation-status-panel"],
     ["PR merge readiness checklist", "pr-merge-readiness-checklist"],
     ["CI healing panel", "panel-ci-healing"],
     ["ask agent tab", "tab-ask"],
@@ -320,6 +321,7 @@ test("dashboard keeps the QA-tested PR, repo, feedback, and side-panel workflows
   assertHasExpression(sourceFile, "dashboard error scroll action", /\bscrollToDashboardErrors\b/);
   assertHasExpression(sourceFile, "dashboard errors panel component", /\bDashboardErrorsPanel\b/);
   assertHasExpression(sourceFile, "PR current run strip", /\bCurrentRunStatusStrip\b/);
+  assertHasExpression(sourceFile, "PR automation status component", /\bAutomationStatusPanel\b/);
 
   for (const [label, endpoint] of [
     ["active PR API", "/api/prs"],
@@ -545,6 +547,7 @@ test("releases route keeps the QA-tested list, expand, copy, retry, and GitHub l
   const releases = await parseProjectFile("client/src/pages/releases.tsx");
 
   assertHasQueryKey(releases.sourceFile, "release route query", "/api/releases");
+  assertHasQueryKey(releases.sourceFile, "release preview query", "/api/repos/release-preview");
   assertHasQueryKey(releases.sourceFile, "github releases query", "/api/github-releases");
   assertHasQueryKey(releases.sourceFile, "runtime query", "/api/runtime");
   assertHasApiRequest(releases.sourceFile, "release retry mutation", "POST", /`\/api\/releases\/\$\{id\}\/retry`/);
@@ -554,10 +557,12 @@ test("releases route keeps the QA-tested list, expand, copy, retry, and GitHub l
     ["github link button", "Open on GitHub"],
     ["sync github button tooltip", "Sync from GitHub"],
     ["orphan section header", "Published outside the pipeline"],
+    ["release readiness preview", "Release preview"],
     ["empty release state", "No release activity yet."],
     ["watched repositories sidebar", "Watched repositories"],
   ]);
   assertHasExpression(releases.sourceFile, "github releases cache window", /staleTime:\s*5\s*\*\s*60\s*\*\s*1000/);
+  assertHasTestId(releases.sourceFile, "release readiness preview panel", "release-readiness-preview");
   assertHasExpression(releases.sourceFile, "github releases sync guard", /disabled=\{isFetchingGitHub \|\| runtimeState === undefined\}/);
 });
 
