@@ -342,6 +342,7 @@ test("dashboard keeps the QA-tested PR, repo, feedback, and side-panel workflows
   assertHasExpression(sourceFile, "queue status badge", /\bQueueStatusBadge\b/);
   assertHasExpression(sourceFile, "queue status index", /\bqueueStatusById\b/);
   assertHasExpression(sourceFile, "PR number search helper", /\bmatchesNumberSearch\b/);
+  assertHasExpression(sourceFile, "PR ready merge rail", /isPRSummaryReadyToMerge\(pr\)\s*\?\s*["']success["']\s*:\s*prStatusTone\(pr\)/);
   assertHasStringValue(sourceFile, "PR number search placeholder", "Search #");
   assertHasExpression(sourceFile, "issue-linked PR index", /\bbuildIssueLinkedPRIndex\b/);
   assertHasStringValue(sourceFile, "linked issues tab label", /Linked Issues \(/);
