@@ -290,6 +290,7 @@ test("dashboard keeps the QA-tested PR, repo, feedback, and side-panel workflows
     ["run-now action", "button-apply"],
     ["pause-resume watch action", "button-toggle-watch"],
     ["selected PR current run", "selected-pr-current-run"],
+    ["PR automation status panel", "pr-automation-status-panel"],
     ["PR merge readiness checklist", "pr-merge-readiness-checklist"],
     ["CI healing panel", "panel-ci-healing"],
     ["ask agent tab", "tab-ask"],
@@ -318,6 +319,7 @@ test("dashboard keeps the QA-tested PR, repo, feedback, and side-panel workflows
   assertHasExpression(sourceFile, "dashboard error scroll action", /\bscrollToDashboardErrors\b/);
   assertHasExpression(sourceFile, "dashboard errors panel component", /\bDashboardErrorsPanel\b/);
   assertHasExpression(sourceFile, "PR current run strip", /\bCurrentRunStatusStrip\b/);
+  assertHasExpression(sourceFile, "PR automation status component", /\bAutomationStatusPanel\b/);
 
   for (const [label, endpoint] of [
     ["active PR API", "/api/prs"],
