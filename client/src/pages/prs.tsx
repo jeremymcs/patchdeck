@@ -413,6 +413,86 @@ function MergeReadinessChecklist({
   );
 }
 
+function AutomationStatusPanel({
+  pr,
+  contract,
+  queueStatus,
+  failedActivity,
+  watchEnabled,
+  globalDrainMode,
+  isGitHubThrottled,
+  activityIdleReason,
+  errorMessage,
+}: {
+  pr: PR;
+  contract: PRWorkContract;
+  queueStatus: QueueStatusView | null;
+  failedActivity?: ActivityItem;
+  watchEnabled: boolean;
+  globalDrainMode: boolean;
+  isGitHubThrottled: boolean;
+  activityIdleReason: string | null;
+  errorMessage: string | null;
+}) {
+  const nextAction = formatContractTime(contract.nextActionAt);
+  const lastAttempt = formatContractTime(contract.lastAttemptAt);
+  const currentRun = pr.currentRun;
+  const statusLabel = queueStatus?.label
+    ?? (currentRun?.status === "running" ? "running" : null)
+    ?? (globalDrainMode ? "paused" : null)
+    ?? (!watchEnabled ? "watch paused" : null)
+    ?? (isGitHubThrottled ? "rate limited" : null)
+    ?? (pr.status === "error" ? "needs attention" : "watching");
+  const reason = errorMessage
+    ?? failedActivity?.lastError
+    ?? contract.reason
+    ?? activityIdleReason
+    ?? "No blocker recorded.";
+
+  return (
+    <div
+      className="mt-2 rounded-md border border-border bg-background/60 px-3 py-2 text-label"
+      data-testid="pr-automation-status-panel"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="text-label font-medium uppercase tracking-wider text-muted-foreground">
+          Automation status
+        </div>
+        <span className="rounded-md border border-border px-1.5 py-0 text-label uppercase tracking-wider text-foreground">
+          {statusLabel}
+        </span>
+      </div>
+      <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+        <div>
+          <div className="text-label uppercase tracking-wider text-muted-foreground">Phase</div>
+          <div className="mt-0.5 text-foreground">{formatPRWorkPhase(contract.phase)}</div>
+        </div>
+        <div>
+          <div className="text-label uppercase tracking-wider text-muted-foreground">Queue</div>
+          <div className="mt-0.5">
+            {queueStatus ? <QueueStatusBadge status={queueStatus} /> : <span className="text-foreground">no queued work</span>}
+          </div>
+        </div>
+        <div>
+          <div className="text-label uppercase tracking-wider text-muted-foreground">Next action</div>
+          <div className="mt-0.5 text-foreground">{nextAction ?? "waiting for watcher"}</div>
+        </div>
+        <div>
+          <div className="text-label uppercase tracking-wider text-muted-foreground">Last attempt</div>
+          <div className="mt-0.5 text-foreground">{lastAttempt ?? "none recorded"}</div>
+        </div>
+      </div>
+      <div className="mt-2 border-t border-border pt-2">
+        <span className="text-label uppercase tracking-wider text-muted-foreground">Why</span>
+        <span className="ml-2 text-foreground/80">
+          {contract.blocker ? `${formatPRWorkBlocker(contract.blocker)}: ` : ""}
+          {reason}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function AgentIndicator({ pr }: { pr: PRSummary }) {
   const isProcessing = pr.status === "processing";
 
@@ -1758,11 +1838,22 @@ export default function Dashboard() {
                     </button>
                   </>
                 ) : undefined}
-                banner={(
-                  <>
-                    <CurrentRunStatusStrip run={selectedPR.currentRun} testId="selected-pr-current-run" />
-                    <MergeReadinessChecklist
-                      checks={selectedPRReadinessChecks}
+	                banner={(
+	                  <>
+	                    <CurrentRunStatusStrip run={selectedPR.currentRun} testId="selected-pr-current-run" />
+	                    <AutomationStatusPanel
+	                      pr={selectedPR}
+	                      contract={selectedPRWorkContract ?? getSafePRWorkContract(null)}
+	                      queueStatus={selectedPRQueueStatus}
+	                      failedActivity={selectedFailedActivity}
+	                      watchEnabled={selectedPRWatchEnabled}
+	                      globalDrainMode={globalDrainMode}
+	                      isGitHubThrottled={isGitHubThrottled}
+	                      activityIdleReason={activityIdleReason}
+	                      errorMessage={selectedPRErrorMessage}
+	                    />
+	                    <MergeReadinessChecklist
+	                      checks={selectedPRReadinessChecks}
                       ready={isPRDetailReadyToMerge(selectedPR)}
                       contract={selectedPRWorkContract ?? getSafePRWorkContract(null)}
                     />
