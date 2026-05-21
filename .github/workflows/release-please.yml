@@ -3,6 +3,22 @@ name: Release
 on:
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      release-ref:
+        description: Git ref to publish, such as v1.2.0.
+        required: true
+        type: string
+      publish-npm:
+        description: Publish the npm package from release-ref.
+        required: false
+        default: true
+        type: boolean
+      build-tauri:
+        description: Build and upload Tauri artifacts to release-ref.
+        required: false
+        default: true
+        type: boolean
 
 permissions:
   contents: write
@@ -49,3 +65,35 @@ jobs:
     uses: ./.github/workflows/tauri-build.yml
     with:
       release-tag: ${{ needs.release-please.outputs.tag_name }}
+
+  manual-publish-npm:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish-npm }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.release-ref }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - run: npm ci
+
+      - run: npm run build
+
+      - name: Publish package
+        run: npm publish --access public
+
+  manual-build-tauri:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.build-tauri }}
+    permissions:
+      contents: write
+    uses: ./.github/workflows/tauri-build.yml
+    with:
+      release-tag: ${{ inputs.release-ref }}
