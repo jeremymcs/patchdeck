@@ -4,6 +4,12 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      release-tag:
+        description: Tag to upload built artifacts to. Empty for a CI-only build.
+        type: string
+        required: false
+        default: ''
   workflow_call:
     inputs:
       release-tag:
