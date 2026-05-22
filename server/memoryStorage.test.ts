@@ -493,6 +493,7 @@ describe("MemStorage", () => {
         codexReasoningEffort: null,
         claudeModel: null,
         claudeEffort: null,
+        agentInstructions: "",
       }]);
     });
 
@@ -516,6 +517,7 @@ describe("MemStorage", () => {
         codexReasoningEffort: null,
         claudeModel: null,
         claudeEffort: null,
+        agentInstructions: "",
       });
 
       const config = await storage.getConfig();
@@ -534,6 +536,7 @@ describe("MemStorage", () => {
         codexReasoningEffort: null,
         claudeModel: null,
         claudeEffort: null,
+        agentInstructions: "",
       });
     });
   });

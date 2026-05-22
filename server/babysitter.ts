@@ -390,14 +390,29 @@ function truncateForPrompt(input: string, maxChars: number): string {
   return `${input.slice(0, maxChars)}\n... (truncated)`;
 }
 
+function formatRepoAgentInstructions(instructions?: string | null): string[] {
+  const trimmed = instructions?.trim();
+  if (!trimmed) {
+    return ["Repository agent instructions: none"];
+  }
+
+  return [
+    "Repository agent instructions:",
+    "```",
+    truncateForPrompt(trimmed, 4000),
+    "```",
+  ];
+}
+
 function buildDocumentationAssessmentPrompt(params: {
   pr: PR;
   pullSummary: GitHubPullSummary;
   changedFiles: string;
   diffStat: string;
   diffPreview: string;
+  agentInstructions?: string | null;
 }): string {
-  const { pr, pullSummary, changedFiles, diffStat, diffPreview } = params;
+  const { pr, pullSummary, changedFiles, diffStat, diffPreview, agentInstructions } = params;
 
   return [
     "You are deciding whether a pull request requires repository documentation updates.",
@@ -407,6 +422,8 @@ function buildDocumentationAssessmentPrompt(params: {
     `PR title: ${pr.title}`,
     `Base branch: ${pullSummary.baseRef}`,
     `Head branch: ${pullSummary.headRef}`,
+    "",
+    ...formatRepoAgentInstructions(agentInstructions),
     "",
     "Changed files (git diff --name-only origin/base...HEAD):",
     truncateForPrompt(changedFiles || "None", 4000),
@@ -452,8 +469,9 @@ function buildConflictResolutionPrompt(params: {
   pullSummary: GitHubPullSummary;
   remoteName: string;
   conflictFiles: string[];
+  agentInstructions?: string | null;
 }): string {
-  const { pr, pullSummary, remoteName, conflictFiles } = params;
+  const { pr, pullSummary, remoteName, conflictFiles, agentInstructions } = params;
 
   return [
     `You are acting as an autonomous PR babysitter for ${pr.repo} PR #${pr.number}.`,
@@ -464,6 +482,8 @@ function buildConflictResolutionPrompt(params: {
     `Base branch: ${pullSummary.baseRef}`,
     `Head remote: ${remoteName}`,
     "You are running inside an isolated app-owned worktree under ~/.patchdeck.",
+    "",
+    ...formatRepoAgentInstructions(agentInstructions),
     "",
     "A merge from the base branch into the head branch has been started but has conflicts.",
     "The following files have merge conflicts:",
@@ -490,8 +510,9 @@ function buildAgentFixPrompt(params: {
   commentTasks: FeedbackItem[];
   statusTasks: { context: string; description: string; targetUrl: string | null }[];
   docsTaskSummary: string | null;
+  agentInstructions?: string | null;
 }): string {
-  const { pr, pullSummary, remoteName, commentTasks, statusTasks, docsTaskSummary } = params;
+  const { pr, pullSummary, remoteName, commentTasks, statusTasks, docsTaskSummary, agentInstructions } = params;
 
   const commentSection = commentTasks.length
     ? commentTasks
@@ -543,6 +564,8 @@ function buildAgentFixPrompt(params: {
     "GitHub follow-up replies and review-thread resolution will be handled by the babysitter after your run.",
     "If a task is invalid after inspection, explain it in your final response and include the exact audit token.",
     "",
+    ...formatRepoAgentInstructions(agentInstructions),
+    "",
     "Approved review-comment tasks:",
     commentSection,
     "",
@@ -571,8 +594,9 @@ function buildCodeOwnerFallbackPrompt(params: {
   pr: PR;
   pullSummary: GitHubPullSummary;
   remoteName: string;
+  agentInstructions?: string | null;
 }): string {
-  const { pr, pullSummary, remoteName } = params;
+  const { pr, pullSummary, remoteName, agentInstructions } = params;
 
   return [
     pr.url,
@@ -588,6 +612,8 @@ function buildCodeOwnerFallbackPrompt(params: {
     "- Do not operate outside this worktree.",
     "- Review the latest PR review comments, unresolved review threads, issue comments, and failing checks.",
     "- Treat reviewer feedback as actionable by default, but validate it against the current code before changing anything. You can reject the feedback if it's not a valid feedback.",
+    "",
+    ...formatRepoAgentInstructions(agentInstructions),
     "",
     "Task:",
     "1. Fetch and inspect the current PR state.",
@@ -3376,10 +3402,12 @@ export class PRBabysitter {
         });
         await ensureGitIdentity(worktreePath, this.runtime.runCommand);
 
+        const fallbackRepoSettings = await this.storage.getRepoSettings(pr.repo);
         const prompt = buildCodeOwnerFallbackPrompt({
           pr,
           pullSummary,
           remoteName,
+          agentInstructions: fallbackRepoSettings?.agentInstructions ?? "",
         });
 
         await updateRunRecord({
@@ -3559,6 +3587,8 @@ export class PRBabysitter {
       await updateRunRecord({
         resolvedAgent: agent,
       });
+      const repoSettings = await this.storage.getRepoSettings(pr.repo);
+      const repoAgentInstructions = repoSettings?.agentInstructions ?? "";
       const parsedRepo = parseRepoSlug(pr.repo);
 
       if (!parsedRepo) {
@@ -4479,6 +4509,7 @@ export class PRBabysitter {
                 changedFiles: changedFilesResult.stdout.trim(),
                 diffStat: diffStatResult.stdout.trim(),
                 diffPreview: diffPreviewResult.stdout.trim(),
+                agentInstructions: repoAgentInstructions,
               });
               await queueLog(pr.id, "info", `Evaluating documentation needs with ${agent}`, {
                 phase: "evaluate.docs",
@@ -4680,6 +4711,7 @@ export class PRBabysitter {
                 pullSummary,
                 remoteName,
                 conflictFiles: normalizedConflictFiles,
+                agentInstructions: repoAgentInstructions,
               });
 
               await queueLog(pr.id, "info", `Launching ${agent} to resolve merge conflicts`, {
@@ -4818,6 +4850,7 @@ export class PRBabysitter {
               commentTasks: effectiveCommentTasks,
               statusTasks,
               docsTaskSummary,
+              agentInstructions: repoAgentInstructions,
             });
 
             await updateRunRecord({

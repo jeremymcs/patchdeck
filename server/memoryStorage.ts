@@ -300,6 +300,7 @@ export class MemStorage implements IStorage {
       codexReasoningEffort: null,
       claudeModel: null,
       claudeEffort: null,
+      agentInstructions: "",
     };
     const next = applyWatchedRepoUpdate(existing, updates);
     this.repoSettings.set(repo, next);
@@ -453,6 +454,7 @@ export class MemStorage implements IStorage {
           codexReasoningEffort: null,
           claudeModel: null,
           claudeEffort: null,
+          agentInstructions: "",
         });
       }
     }

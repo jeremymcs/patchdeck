@@ -5023,6 +5023,9 @@ test("babysitPR retries docs assessment for same-SHA failed state", async () => 
 
 test("babysitPR runs agent for docs-only work when docs assessment says needed", async () => {
   const storage = new MemStorage();
+  await storage.updateRepoSettings("alex-morgan-o/lolodex", {
+    agentInstructions: "Use pnpm docs:check before finishing.",
+  });
   const pr = await storage.addPR({
     number: 106,
     title: "Docs-only remediation",
@@ -5092,6 +5095,7 @@ test("babysitPR runs agent for docs-only work when docs assessment says needed",
     assert.equal(updated?.docsAssessment?.status, "needed");
     assert.match(capturedPrompt, /Approved documentation tasks:/);
     assert.match(capturedPrompt, /README and API docs need updates/);
+    assert.match(capturedPrompt, /Use pnpm docs:check before finishing\./);
     assert.match(capturedPrompt, /DOCS_SUMMARY_START <changed\|no_change>/);
   } finally {
     delete process.env.CODEFACTORY_HOME;

@@ -429,6 +429,7 @@ export async function registerRoutes(
         codexReasoningEffort: codexReasoningEffortSchema.nullable().optional(),
         claudeModel: z.string().nullable().optional(),
         claudeEffort: claudeEffortSchema.nullable().optional(),
+        agentInstructions: z.string().optional(),
       }).refine(
         (value) => (
           value.autoCreateReleases !== undefined
@@ -441,6 +442,7 @@ export async function registerRoutes(
           || value.codexReasoningEffort !== undefined
           || value.claudeModel !== undefined
           || value.claudeEffort !== undefined
+          || value.agentInstructions !== undefined
         ),
         "At least one repository setting must be provided",
       ).parse(req.body);

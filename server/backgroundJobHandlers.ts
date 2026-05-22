@@ -577,6 +577,7 @@ export function createBackgroundJobHandlers(params: {
           repoCloneUrl: buildGitHubCloneUrl(issue.repoFullName, githubToken),
           agent,
           agentSettings,
+          agentInstructions: repoSettings?.agentInstructions ?? "",
           subtasks: subtasks.length >= 2 ? subtasks : undefined,
         });
       } catch (error) {

@@ -254,6 +254,7 @@ test("SqliteStorage reloads config and PR state from the same root", async () =>
     codexReasoningEffort: "medium",
     claudeModel: null,
     claudeEffort: null,
+    agentInstructions: "",
   });
   assert.equal(runtime.drainMode, true);
   assert.equal(runtime.drainRequestedAt, "2026-03-18T10:00:00.000Z");
@@ -478,6 +479,10 @@ test("SqliteStorage schema defaults automatic release creation off", async () =>
       watchedRepoColumns.find((column) => column.name === "issue_auto_work")?.dflt_value,
       "0",
     );
+    assert.equal(
+      watchedRepoColumns.find((column) => column.name === "agent_instructions")?.dflt_value,
+      "''",
+    );
   } finally {
     db.close();
     storage.close();
@@ -528,6 +533,7 @@ test("SqliteStorage updateRepoSettings tracks a previously untracked repo", asyn
       codexReasoningEffort: null,
       claudeModel: null,
       claudeEffort: null,
+      agentInstructions: "",
     });
 
     const after = await storage.getConfig();
@@ -546,6 +552,7 @@ test("SqliteStorage updateRepoSettings tracks a previously untracked repo", asyn
       codexReasoningEffort: null,
       claudeModel: null,
       claudeEffort: null,
+      agentInstructions: "",
     });
   } finally {
     storage.close();
