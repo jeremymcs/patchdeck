@@ -317,6 +317,9 @@ test("work_issue handler opens a PR after a successful repair run", async () => 
     codingAgent: "claude",
     postGitHubProgressReplies: true,
   });
+  await storage.updateRepoSettings("acme/widgets", {
+    agentInstructions: "Use pnpm for this repository.",
+  });
   const queue = new BackgroundJobQueue(storage);
   const job = await queue.enqueue(
     "work_issue",
@@ -332,7 +335,7 @@ test("work_issue handler opens a PR after a successful repair run", async () => 
   );
   const pullsCreated: Array<Record<string, unknown>> = [];
   const commentsCreated: Array<Record<string, unknown>> = [];
-  const repairCalls: Array<{ repo: string; issueNumber: number; baseBranch: string; repoCloneUrl: string }> = [];
+  const repairCalls: Array<{ repo: string; issueNumber: number; baseBranch: string; repoCloneUrl: string; agentInstructions?: string | null }> = [];
   const octokit = {
     issues: {
       get: async () => ({
@@ -375,6 +378,7 @@ test("work_issue handler opens a PR after a successful repair run", async () => 
           issueNumber: input.issueNumber,
           baseBranch: input.baseBranch,
           repoCloneUrl: input.repoCloneUrl,
+          agentInstructions: input.agentInstructions,
         });
         return {
           accepted: true,
@@ -394,6 +398,7 @@ test("work_issue handler opens a PR after a successful repair run", async () => 
     issueNumber: 17,
     baseBranch: "main",
     repoCloneUrl: "https://x-access-token:gho_token@github.com/acme/widgets.git",
+    agentInstructions: "Use pnpm for this repository.",
   }]);
   assert.equal(pullsCreated.length, 1);
   assert.equal(pullsCreated[0]?.head, "issue/17-fix-the-toggle-123");

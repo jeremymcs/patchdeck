@@ -183,6 +183,7 @@ type WatchedRepoRow = {
   codex_reasoning_effort: Config["codexReasoningEffort"] | null;
   claude_model: string | null;
   claude_effort: Config["claudeEffort"] | null;
+  agent_instructions: string | null;
 };
 
 type FeedbackItemRow = {
@@ -604,7 +605,8 @@ export class SqliteStorage implements IStorage {
         codex_model TEXT,
         codex_reasoning_effort TEXT,
         claude_model TEXT,
-        claude_effort TEXT
+        claude_effort TEXT,
+        agent_instructions TEXT NOT NULL DEFAULT ''
       );
 
       CREATE TABLE IF NOT EXISTS prs (
@@ -969,6 +971,7 @@ export class SqliteStorage implements IStorage {
     this.ensureColumn("watched_repos", "codex_reasoning_effort", "TEXT");
     this.ensureColumn("watched_repos", "claude_model", "TEXT");
     this.ensureColumn("watched_repos", "claude_effort", "TEXT");
+    this.ensureColumn("watched_repos", "agent_instructions", "TEXT NOT NULL DEFAULT ''");
     this.exec("UPDATE watched_repos SET issue_auto_evaluate = 1 WHERE issue_auto_work = 1 AND issue_auto_evaluate = 0");
     this.ensureColumn("config", "max_concurrent_issue_evaluations", "INTEGER NOT NULL DEFAULT 2");
     this.ensureColumn("config", "max_concurrent_issue_work", "INTEGER NOT NULL DEFAULT 1");
@@ -1239,7 +1242,7 @@ export class SqliteStorage implements IStorage {
       for (const repo of config.watchedRepos) {
         const settings = watchedRepoSettings.get(repo);
         this.run(
-          "INSERT INTO watched_repos (repo, auto_create_releases, own_prs_only, issue_auto_evaluate, issue_auto_work, pr_auto_monitor, coding_agent_override, codex_model, codex_reasoning_effort, claude_model, claude_effort) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          "INSERT INTO watched_repos (repo, auto_create_releases, own_prs_only, issue_auto_evaluate, issue_auto_work, pr_auto_monitor, coding_agent_override, codex_model, codex_reasoning_effort, claude_model, claude_effort, agent_instructions) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
           repo,
           settings?.auto_create_releases ?? 0,
           settings?.own_prs_only ?? 1,
@@ -1251,6 +1254,7 @@ export class SqliteStorage implements IStorage {
           settings?.codex_reasoning_effort ?? null,
           settings?.claude_model ?? null,
           settings?.claude_effort ?? null,
+          settings?.agent_instructions ?? "",
         );
       }
     });
@@ -1269,12 +1273,13 @@ export class SqliteStorage implements IStorage {
       codexReasoningEffort: row.codex_reasoning_effort ?? null,
       claudeModel: row.claude_model ?? null,
       claudeEffort: row.claude_effort ?? null,
+      agentInstructions: row.agent_instructions ?? "",
     };
   }
 
   private getWatchedRepoRows(): WatchedRepoRow[] {
     return this.all<WatchedRepoRow>(
-      "SELECT repo, auto_create_releases, own_prs_only, issue_auto_evaluate, issue_auto_work, pr_auto_monitor, coding_agent_override, codex_model, codex_reasoning_effort, claude_model, claude_effort FROM watched_repos ORDER BY repo ASC",
+      "SELECT repo, auto_create_releases, own_prs_only, issue_auto_evaluate, issue_auto_work, pr_auto_monitor, coding_agent_override, codex_model, codex_reasoning_effort, claude_model, claude_effort, agent_instructions FROM watched_repos ORDER BY repo ASC",
     );
   }
 
@@ -2057,7 +2062,7 @@ export class SqliteStorage implements IStorage {
 
   async getRepoSettings(repo: string): Promise<WatchedRepo | undefined> {
     const row = this.get<WatchedRepoRow>(
-      "SELECT repo, auto_create_releases, own_prs_only, issue_auto_evaluate, issue_auto_work, pr_auto_monitor, coding_agent_override, codex_model, codex_reasoning_effort, claude_model, claude_effort FROM watched_repos WHERE repo = ?",
+      "SELECT repo, auto_create_releases, own_prs_only, issue_auto_evaluate, issue_auto_work, pr_auto_monitor, coding_agent_override, codex_model, codex_reasoning_effort, claude_model, claude_effort, agent_instructions FROM watched_repos WHERE repo = ?",
       repo,
     );
     return row ? this.parseWatchedRepoRow(row) : undefined;
@@ -2079,14 +2084,15 @@ export class SqliteStorage implements IStorage {
       codexReasoningEffort: null,
       claudeModel: null,
       claudeEffort: null,
+      agentInstructions: "",
     };
     const next = applyWatchedRepoUpdate(existing, updates);
 
     this.withWriteTransaction(() => {
       this.run(
         `
-          INSERT INTO watched_repos (repo, auto_create_releases, own_prs_only, issue_auto_evaluate, issue_auto_work, pr_auto_monitor, coding_agent_override, codex_model, codex_reasoning_effort, claude_model, claude_effort)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO watched_repos (repo, auto_create_releases, own_prs_only, issue_auto_evaluate, issue_auto_work, pr_auto_monitor, coding_agent_override, codex_model, codex_reasoning_effort, claude_model, claude_effort, agent_instructions)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(repo) DO UPDATE SET
             auto_create_releases = excluded.auto_create_releases,
             own_prs_only = excluded.own_prs_only,
@@ -2097,7 +2103,8 @@ export class SqliteStorage implements IStorage {
             codex_model = excluded.codex_model,
             codex_reasoning_effort = excluded.codex_reasoning_effort,
             claude_model = excluded.claude_model,
-            claude_effort = excluded.claude_effort
+            claude_effort = excluded.claude_effort,
+            agent_instructions = excluded.agent_instructions
         `,
         next.repo,
         Number(next.autoCreateReleases),
@@ -2110,6 +2117,7 @@ export class SqliteStorage implements IStorage {
         next.codexReasoningEffort,
         next.claudeModel,
         next.claudeEffort,
+        next.agentInstructions,
       );
     });
 

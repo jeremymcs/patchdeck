@@ -750,6 +750,7 @@ export const watchedRepoSchema = z.object({
   codexReasoningEffort: codexReasoningEffortSchema.nullable(),
   claudeModel: z.string().nullable(),
   claudeEffort: claudeEffortSchema.nullable(),
+  agentInstructions: z.string().default(""),
 });
 export type WatchedRepo = z.infer<typeof watchedRepoSchema>;
 

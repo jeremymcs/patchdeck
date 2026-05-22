@@ -423,10 +423,14 @@ export function applyWatchedRepoUpdate(
   existing: WatchedRepo,
   updates: Partial<Omit<WatchedRepo, "repo">>,
 ): WatchedRepo {
+  const agentInstructions = updates.agentInstructions === undefined
+    ? existing.agentInstructions
+    : updates.agentInstructions.trim();
   const merged = {
     ...existing,
     ...updates,
     repo: existing.repo,
+    agentInstructions,
   };
   if (merged.issueAutoWork) {
     merged.issueAutoEvaluate = true;

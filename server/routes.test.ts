@@ -1352,6 +1352,7 @@ test("GET/PATCH /api/repos/settings exposes repo-level settings", async () => {
       codexReasoningEffort: "default" | "low" | "medium" | "high" | "xhigh" | null;
       claudeModel: string | null;
       claudeEffort: "default" | "low" | "medium" | "high" | "xhigh" | "max" | null;
+      agentInstructions: string;
     }>;
     assert.deepEqual(initial, [{
       repo: "acme/widgets",
@@ -1365,6 +1366,7 @@ test("GET/PATCH /api/repos/settings exposes repo-level settings", async () => {
       codexReasoningEffort: null,
       claudeModel: null,
       claudeEffort: null,
+      agentInstructions: "",
     }]);
 
     const updateResponse = await fetch(`${harness.baseUrl}/api/repos/settings`, {
@@ -1382,6 +1384,7 @@ test("GET/PATCH /api/repos/settings exposes repo-level settings", async () => {
         codexReasoningEffort: "high",
         claudeModel: "sonnet",
         claudeEffort: "xhigh",
+        agentInstructions: "Prefer the repo's pnpm scripts before npm.",
       }),
     });
     assert.equal(updateResponse.status, 200);
@@ -1397,6 +1400,7 @@ test("GET/PATCH /api/repos/settings exposes repo-level settings", async () => {
       codexReasoningEffort: "default" | "low" | "medium" | "high" | "xhigh" | null;
       claudeModel: string | null;
       claudeEffort: "default" | "low" | "medium" | "high" | "xhigh" | "max" | null;
+      agentInstructions: string;
     };
     // Enabling auto-work implicitly enables auto-evaluate — they're dependent settings,
     // not independent flags. Verifies coercion in applyWatchedRepoUpdate.
@@ -1412,6 +1416,7 @@ test("GET/PATCH /api/repos/settings exposes repo-level settings", async () => {
       codexReasoningEffort: "high",
       claudeModel: "sonnet",
       claudeEffort: "xhigh",
+      agentInstructions: "Prefer the repo's pnpm scripts before npm.",
     });
 
     const persisted = await harness.storage.getRepoSettings("acme/widgets");
@@ -1427,6 +1432,7 @@ test("GET/PATCH /api/repos/settings exposes repo-level settings", async () => {
       codexReasoningEffort: "high",
       claudeModel: "sonnet",
       claudeEffort: "xhigh",
+      agentInstructions: "Prefer the repo's pnpm scripts before npm.",
     });
   } finally {
     await harness.close();
@@ -1465,6 +1471,7 @@ test("PATCH /api/repos/settings can update only ownPrsOnly", async () => {
       codexReasoningEffort: "default" | "low" | "medium" | "high" | "xhigh" | null;
       claudeModel: string | null;
       claudeEffort: "default" | "low" | "medium" | "high" | "xhigh" | "max" | null;
+      agentInstructions: string;
     };
     assert.deepEqual(updated, {
       repo: "acme/widgets",
@@ -1478,6 +1485,7 @@ test("PATCH /api/repos/settings can update only ownPrsOnly", async () => {
       codexReasoningEffort: null,
       claudeModel: null,
       claudeEffort: null,
+      agentInstructions: "",
     });
   } finally {
     await harness.close();

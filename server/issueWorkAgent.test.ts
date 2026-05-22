@@ -40,6 +40,24 @@ test("buildIssueWorkPrompt includes repository contribution guidance when presen
   assert.match(prompt, /Keep changes small and update tests\./);
 });
 
+test("buildIssueWorkPrompt includes custom repository agent instructions", () => {
+  const prompt = buildIssueWorkPrompt({
+    repo: "acme/widgets",
+    issueNumber: 17,
+    issueTitle: "Fix the toggle",
+    issueUrl: "https://github.com/acme/widgets/issues/17",
+    issueBody: "The toggle is stuck",
+    labels: [],
+    author: "alice",
+    baseBranch: "main",
+    agent: "claude",
+    agentInstructions: "Use pnpm test for focused verification.",
+  });
+
+  assert.match(prompt, /Repository agent instructions:/);
+  assert.match(prompt, /Use pnpm test for focused verification\./);
+});
+
 test("runIssueWorkRepair commits, pushes, and verifies the issue branch", async () => {
   const calls: Array<{ command: string; args: string[]; cwd?: string }> = [];
   let agentPrompt = "";

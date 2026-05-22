@@ -1118,6 +1118,28 @@ export default function Settings() {
                           </select>
                         </div>
                       </div>
+                      <div className="mt-4 grid gap-2 border-t border-border pt-4">
+                        <label htmlFor={`tracked-repo-agent-instructions-${id}`} className="text-label uppercase tracking-wider text-muted-foreground">
+                          Agent instructions
+                        </label>
+                        <textarea
+                          id={`tracked-repo-agent-instructions-${id}`}
+                          defaultValue={repo.agentInstructions}
+                          onBlur={(e) => {
+                            const next = e.currentTarget.value;
+                            if (next !== repo.agentInstructions) {
+                              updateRepoSettingsMutation.mutate({
+                                repo: repo.repo,
+                                agentInstructions: next,
+                              });
+                            }
+                          }}
+                          disabled={updateRepoSettingsMutation.isPending}
+                          rows={4}
+                          placeholder="Repository-specific instructions for issue work and PR babysitter runs."
+                          className="min-h-24 resize-y border border-border bg-transparent px-3 py-2 text-body leading-relaxed focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
+                        />
+                      </div>
                     </div>
                   );
                 })}

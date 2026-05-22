@@ -20,6 +20,7 @@ export type IssueWorkPromptInput = {
   agent: CodingAgent;
   agentSettings?: AgentRuntimeSettings;
   contributionGuidance?: string | null;
+  agentInstructions?: string | null;
   subtasks?: IssueSubtask[];
 };
 
@@ -77,6 +78,7 @@ export function buildIssueWorkPrompt(input: IssueWorkPromptInput): string {
   const labels = input.labels.length > 0 ? input.labels.join(", ") : "none";
   const author = input.author || "unknown";
   const contributionGuidance = input.contributionGuidance?.trim();
+  const agentInstructions = input.agentInstructions?.trim();
   const guidance = contributionGuidance
     ? [
         "Repository contribution guidance:",
@@ -89,6 +91,14 @@ export function buildIssueWorkPrompt(input: IssueWorkPromptInput): string {
         "- No CONTRIBUTING.md was found in the repository.",
         "- Use the concise issue-reply and PR-body templates below.",
       ].join("\n");
+  const customInstructions = agentInstructions
+    ? [
+        "Repository agent instructions:",
+        "```",
+        trimText(agentInstructions, 4000),
+        "```",
+      ].join("\n")
+    : "Repository agent instructions: none";
 
   const hasSubtasks = (input.subtasks?.length ?? 0) >= 2;
   const subtaskSection = hasSubtasks
@@ -144,6 +154,8 @@ export function buildIssueWorkPrompt(input: IssueWorkPromptInput): string {
     "If no contribution file exists, keep the final summary concise and factual.",
     "",
     guidance,
+    "",
+    customInstructions,
     "",
     "Fallback response template:",
     "```",
@@ -448,6 +460,7 @@ export async function runIssueWorkRepair(
         repoContributionGuidance ? `CONTRIBUTING.md:\n${repoContributionGuidance}` : null,
         repoPullRequestTemplate ? `.github/pull_request_template.md:\n${repoPullRequestTemplate}` : null,
       ].filter((value): value is string => Boolean(value)).join("\n\n") || null,
+      agentInstructions: input.agentInstructions,
     });
     const branchCreate = await deps.runCommand(
       "git",
