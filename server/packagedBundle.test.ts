@@ -1,14 +1,10 @@
 import assert from "node:assert/strict";
-import { builtinModules } from "node:module";
+import { isBuiltin } from "node:module";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 
-const builtins = new Set([
-  ...builtinModules,
-  ...builtinModules.map((name) => `node:${name}`),
-]);
 const optionalPackageRequires = new Set([
   // debug probes this in a try/catch for terminal colors; it is not required
   // for the packaged server to start.
@@ -18,7 +14,7 @@ const optionalPackageRequires = new Set([
 function isPackageRequire(specifier: string) {
   return !specifier.startsWith(".")
     && !specifier.startsWith("/")
-    && !builtins.has(specifier);
+    && !isBuiltin(specifier);
 }
 
 test("production server bundle is self-contained for desktop resources", async (t) => {
