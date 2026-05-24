@@ -1084,6 +1084,49 @@ test("listIssues stays cached-only when issue automation is off", async () => {
   assert.equal(buildOctokitCalls, 0, "disabled issue automation must not enrich list rows through GitHub");
 });
 
+test("listIssues excludes closed worked issues from the default open issue count", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig({ autoIssues: false, watchedRepos: ["owner/repo"] });
+  const makeIssue = (number: number, title: string) => ({
+    number,
+    title,
+    body: null,
+    bodyHtml: null,
+    url: `https://github.com/owner/repo/issues/${number}`,
+    repoFullName: "owner/repo",
+    repoCloneUrl: "https://github.com/owner/repo.git",
+    author: "alice",
+    labels: ["needs-triage"],
+    assignees: [],
+    comments: 0,
+    createdAt: "2026-05-03T17:00:00.000Z",
+    updatedAt: "2026-05-03T18:00:00.000Z",
+  });
+  await storage.upsertSyncedIssues("owner/repo", [
+    makeIssue(1, "Open issue"),
+    makeIssue(2, "Open worked issue"),
+    makeIssue(3, "Closed worked issue"),
+  ], "2026-05-03T18:00:00.000Z");
+  await storage.markSyncedIssueWorked("owner/repo", 2);
+  await storage.markSyncedIssueWorked("owner/repo", 3);
+  await storage.markRepoIssuesStale("owner/repo");
+  await storage.upsertSyncedIssues("owner/repo", [
+    makeIssue(1, "Open issue"),
+    makeIssue(2, "Open worked issue"),
+  ], "2026-05-03T19:00:00.000Z");
+
+  const runtime = createAppRuntime({
+    storage,
+    startBackgroundServices: false,
+    startWatcher: false,
+  });
+
+  const page = await runtime.listIssues({ limit: 50, offset: 0 });
+
+  assert.equal(page.totalCount, 2);
+  assert.deepEqual(page.items.map((issue) => issue.number), [2, 1]);
+});
+
 test("getIssue stays cached-only when issue automation is off", async () => {
   const storage = new MemStorage();
   await storage.updateConfig({ autoIssues: false, watchedRepos: ["owner/repo"] });
