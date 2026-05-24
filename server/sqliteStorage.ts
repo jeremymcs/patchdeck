@@ -2267,13 +2267,12 @@ export class SqliteStorage implements IStorage {
       `
         SELECT repo, issue_number, payload_json, is_open, is_worked, first_seen_at, last_seen_at
         FROM synced_issues
-        WHERE (is_open = 1 OR (? = 1 AND is_worked = 1)) AND repo IN (${placeholders}) AND (? = 1 OR is_worked = 0)
+        WHERE (is_open = 1 OR (? = 1 AND is_worked = 1)) AND repo IN (${placeholders})
         ORDER BY issue_number DESC
         LIMIT ? OFFSET ?
       `,
       includeWorked ? 1 : 0,
       ...input.repos,
-      includeWorked ? 1 : 0,
       input.limit + 1,
       input.offset,
     );
@@ -2292,12 +2291,11 @@ export class SqliteStorage implements IStorage {
       `
         SELECT repo, COUNT(*) as count
         FROM synced_issues
-        WHERE (is_open = 1 OR (? = 1 AND is_worked = 1)) AND repo IN (${placeholders}) AND (? = 1 OR is_worked = 0)
+        WHERE (is_open = 1 OR (? = 1 AND is_worked = 1)) AND repo IN (${placeholders})
         GROUP BY repo
       `,
       includeWorked ? 1 : 0,
       ...input.repos,
-      includeWorked ? 1 : 0,
     );
     const repoTotals: Record<string, number> = {};
     let totalCount = 0;

@@ -2759,6 +2759,115 @@ test("babysitPR uses a CODEFACTORY_HOME worktree, passes GitHub context, and ver
   delete process.env.CODEFACTORY_HOME;
 });
 
+test("babysitPR does not repost agent command comments for same-head retries", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig({ autoUpdateDocs: false });
+  const existingItem = makeFeedbackItem();
+  const pr = await storage.addPR({
+    number: 106,
+    title: "Verbose PR",
+    repo: "alex-morgan-o/lolodex",
+    branch: "feature/verbose",
+    author: "octocat",
+    url: "https://github.com/alex-morgan-o/lolodex/pull/106",
+    status: "watching",
+    feedbackItems: [existingItem],
+    accepted: 0,
+    rejected: 0,
+    flagged: 0,
+    testsPassed: null,
+    lintPassed: null,
+    lastChecked: null,
+  });
+  await storage.upsertAgentRun({
+    id: "prior-run",
+    prId: pr.id,
+    preferredAgent: "codex",
+    resolvedAgent: "codex",
+    status: "completed",
+    phase: "code-owner-fallback.completed",
+    prompt: "previous same-head prompt",
+    initialHeadSha: "abc123",
+    metadata: null,
+    lastError: null,
+    createdAt: "2026-03-15T10:01:00.000Z",
+    updatedAt: "2026-03-15T10:02:00.000Z",
+  });
+
+  const worktreeRoot = await mkdtemp(path.join(os.tmpdir(), "codefactory-home-"));
+  process.env.CODEFACTORY_HOME = worktreeRoot;
+  const postedAgentComments: string[] = [];
+  const pullSummary = makePullSummary(pr);
+  const followUp = makeFeedbackItem({
+    id: "gh-review-comment-2",
+    author: "code-factory",
+    body: `Implemented the requested rename.\n\n${existingItem.auditToken}`,
+    bodyHtml: `<p>Implemented the requested rename.</p><p>${existingItem.auditToken}</p>`,
+    sourceId: "2",
+    sourceNodeId: "PRRC_kwDO_followup",
+    sourceUrl: "https://github.com/alex-morgan-o/lolodex/pull/106#discussion_r2",
+    threadId: existingItem.threadId,
+    threadResolved: true,
+    createdAt: new Date().toISOString(),
+    decision: null,
+    decisionReason: null,
+    action: null,
+  });
+  let feedbackFetchCount = 0;
+
+  const babysitter = new PRBabysitter(
+    storage,
+    {
+      buildOctokit: async () => ({}) as never,
+      fetchFeedbackItemsForPR: async () => {
+        feedbackFetchCount += 1;
+        return feedbackFetchCount === 1 ? [existingItem] : [
+          { ...existingItem, threadResolved: true },
+          followUp,
+        ];
+      },
+      fetchPullSummary: async () => pullSummary,
+      listFailingStatuses: async () => [],
+      checkCISettled: async () => true,
+      listOpenPullsForRepo: async () => [],
+      postFollowUpForFeedbackItem: async () => undefined,
+      resolveReviewThread: async () => undefined,
+      resolveGitHubAuthToken: async () => "test-token",
+      addReactionToComment: async () => {},
+      postPRComment: async (_octokit: unknown, _parsed: unknown, body: string) => {
+        postedAgentComments.push(body);
+      },
+      postStatusReplyForFeedbackItem: async () => null,
+      updateStatusReply: async () => {},
+    },
+    {
+      resolveAgent: async () => "codex",
+      ciPollIntervalMs: 0,
+      evaluateFixNecessityWithAgent: async () => ({
+        needsFix: true,
+        reason: "Comment requires a code change",
+      }),
+      applyFixesWithAgent: async () => ({
+        code: 0,
+        stdout: "",
+        stderr: "",
+      }),
+      runCommand: makeGitRunCommand({
+        localHeadSha: "def456",
+        remoteHeadSha: "def456",
+      }),
+    },
+  );
+
+  await babysitter.babysitPR(pr.id, "codex");
+
+  const logs = await storage.getLogs(pr.id);
+  assert.deepEqual(postedAgentComments, []);
+  assert.ok(logs.some((log) => log.phase === "github.agent-command" && log.message.includes("Skipped duplicate agent command comment")));
+
+  delete process.env.CODEFACTORY_HOME;
+});
+
 test("babysitPR stages, commits, and pushes agent file edits from the app runtime", async () => {
   const storage = new MemStorage();
   await storage.updateConfig({ autoUpdateDocs: false });
