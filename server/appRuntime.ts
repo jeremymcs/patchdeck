@@ -1528,8 +1528,8 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       };
     }
 
-    const synced = await storage.listSyncedIssues({ repos: config.watchedRepos, limit, offset, includeWorked: true });
-    const counts = await storage.listSyncedIssueCounts({ repos: config.watchedRepos, includeWorked: true });
+    const synced = await storage.listSyncedIssues({ repos: config.watchedRepos, limit, offset });
+    const counts = await storage.listSyncedIssueCounts({ repos: config.watchedRepos });
     const issueAutomationEnabled = config.autoIssues !== false;
     const octokit = issueAutomationEnabled ? await buildOctokit(config) : null;
     const workJobs = await storage.listBackgroundJobs({ kind: "work_issue" });

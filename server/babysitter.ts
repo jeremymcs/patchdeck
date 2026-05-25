@@ -3897,7 +3897,23 @@ export class PRBabysitter {
         }
       };
 
-      const postAgentCommandComment = async (agent: CodingAgent, prompt: string) => {
+      const postAgentCommandComment = async (agent: CodingAgent, prompt: string, headSha: string | null) => {
+        if (headSha) {
+          const previousRuns = await this.storage.listAgentRuns({ prId: pr.id });
+          const alreadyPostedForHead = previousRuns.some((candidate) =>
+            candidate.id !== runId
+            && candidate.initialHeadSha === headSha
+            && Boolean(candidate.prompt)
+          );
+          if (alreadyPostedForHead) {
+            await queueLog(pr.id, "info", "Skipped duplicate agent command comment for same PR head", {
+              phase: "github.agent-command",
+              metadata: { headSha },
+            });
+            return;
+          }
+        }
+
         try {
           await this.github.postPRComment(
             octokit,
@@ -3944,7 +3960,7 @@ export class PRBabysitter {
           phase,
           metadata: { agent, prompt: params.prompt },
         });
-        await postAgentCommandComment(agent, params.prompt);
+        await postAgentCommandComment(agent, params.prompt, runRecord.initialHeadSha);
 
         return this.runtime.applyFixesWithAgent({
           agent,
@@ -4719,7 +4735,7 @@ export class PRBabysitter {
                 metadata: { agent, promptChars: conflictPrompt.length },
               });
 
-              await postAgentCommandComment(agent, conflictPrompt);
+              await postAgentCommandComment(agent, conflictPrompt, pullSummary.headSha);
 
               const conflictResult = await applyWithCurrentAgent({
                 cwd: worktreePath,
@@ -4868,7 +4884,7 @@ export class PRBabysitter {
             });
 
             // Post agent command to GitHub PR as a comment for debugging visibility.
-            await postAgentCommandComment(agent, fixPrompt);
+            await postAgentCommandComment(agent, fixPrompt, replayInitialHeadSha || pullSummary.headSha);
 
             const agentRunningStatus = STATUS_MESSAGES.agentRunning(agent);
             await Promise.all(effectiveCommentTasks.map((task) => updateItemStatus(task.id, agentRunningStatus)));

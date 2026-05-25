@@ -367,7 +367,7 @@ export class MemStorage implements IStorage {
     const repos = new Set(input.repos.map((repo) => repo.toLowerCase()));
     const includeWorked = input.includeWorked ?? false;
     const all = Array.from(this.syncedIssues.values())
-      .filter((record) => (record.isOpen || (includeWorked && record.isWorked)) && repos.has(record.repo.toLowerCase()) && (includeWorked || !record.isWorked))
+      .filter((record) => (record.isOpen || (includeWorked && record.isWorked)) && repos.has(record.repo.toLowerCase()))
       .sort((a, b) => b.number - a.number);
     const items = all.slice(input.offset, input.offset + input.limit).map((record) => structuredClone(record));
     return { items, hasMore: input.offset + items.length < all.length };
@@ -381,7 +381,6 @@ export class MemStorage implements IStorage {
     for (const record of Array.from(this.syncedIssues.values())) {
       if (!record.isOpen && !(includeWorked && record.isWorked)) continue;
       if (!repos.has(record.repo.toLowerCase())) continue;
-      if (!includeWorked && record.isWorked) continue;
       repoTotals[record.repo] = (repoTotals[record.repo] ?? 0) + 1;
       totalCount += 1;
     }
