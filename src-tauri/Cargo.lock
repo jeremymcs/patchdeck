@@ -2597,7 +2597,7 @@ dependencies = [
 
 [[package]]
 name = "patchdeck"
-version = "1.2.1"
+version = "1.3.0"
 dependencies = [
  "portpicker",
  "reqwest 0.12.28",
