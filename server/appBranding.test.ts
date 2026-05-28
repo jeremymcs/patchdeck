@@ -53,6 +53,7 @@ test("release metadata keeps Tauri package versions in sync", async () => {
 
   assert.equal(tauriConfig.version, version);
   assert.match(cargoToml, new RegExp(`^version = "${version}"$`, "m"));
+  assert.equal(releasePleaseConfig["commit-batch-size"], 1);
 
   const extraFilePaths = releasePleaseConfig.packages["."]["extra-files"].map((file: { path: string }) => file.path);
   assert.deepEqual(extraFilePaths, [
