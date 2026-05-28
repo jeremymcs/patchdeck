@@ -752,8 +752,10 @@ function makePlanIssue(
     repo: overrides.repo,
     number: overrides.number,
     author: overrides.author ?? "alice",
+    isWorked: overrides.isWorked ?? false,
     workStatus: overrides.workStatus ?? "idle",
     workPrUrl: overrides.workPrUrl ?? null,
+    externalWorkPrUrl: overrides.externalWorkPrUrl ?? null,
     autoWorkEligible: overrides.autoWorkEligible ?? false,
     evaluationStatus: overrides.evaluationStatus ?? null,
     updatedAt: overrides.updatedAt ?? "2026-05-01T00:00:00.000Z",
@@ -875,6 +877,32 @@ test("planAutomaticIssueQueueActions queues work for approved+eligible issues wh
     maxConcurrentIssueWork: 1,
   });
   assert.deepEqual(plan.work, [{ repo: "acme/widgets", number: 1, id: "acme/widgets#1" }]);
+});
+
+test("planAutomaticIssueQueueActions does not requeue worked issues", () => {
+  const plan = planAutomaticIssueQueueActions({
+    repoSettings: [{ repo: "acme/widgets", issueAutoEvaluate: true, issueAutoWork: true }],
+    issues: [
+      makePlanIssue({
+        repo: "acme/widgets",
+        number: 1,
+        isWorked: true,
+        evaluationStatus: "approved",
+        autoWorkEligible: true,
+      }),
+      makePlanIssue({
+        repo: "acme/widgets",
+        number: 2,
+        isWorked: true,
+      }),
+    ],
+    activeEvaluationTargets: new Set(),
+    activeWorkCount: 0,
+    maxConcurrentIssueEvaluations: 2,
+    maxConcurrentIssueWork: 1,
+  });
+
+  assert.deepEqual(plan, { evaluations: [], work: [] });
 });
 
 test("planAutomaticIssueQueueActions respects per-repo single-flight on work", () => {
