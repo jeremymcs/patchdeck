@@ -43,3 +43,23 @@ test("standalone metadata names the app PatchDeck (display) and patchdeck (packa
   assert.equal(tauriConfig.app.windows[0].title, APP_DISPLAY_NAME);
   assert.match(cargoToml, new RegExp(`^name = "${APP_PACKAGE_NAME}"$`, "m"));
 });
+
+test("release metadata keeps Tauri package versions in sync", async () => {
+  const packageJson = JSON.parse(await readProjectFile("package.json"));
+  const tauriConfig = JSON.parse(await readProjectFile("src-tauri/tauri.conf.json"));
+  const cargoToml = await readProjectFile("src-tauri/Cargo.toml");
+  const cargoLock = await readProjectFile("src-tauri/Cargo.lock");
+  const releasePleaseConfig = JSON.parse(await readProjectFile("release-please-config.json"));
+  const version = packageJson.version;
+
+  assert.equal(tauriConfig.version, version);
+  assert.match(cargoToml, new RegExp(`^version = "${version}"$`, "m"));
+  assert.match(cargoLock, new RegExp(`\\[\\[package\\]\\]\\nname = "${APP_PACKAGE_NAME}"\\nversion = "${version}"`, "m"));
+
+  const extraFilePaths = releasePleaseConfig.packages["."]["extra-files"].map((file: { path: string }) => file.path);
+  assert.deepEqual(extraFilePaths, [
+    "src-tauri/tauri.conf.json",
+    "src-tauri/Cargo.toml",
+    "src-tauri/Cargo.lock",
+  ]);
+});
