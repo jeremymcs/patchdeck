@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.3.0](https://github.com/jeremymcs/patchdeck/compare/v1.2.0...v1.3.0) (2026-05-28)
+
+
+### Features
+
+* add repo agent instructions ([527a93d](https://github.com/jeremymcs/patchdeck/commit/527a93de373a124cb5000967bbb0057188697166))
+* add repo agent instructions ([24f3e4e](https://github.com/jeremymcs/patchdeck/commit/24f3e4e2495ebd25868274db94f36efaceb2a87f))
+
+
+### Bug Fixes
+
+* count only open issues by default ([3d2dd8f](https://github.com/jeremymcs/patchdeck/commit/3d2dd8f9519a2f8dcc90743ffa1f37f217642ef3))
+* dedupe PatchDeck agent command comments ([1e51ea7](https://github.com/jeremymcs/patchdeck/commit/1e51ea71fb3b6bdae50b0b9415926048b5629b31))
+* hand off issue PRs to verification and babysitter ([26a92c3](https://github.com/jeremymcs/patchdeck/commit/26a92c3ec44420fb0912cb0ef71af5caa1162b81))
+* stop requeueing worked issues ([e954c6f](https://github.com/jeremymcs/patchdeck/commit/e954c6fbcbe13d0046f7932971ae8dc8edac69d3))
+* stop requeueing worked issues ([1ba3366](https://github.com/jeremymcs/patchdeck/commit/1ba3366531215beb5fcdafd78e2bdf3411b283f1))
+
 ## [1.2.0](https://github.com/jeremymcs/patchdeck/compare/patchdeck-v1.1.0...patchdeck-v1.2.0) (2026-05-21)
 
 
