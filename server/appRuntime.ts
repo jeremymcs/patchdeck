@@ -316,7 +316,7 @@ export type PlanAutomaticIssueQueueInput = {
   repoSettings: Pick<WatchedRepo, "repo" | "issueAutoEvaluate" | "issueAutoWork">[];
   issues: Pick<
     Issue,
-    "id" | "repo" | "number" | "author" | "workStatus" | "workPrUrl" | "externalWorkPrUrl" | "autoWorkEligible" | "evaluationStatus" | "updatedAt"
+    "id" | "repo" | "number" | "author" | "isWorked" | "workStatus" | "workPrUrl" | "externalWorkPrUrl" | "autoWorkEligible" | "evaluationStatus" | "updatedAt"
   >[];
   activeEvaluationTargets: Set<string>;
   activeWorkCount: number;
@@ -357,7 +357,7 @@ export function planAutomaticIssueQueueActions(
       continue;
     }
     const candidate = repoIssues
-      .filter((issue) => issue.workStatus === "idle" && !issue.workPrUrl && !issue.externalWorkPrUrl && issue.autoWorkEligible)
+      .filter((issue) => !issue.isWorked && issue.workStatus === "idle" && !issue.workPrUrl && !issue.externalWorkPrUrl && issue.autoWorkEligible)
       .sort((a, b) => compareIssueQueuePriority(a, b, priorityIssueAuthors))[0];
     if (!candidate) continue;
     result.work.push({ repo: candidate.repo, number: candidate.number, id: candidate.id });
@@ -372,6 +372,7 @@ export function planAutomaticIssueQueueActions(
       const pending = input.issues
         .filter((issue) =>
           issue.repo === repo
+          && !issue.isWorked
           && issue.workStatus === "idle"
           && !issue.workPrUrl
           && !issue.externalWorkPrUrl
