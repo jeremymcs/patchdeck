@@ -6249,6 +6249,114 @@ test("runQueuedBabysitPR launches code-owner fallback after the default run fail
   assert.equal(jobs[0]?.payload.monitorReason, "GitHub mergeable state is blocked");
 });
 
+test("runQueuedBabysitPR commits and pushes uncommitted code-owner fallback agent changes", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig({ autoUpdateDocs: false });
+  const pr = await storage.addPR({
+    number: 106,
+    title: "Verbose PR",
+    repo: "alex-morgan-o/lolodex",
+    branch: "feature/verbose",
+    author: "octocat",
+    url: "https://github.com/alex-morgan-o/lolodex/pull/106",
+    status: "watching",
+    feedbackItems: [],
+    accepted: 0,
+    rejected: 0,
+    flagged: 0,
+    testsPassed: null,
+    lintPassed: null,
+    lastChecked: null,
+  });
+  const worktreeRoot = await mkdtemp(path.join(os.tmpdir(), "codefactory-home-"));
+  process.env.CODEFACTORY_HOME = worktreeRoot;
+  const backgroundJobQueue = new BackgroundJobQueue(storage);
+  const gitCommands: string[] = [];
+  const applyCalls: Array<{ agent: string; cwd?: string }> = [];
+
+  try {
+    const babysitter = new PRBabysitter(
+      storage,
+      makeWatcherGitHubService({
+        fetchPullSummary: async () => makePullSummary(pr, { mergeableState: "blocked" }),
+        listFailingStatuses: async () => [{
+          context: "build",
+          description: "TypeScript compilation failed",
+          targetUrl: "https://github.com/octo/example/actions/runs/1",
+        }],
+      }),
+      {
+        resolveAgent: async () => "claude",
+        ciPollIntervalMs: 0,
+        evaluateFixNecessityWithAgent: async () => ({
+          needsFix: true,
+          reason: "Build failure needs a code change",
+        }),
+        applyFixesWithAgent: async ({ agent, cwd }) => {
+          applyCalls.push({ agent, cwd });
+          if (applyCalls.length === 1) {
+            return { code: 1, stdout: "", stderr: "default run failed" };
+          }
+          // Fallback agent modified files but did not commit or push them.
+          return { code: 0, stdout: "fallback handled the PR", stderr: "" };
+        },
+        runCommand: async (command: string, args: string[]) => {
+          gitCommands.push([command, ...args].join(" "));
+          if (command !== "git") {
+            return { code: 1, stdout: "", stderr: `unexpected command: ${command}` };
+          }
+
+          // Worktree status reports uncommitted changes after the fallback agent.
+          if (args[0] === "status" && args[1] === "--porcelain") {
+            return { code: 0, stdout: " M src/file.ts\n", stderr: "" };
+          }
+
+          // Local head is a new commit the agent (or PatchDeck) created.
+          if (args[0] === "rev-parse" && args[1] === "HEAD") {
+            return { code: 0, stdout: "localnew123\n", stderr: "" };
+          }
+
+          // FETCH_HEAD reflects the remote after the push: once the fetch
+          // happened, the remote head matches the locally created commit.
+          if (args[0] === "-C" && args[2] === "rev-parse" && args[3] === "FETCH_HEAD") {
+            const alreadyPushed = gitCommands.some((cmd) => cmd.startsWith("git push") && cmd.includes("HEAD:feature/verbose"));
+            return { code: 0, stdout: `${alreadyPushed ? "localnew123" : "remoteold456"}\n`, stderr: "" };
+          }
+
+          if (args[0] === "-C" && args[2] === "status") {
+            return { code: 0, stdout: "", stderr: "" };
+          }
+
+          if (args[0] === "-C" && args[2] === "fetch") {
+            return { code: 0, stdout: "fetched\n", stderr: "" };
+          }
+
+          return { code: 0, stdout: "", stderr: "" };
+        },
+      },
+      undefined,
+      async (...args) => backgroundJobQueue.enqueue(...args),
+    );
+
+    await babysitter.runQueuedBabysitPR(pr.id, "claude");
+  } finally {
+    delete process.env.CODEFACTORY_HOME;
+  }
+
+  const [run] = await storage.listAgentRuns({ prId: pr.id });
+  const logs = await storage.getLogs(pr.id);
+
+  assert.equal(applyCalls.length, 2);
+  assert.equal(run?.status, "completed");
+  assert.equal(run?.phase, "code-owner-fallback.completed");
+
+  // PatchDeck should have staged, committed, and pushed the uncommitted agent edits.
+  assert.ok(gitCommands.some((cmd) => cmd.startsWith("git add -A")), "expected git add -A");
+  assert.ok(gitCommands.some((cmd) => cmd.includes("commit") && cmd.includes("--no-verify")), "expected git commit");
+  assert.ok(gitCommands.some((cmd) => cmd.startsWith("git push") && cmd.includes("HEAD:feature/verbose")), "expected git push to PR branch");
+  assert.ok(logs.some((log) => log.phase === "code-owner-fallback" && log.message.includes("finalized")), "expected finalize log");
+});
+
 test("runQueuedBabysitPR records code-owner fallback failure phase", async () => {
   const storage = new MemStorage();
   await storage.updateConfig({ autoUpdateDocs: false });
