@@ -971,7 +971,7 @@ function needsGitHubFollowUp(item: FeedbackItem, feedbackItems: FeedbackItem[]):
   // rejected as "not new work", not as reviewer feedback, so they must not
   // trigger another reply (that would loop on our own comments).
   const rejectedInternalReply = item.decision === "reject"
-    && /PatchDeck status comment|Automation audit trail follow-up/i.test(item.statusReason ?? "");
+    && /PatchDeck (agent command|audit trail|status) comment|Automation audit trail follow-up/i.test(item.statusReason ?? "");
   const isRejectedReviewThread = item.decision === "reject"
     && item.replyKind === "review_thread"
     && !rejectedInternalReply;

@@ -4609,6 +4609,68 @@ test("babysitPR does not pull rejected or resolved items into in_progress", asyn
   delete process.env.CODEFACTORY_HOME;
 });
 
+test("babysitPR does not re-reply to its own rejected audit-trail comments", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig({ autoUpdateDocs: false });
+  // A comment PatchDeck itself posted (contains the audit trail marker) that was
+  // rejected must not trigger another follow-up reply, or it would loop forever.
+  const ownReply = makeFeedbackItem({
+    id: "gh-review-comment-own-audit-reply",
+    author: "cwbcheng",
+    body: `已在提交 \`abc123\` 中处理。\n\n<!-- codefactory-feedback:gh-review-comment-1 -->`,
+    status: "rejected",
+    decision: "reject",
+    statusReason: "PatchDeck audit trail comment",
+  });
+  const pr = await storage.addPR({
+    number: 106,
+    title: "Verbose PR",
+    repo: "alex-morgan-o/lolodex",
+    branch: "feature/verbose",
+    author: "octocat",
+    url: "https://github.com/alex-morgan-o/lolodex/pull/106",
+    status: "watching",
+    feedbackItems: [ownReply],
+    accepted: 0,
+    rejected: 1,
+    flagged: 0,
+    testsPassed: null,
+    lintPassed: null,
+    lastChecked: null,
+  });
+
+  let postedFollowUpCount = 0;
+  const babysitter = new PRBabysitter(
+    storage,
+    makeWatcherGitHubService({
+      fetchFeedbackItemsForPR: async () => [ownReply],
+      fetchPullSummary: async () => makePullSummary(pr),
+      listFailingStatuses: async () => [],
+      postFollowUpForFeedbackItem: async () => {
+        postedFollowUpCount += 1;
+      },
+    }),
+    {
+      resolveAgent: async () => "codex",
+      ciPollIntervalMs: 0,
+      evaluateFixNecessityWithAgent: async () => {
+        throw new Error("own audit-trail reply should not be evaluated");
+      },
+      applyFixesWithAgent: async () => {
+        throw new Error("own audit-trail reply should not trigger a fix run");
+      },
+      runCommand: makeGitRunCommand(),
+    },
+  );
+
+  await babysitter.babysitPR(pr.id, "codex");
+
+  assert.equal(postedFollowUpCount, 0, "PatchDeck's own rejected audit-trail comment must not be re-replied");
+  const updated = await storage.getPR(pr.id);
+  const item = updated?.feedbackItems.find((i) => i.id === ownReply.id);
+  assert.equal(item?.status, "rejected");
+});
+
 test("babysitPR replies to and resolves rejected review threads", async () => {
   const storage = new MemStorage();
   await storage.updateConfig({ autoUpdateDocs: false });
