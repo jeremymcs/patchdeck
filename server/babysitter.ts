@@ -4930,6 +4930,24 @@ export class PRBabysitter {
                 metadata: { code: conflictResult.code },
               });
 
+              // The agent resolves conflicts by editing worktree files but usually
+              // does not stage them. Stage everything before the unmerged-index
+              // check below, otherwise resolved files still appear as unmerged and
+              // the run is falsely declared failed. Any leftover conflict markers
+              // are caught by the marker check that follows.
+              const stageResolvedConflicts = await runLoggedCommand({
+                currentPrId: pr.id,
+                command: "git",
+                args: ["add", "-A"],
+                cwd: worktreePath,
+                timeoutMs: 30000,
+                phase: "conflict.agent",
+                successMessage: "Staged resolved merge conflict files",
+              });
+              if (stageResolvedConflicts.code !== 0) {
+                throw new Error(formatGitFailure("staging resolved merge conflicts", stageResolvedConflicts));
+              }
+
               const unresolvedAfterAgent = await this.runtime.runCommand("git", ["diff", "--name-only", "--diff-filter=U"], {
                 cwd: worktreePath,
                 timeoutMs: 5000,
