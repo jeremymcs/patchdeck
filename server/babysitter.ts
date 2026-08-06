@@ -2167,12 +2167,45 @@ export class PRBabysitter {
     }
   }
 
+  private async isRunAlreadyInProgress(
+    prId: string,
+    requestedPreferredAgent: CodingAgent,
+  ): Promise<boolean> {
+    const activeRun = this.inProgress.get(prId);
+    if (!activeRun) {
+      return false;
+    }
+    const pr = await this.storage.getPR(prId);
+    if (pr) {
+      const activeStartedAtMs = Date.parse(activeRun.startedAt);
+      const activeAgeMs = Number.isNaN(activeStartedAtMs)
+        ? null
+        : Math.max(0, this.now().getTime() - activeStartedAtMs);
+      await this.storage.addLog(pr.id, "warn", "PR work skipped because another run is already in progress", {
+        phase: "run",
+        metadata: {
+          reason: "in_progress",
+          activeRunId: activeRun.runId,
+          activePreferredAgent: activeRun.preferredAgent,
+          activeStartedAt: activeRun.startedAt,
+          activeAgeMs,
+          requestedPreferredAgent,
+        },
+      });
+    }
+    return true;
+  }
+
   async runQueuedBabysitPR(
     prId: string,
     preferredAgent: CodingAgent,
     agentSettings?: AgentRuntimeSettings,
     jobAttemptCount?: number,
   ): Promise<void> {
+    if (await this.isRunAlreadyInProgress(prId, preferredAgent)) {
+      return;
+    }
+
     const interruptedRun = (await this.storage.listAgentRuns({ status: "running", prId }))
       .slice()
       .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))[0];
@@ -3137,26 +3170,7 @@ export class PRBabysitter {
       return;
     }
 
-    const activeRun = this.inProgress.get(prId);
-    if (activeRun) {
-      const pr = await this.storage.getPR(prId);
-      if (pr) {
-        const activeStartedAtMs = Date.parse(activeRun.startedAt);
-        const activeAgeMs = Number.isNaN(activeStartedAtMs)
-          ? null
-          : Math.max(0, this.now().getTime() - activeStartedAtMs);
-        await this.storage.addLog(pr.id, "warn", "PR work skipped because another run is already in progress", {
-          phase: "run",
-          metadata: {
-            reason: "in_progress",
-            activeRunId: activeRun.runId,
-            activePreferredAgent: activeRun.preferredAgent,
-            activeStartedAt: activeRun.startedAt,
-            activeAgeMs,
-            requestedPreferredAgent: preferredAgent,
-          },
-        });
-      }
+    if (await this.isRunAlreadyInProgress(prId, preferredAgent)) {
       return;
     }
 
