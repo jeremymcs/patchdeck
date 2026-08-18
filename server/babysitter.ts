@@ -3401,6 +3401,92 @@ export class PRBabysitter {
       return true;
     };
 
+    const finalizeCodeOwnerFallbackWorktree = async (params: {
+      prId: string;
+      cwd: string;
+      repoCacheDir: string;
+      remoteName: string;
+      headRef: string;
+      agent: CodingAgent;
+    }): Promise<void> => {
+      const { prId, cwd, repoCacheDir, remoteName, headRef, agent } = params;
+      const phase = "code-owner-fallback";
+
+      // Commit any uncommitted agent edits so the local head captures them.
+      const committed = await commitDirtyWorktree({
+        currentPrId: prId,
+        cwd,
+        commitArgs: ["commit", "--no-verify", "--no-edit", "-m", `Apply ${agent} code-owner fallback fixes for PR`],
+        phase,
+        context: "code-owner fallback agent run",
+      });
+
+      // If the agent already committed but did not push (or we just committed),
+      // push the local head to the PR branch. When the agent already pushed,
+      // local HEAD equals the remote HEAD and the push is a no-op success.
+      const pushResult = await runLoggedCommand({
+        currentPrId: prId,
+        command: "git",
+        args: ["push", remoteName, `HEAD:${headRef}`],
+        cwd,
+        timeoutMs: 120000,
+        phase,
+        successMessage: `Pushed code-owner fallback work to ${remoteName}/${headRef}`,
+      });
+      if (pushResult.code !== 0) {
+        throw new Error(formatGitFailure(`pushing ${remoteName}/${headRef} after code-owner fallback`, pushResult));
+      }
+
+      // Confirm the pushed head is visible on the remote.
+      const remoteFetch = await runLoggedCommand({
+        currentPrId: prId,
+        command: "git",
+        args: ["-C", repoCacheDir, "fetch", remoteName, headRef],
+        timeoutMs: 120000,
+        phase,
+        successMessage: `Fetched ${remoteName}/${headRef} after code-owner fallback push`,
+      });
+      if (remoteFetch.code !== 0) {
+        throw new Error(formatGitFailure(`fetching ${remoteName}/${headRef} after code-owner fallback push`, remoteFetch));
+      }
+
+      const remoteHead = await runLoggedCommand({
+        currentPrId: prId,
+        command: "git",
+        args: ["-C", repoCacheDir, "rev-parse", "FETCH_HEAD"],
+        timeoutMs: 5000,
+        phase,
+        successMessage: "Collected remote PR head SHA after code-owner fallback push",
+      });
+      if (remoteHead.code !== 0) {
+        throw new Error(formatGitFailure("reading remote PR head after code-owner fallback push", remoteHead));
+      }
+
+      const localHead = await runLoggedCommand({
+        currentPrId: prId,
+        command: "git",
+        args: ["rev-parse", "HEAD"],
+        cwd,
+        timeoutMs: 5000,
+        phase,
+        successMessage: "Collected local PR head SHA after code-owner fallback",
+      });
+      if (localHead.code !== 0) {
+        throw new Error(formatGitFailure("reading local PR head after code-owner fallback", localHead));
+      }
+
+      if (localHead.stdout.trim() !== remoteHead.stdout.trim()) {
+        throw new Error(
+          `Code-owner fallback work was not reflected on ${remoteName}/${headRef} (local ${localHead.stdout.trim().slice(0, 8)}, remote ${remoteHead.stdout.trim().slice(0, 8)})`,
+        );
+      }
+
+      await queueLog(prId, "info", `Code-owner fallback work finalized on ${remoteName}/${headRef}`, {
+        phase,
+        metadata: { committed, remoteHead: remoteHead.stdout.trim().slice(0, 12) },
+      });
+    };
+
     const runCodeOwnerFallbackAfterFailure = async (params: {
       pr: PR;
       failureMessage: string;
@@ -3541,6 +3627,20 @@ export class PRBabysitter {
           await queueLog(pr.id, "info", `${agent} code-owner fallback completed successfully`, {
             phase: "code-owner-fallback",
             metadata: { agent, cwd },
+          });
+
+          // The code-owner fallback agent is asked to commit and push its own
+          // changes, but agents sometimes finish without doing so (e.g. a
+          // truncated model response). If the worktree has uncommitted changes
+          // or a local commit that was not pushed, PatchDeck finalizes the PR
+          // branch so the review threads can be closed against the real head.
+          await finalizeCodeOwnerFallbackWorktree({
+            prId: pr.id,
+            cwd: worktreePath,
+            repoCacheDir,
+            remoteName,
+            headRef: pullSummary.headRef,
+            agent,
           });
 
           return { agent, prompt };
