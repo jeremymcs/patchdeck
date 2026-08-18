@@ -6479,7 +6479,7 @@ test("runQueuedBabysitPR launches code-owner fallback after the default run fail
   assert.notEqual(applyCalls[1]?.cwd, process.cwd());
   assert.ok(applyCalls[1]?.cwd?.startsWith(path.join(worktreeRoot, "worktrees")));
   assert.match(applyCalls[1]?.cwd ?? "", /code-owner-fallback$/);
-  assert.equal(applyCalls[1]?.timeoutMs, 30 * 60 * 1000);
+  assert.equal(applyCalls[1]?.timeoutMs, 90 * 60 * 1000);
   assert.equal(updated?.status, "watching");
   assert.equal(run?.status, "completed");
   assert.equal(run?.phase, "code-owner-fallback.completed");
