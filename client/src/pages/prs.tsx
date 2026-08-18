@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { Link } from "wouter";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import * as Collapsible from "@radix-ui/react-collapsible";
@@ -1035,6 +1035,9 @@ function PRDescriptionPanel({ pr }: { pr: PR }) {
   );
 }
 
+// Expanded activity rail: viewport-bounded below `lg`, a fixed side column above it.
+const PR_ACTIVITY_PANEL_CLASS = "max-h-[42dvh] min-h-0 w-full shrink-0 flex-col border-t border-border lg:max-h-none lg:min-h-0 lg:w-80 lg:border-l lg:border-t-0";
+
 function RightPanel({
   prId,
   activities,
@@ -1042,6 +1045,7 @@ function RightPanel({
   isCollapsed,
   onToggleCollapsed,
   idleReason,
+  mobileHidden = false,
 }: {
   prId: string | null;
   activities: ActivitySnapshot;
@@ -1049,10 +1053,14 @@ function RightPanel({
   isCollapsed: boolean;
   onToggleCollapsed: () => void;
   idleReason?: string | null;
+  /** Hidden below `lg` while the single-pane layout is showing the PR list. */
+  mobileHidden?: boolean;
 }) {
+  const mobileVisibility = mobileHidden ? "hidden lg:flex" : "flex";
+
   if (isCollapsed) {
     return (
-      <div className="flex h-10 w-full shrink-0 items-center justify-end border-t border-border px-2 lg:h-auto lg:w-10 lg:flex-col lg:justify-start lg:border-l lg:border-t-0 lg:px-0 lg:py-2" data-testid="activity-panel-collapsed">
+      <div className={`${mobileVisibility} h-10 w-full shrink-0 items-center justify-end border-t border-border px-2 lg:h-auto lg:w-10 lg:flex-col lg:justify-start lg:border-l lg:border-t-0 lg:px-0 lg:py-2`} data-testid="activity-panel-collapsed">
         <button
           type="button"
           onClick={onToggleCollapsed}
@@ -1068,7 +1076,7 @@ function RightPanel({
   }
 
   return (
-    <div className="flex max-h-[42dvh] min-h-0 w-full shrink-0 flex-col border-t border-border lg:max-h-none lg:min-h-0 lg:w-80 lg:border-l lg:border-t-0">
+    <div className={`${mobileVisibility} ${PR_ACTIVITY_PANEL_CLASS}`}>
       <div className="flex shrink-0 items-center border-b border-border">
         <div
           className="flex-1 bg-muted px-3 py-2 text-label uppercase tracking-wider text-foreground shadow-[inset_0_-2px_0_0_hsl(var(--primary))]"
@@ -1238,10 +1246,23 @@ export default function Dashboard() {
   const [prNumberSearch, setPrNumberSearch] = useState("");
   const [selectedRepo, setSelectedRepo] = useState<string>("all");
   const [selectedStatusFilter, setSelectedStatusFilter] = useState<PrStatusFilter>("all");
-  const [areErrorsRolledUp, setAreErrorsRolledUp] = useState(false);
+  // Failed jobs start rolled up on narrow viewports so they cannot swallow the pane.
+  const [areErrorsRolledUp, setAreErrorsRolledUp] = useState(
+    () => typeof window !== "undefined" && window.matchMedia("(max-width: 1023px)").matches,
+  );
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isAskOpen, setIsAskOpen] = useState(false);
-  const [isActivityPanelCollapsed, setIsActivityPanelCollapsed] = useState(false);
+  // Activity starts collapsed on narrow viewports so the PR body owns the pane.
+  const [isActivityPanelCollapsed, setIsActivityPanelCollapsed] = useState(
+    () => typeof window !== "undefined" && window.matchMedia("(max-width: 1023px)").matches,
+  );
+  // Below `lg` the list and the detail share the viewport one pane at a time.
+  const [mobilePane, setMobilePane] = useState<"list" | "detail">("list");
+  const [areMobileFiltersOpen, setAreMobileFiltersOpen] = useState(false);
+  const selectPR = useCallback((prId: string) => {
+    setSelectedPRId(prId);
+    setMobilePane("detail");
+  }, []);
 
   const handleSyncDashboard = async () => {
     setIsRefreshing(true);
@@ -1528,7 +1549,7 @@ export default function Dashboard() {
   })();
 
   return (
-    <div className="flex min-h-screen flex-col lg:h-screen lg:overflow-hidden">
+    <div className="flex h-dvh flex-col overflow-hidden">
       <UpdateBanner />
       <AppHeader
         active="prs"
@@ -1592,8 +1613,11 @@ export default function Dashboard() {
       />
       <DashboardDrainBanner runtimeState={runtimeState} />
 
-      <div className="flex flex-1 flex-col overflow-hidden lg:flex-row">
-        <div className="flex max-h-[42vh] w-full shrink-0 flex-col overflow-hidden border-b border-border lg:max-h-none lg:w-[28rem] xl:w-[30rem] lg:border-b-0 lg:border-r">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden lg:flex-row">
+        <div
+          data-testid="pr-list-pane"
+          className={`${mobilePane === "detail" ? "hidden lg:flex" : "flex"} min-h-0 w-full flex-col overflow-hidden border-b border-border lg:w-[28rem] xl:w-[30rem] lg:shrink-0 lg:border-b-0 lg:border-r`}
+        >
           <div className="sticky top-0 z-10 flex shrink-0 border-b border-border bg-background">
             <button
               type="button"
@@ -1632,7 +1656,24 @@ export default function Dashboard() {
               Archived ({archivedPRs.length})
             </button>
           </div>
-          <div className="flex flex-col gap-2 border-b border-border px-3 py-2" data-testid="pr-filter-bar">
+          <div className="flex shrink-0 items-center justify-end border-b border-border px-3 py-1.5 lg:hidden">
+            <button
+              type="button"
+              onClick={() => setAreMobileFiltersOpen((open) => !open)}
+              aria-expanded={areMobileFiltersOpen}
+              aria-controls="pr-filter-bar"
+              data-testid="button-toggle-pr-filters"
+              className="inline-flex min-h-8 items-center gap-1 rounded-md border border-border px-2 py-0.5 text-label uppercase tracking-wider text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+            >
+              {areMobileFiltersOpen ? <ChevronUp className="h-3 w-3" aria-hidden="true" /> : <ChevronDown className="h-3 w-3" aria-hidden="true" />}
+              filters
+            </button>
+          </div>
+          <div
+            id="pr-filter-bar"
+            data-testid="pr-filter-bar"
+            className={`${areMobileFiltersOpen ? "flex" : "hidden"} max-h-[50dvh] shrink-0 flex-col gap-2 overflow-y-auto border-b border-border px-3 py-2 lg:flex lg:max-h-none lg:overflow-visible`}
+          >
             <div>
               <label htmlFor="pr-number-search" className="sr-only">Search PR number</label>
               <input
@@ -1687,7 +1728,7 @@ export default function Dashboard() {
               </div>
             </div>
           </div>
-          <div className="flex-1 overflow-y-auto">
+          <div className="min-h-0 flex-1 overflow-y-auto">
             {isLoadingCurrentView ? (
               <div data-testid="pr-list-loading" aria-label="Loading pull requests">
                 {Array.from({ length: 6 }).map((_, idx) => (
@@ -1710,7 +1751,7 @@ export default function Dashboard() {
                   key={pr.id}
                   pr={pr}
                   isSelected={pr.id === selectedPRId}
-                  onSelect={setSelectedPRId}
+                  onSelect={selectPR}
                   queueStatus={queueStatusById.get(pr.id) ?? null}
                   issueLink={issueLinkedPRByKey.get(prIssueLinkKey(pr.repo, pr.number)) ?? null}
                   failureMessage={
@@ -1724,7 +1765,10 @@ export default function Dashboard() {
           </div>
         </div>
 
-        <div className="flex min-h-[32rem] flex-1 flex-col overflow-hidden lg:min-h-0">
+        <div
+          data-testid="pr-detail-pane"
+          className={`${mobilePane === "list" ? "hidden lg:flex" : "flex"} min-h-0 flex-1 flex-col overflow-hidden lg:min-h-[32rem]`}
+        >
           {selectedPR ? (
             <>
               {(() => {
@@ -1762,6 +1806,8 @@ export default function Dashboard() {
                 return (
               <DetailHeader
                 title={selectedPR.title}
+                onBack={() => setMobilePane("list")}
+                backLabel="All pull requests"
                 accentTone="primary"
                 failed={selectedPRFailed}
                 stageBar={<StageProgressBar stages={buildPRStages(selectedPR)} testId="pr-stage-progress" />}
@@ -1914,14 +1960,33 @@ export default function Dashboard() {
                 )}
               </div>
             </>
+          ) : selectedPRSummary ? (
+            // The detail payload is fetched separately; on mobile this pane is the
+            // whole screen, so an unqualified empty state would read as a dead end.
+            <div className="flex flex-1 items-center justify-center gap-2 px-4 text-body text-muted-foreground" data-testid="pr-detail-loading">
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              Loading pull request…
+            </div>
           ) : (
-            <div className="flex flex-1 items-center justify-center text-body text-muted-foreground">
-              Select a PR from the left panel.
+            <div className="flex flex-1 flex-col items-center justify-center gap-3 px-4 text-body text-muted-foreground">
+              <span className="text-center">
+                <span className="hidden lg:inline">Select a PR from the left panel.</span>
+                <span className="lg:hidden">No PR selected.</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setMobilePane("list")}
+                data-testid="pr-detail-empty-back"
+                className="inline-flex min-h-8 items-center gap-1 rounded-md border border-border px-2.5 text-label uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background lg:hidden"
+              >
+                All pull requests
+              </button>
             </div>
           )}
         </div>
 
         <RightPanel
+          mobileHidden={mobilePane === "list"}
           prId={selectedPRId}
           activities={activities}
           queueStatusById={queueStatusById}

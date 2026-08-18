@@ -1,4 +1,4 @@
-import { ExternalLink } from "lucide-react";
+import { ChevronLeft, ExternalLink } from "lucide-react";
 import type { ReactNode } from "react";
 import { toneFailedBgClass, toneHeaderAccentClass, type StatusTone } from "@/lib/statusTones";
 
@@ -15,6 +15,9 @@ export type DetailHeaderProps = {
   stageBar?: ReactNode;
   accentTone?: StatusTone;
   failed?: boolean;
+  /** Mobile-only affordance: returns the single-pane layout to the list view. */
+  onBack?: () => void;
+  backLabel?: string;
 };
 
 export function DetailHeader({
@@ -30,6 +33,8 @@ export function DetailHeader({
   stageBar,
   accentTone,
   failed = false,
+  onBack,
+  backLabel = "Back to list",
 }: DetailHeaderProps) {
   const titleClass = titleMultiline
     ? "line-clamp-2 break-words text-title font-semibold leading-snug tracking-tight"
@@ -39,6 +44,17 @@ export function DetailHeader({
 
   return (
     <div className={`shrink-0 border-b border-border px-4 py-3${accentClass}${failedBg ? ` ${failedBg}` : ""}`}>
+      {onBack && (
+        <button
+          type="button"
+          onClick={onBack}
+          data-testid="detail-back-to-list"
+          className="-ml-1 mb-2 inline-flex min-h-8 items-center gap-1 rounded-md px-1 text-label font-medium uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background lg:hidden"
+        >
+          <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+          {backLabel}
+        </button>
+      )}
       <div className="mb-1 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">

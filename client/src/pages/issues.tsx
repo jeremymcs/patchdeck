@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { AlertTriangle, CheckCircle2, CircleDashed, CircleSlash, ExternalLink, Loader2, PanelRightClose, PanelRightOpen, Plus, RefreshCw, ShieldCheck, Trash2, Wrench, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, CircleDashed, CircleSlash, ExternalLink, Loader2, PanelRightClose, PanelRightOpen, Plus, RefreshCw, ShieldCheck, Trash2, Wrench, X } from "lucide-react";
 import { apiRequest, fetchJson, queryClient } from "@/lib/queryClient";
 import { AppHeader } from "@/components/AppHeader";
 import { UpdateBanner } from "@/components/UpdateBanner";
@@ -630,6 +630,9 @@ function IssueLogRow({ entry }: { entry: LogEntry }) {
   );
 }
 
+// Expanded activity rail: viewport-bounded below `lg`, a fixed side column above it.
+const ISSUE_ACTIVITY_PANEL_CLASS = "max-h-[42dvh] min-h-0 w-full shrink-0 flex-col border-t border-border lg:max-h-none lg:min-h-0 lg:w-80 lg:border-l lg:border-t-0";
+
 function IssueLogPanel({
   logs,
   selected,
@@ -639,6 +642,7 @@ function IssueLogPanel({
   idleReason,
   isCollapsed,
   onToggleCollapsed,
+  mobileHidden = false,
 }: {
   logs: LogEntry[];
   selected: boolean;
@@ -648,6 +652,8 @@ function IssueLogPanel({
   idleReason?: string | null;
   isCollapsed: boolean;
   onToggleCollapsed: () => void;
+  /** Hidden below `lg` while the single-pane layout is showing the issue list. */
+  mobileHidden?: boolean;
 }) {
   const [clearedLogIds, setClearedLogIds] = useState<Set<string>>(() => new Set());
   const viewLogs = useMemo(
@@ -659,9 +665,11 @@ function IssueLogPanel({
     setClearedLogIds(new Set());
   }, [selectedKey]);
 
+  const mobileVisibility = mobileHidden ? "hidden lg:flex" : "flex";
+
   if (isCollapsed) {
     return (
-      <div className="flex h-10 w-full shrink-0 items-center justify-end border-t border-border px-2 lg:h-auto lg:w-10 lg:flex-col lg:justify-start lg:border-l lg:border-t-0 lg:px-0 lg:py-2" data-testid="issue-activity-panel-collapsed">
+      <div className={`${mobileVisibility} h-10 w-full shrink-0 items-center justify-end border-t border-border px-2 lg:h-auto lg:w-10 lg:flex-col lg:justify-start lg:border-l lg:border-t-0 lg:px-0 lg:py-2`} data-testid="issue-activity-panel-collapsed">
         <button
           type="button"
           onClick={onToggleCollapsed}
@@ -677,7 +685,7 @@ function IssueLogPanel({
   }
 
   return (
-    <div className="flex max-h-[42dvh] min-h-0 w-full shrink-0 flex-col border-t border-border lg:max-h-none lg:min-h-0 lg:w-80 lg:border-l lg:border-t-0">
+    <div className={`${mobileVisibility} ${ISSUE_ACTIVITY_PANEL_CLASS}`}>
       <div className="flex shrink-0 items-center border-b border-border">
         <div
           className="flex-1 bg-muted px-3 py-2 text-label uppercase tracking-wider text-foreground shadow-[inset_0_-2px_0_0_hsl(var(--primary))]"
@@ -899,8 +907,21 @@ function IssuesPage() {
   const [issueNumberSearch, setIssueNumberSearch] = useState("");
   const [manualPullNumber, setManualPullNumber] = useState("");
   const [labelInput, setLabelInput] = useState("");
-  const [areErrorsRolledUp, setAreErrorsRolledUp] = useState(false);
-  const [isActivityPanelCollapsed, setIsActivityPanelCollapsed] = useState(false);
+  // Failed jobs start rolled up on narrow viewports so they cannot swallow the pane.
+  const [areErrorsRolledUp, setAreErrorsRolledUp] = useState(
+    () => typeof window !== "undefined" && window.matchMedia("(max-width: 1023px)").matches,
+  );
+  // Activity starts collapsed on narrow viewports so the issue body owns the pane.
+  const [isActivityPanelCollapsed, setIsActivityPanelCollapsed] = useState(
+    () => typeof window !== "undefined" && window.matchMedia("(max-width: 1023px)").matches,
+  );
+  // Below `lg` the list and the detail share the viewport one pane at a time.
+  const [mobilePane, setMobilePane] = useState<"list" | "detail">("list");
+  const [areMobileFiltersOpen, setAreMobileFiltersOpen] = useState(false);
+  const selectIssue = useCallback((issueId: string) => {
+    setSelectedIssueId(issueId);
+    setMobilePane("detail");
+  }, []);
   const normalizedIssueNumberSearch = normalizeNumberSearch(issueNumberSearch);
   const manualPullRepo = selectedRepo !== "all"
     ? selectedRepo
@@ -1363,7 +1384,7 @@ function IssuesPage() {
   });
 
   return (
-    <div className="flex min-h-screen flex-col lg:h-screen lg:overflow-hidden">
+    <div className="flex h-dvh flex-col overflow-hidden">
       <UpdateBanner />
       <AppHeader
         active="issues"
@@ -1438,10 +1459,13 @@ function IssuesPage() {
         onToggleRolledUp={() => setAreErrorsRolledUp((current) => !current)}
       />
 
-      <div className="flex flex-1 flex-col overflow-hidden lg:flex-row">
-        <div className="flex max-h-[42vh] w-full shrink-0 flex-col overflow-hidden border-b border-border lg:max-h-none lg:w-[34rem] xl:w-[36rem] lg:border-b-0 lg:border-r">
-          <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-2 text-label uppercase tracking-wider text-muted-foreground">
-            <div>
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden lg:flex-row">
+        <div
+          data-testid="issue-list-pane"
+          className={`${mobilePane === "detail" ? "hidden lg:flex" : "flex"} min-h-0 w-full flex-col overflow-hidden border-b border-border lg:w-[34rem] xl:w-[36rem] lg:shrink-0 lg:border-b-0 lg:border-r`}
+        >
+          <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-2 text-label uppercase tracking-wider text-muted-foreground">
+            <div className="min-w-0">
               Watched issues
               <span className="ml-2 normal-case tracking-normal text-muted-foreground/80">
                 {selectedCoverage
@@ -1451,7 +1475,7 @@ function IssuesPage() {
                     : `synced ${aggregateSyncedFallback}${aggregateCoverage.github !== null ? ` / GitHub ${aggregateCoverage.github}` : " / GitHub ?"}`}
               </span>
             </div>
-            <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+            <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
               <button
                 type="button"
                 onClick={() => startVisibleWorkMutation.mutate(startableVisibleIssues)}
@@ -1486,9 +1510,24 @@ function IssuesPage() {
               >
                 {globalDrainMode ? "paused" : "full sweep"}
               </button>
+              <button
+                type="button"
+                onClick={() => setAreMobileFiltersOpen((open) => !open)}
+                aria-expanded={areMobileFiltersOpen}
+                aria-controls="repo-filter-bar"
+                data-testid="button-toggle-issue-filters"
+                className="inline-flex min-h-8 items-center gap-1 rounded-md border border-border px-2 py-0.5 text-label uppercase tracking-wider text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background lg:hidden"
+              >
+                {areMobileFiltersOpen ? <ChevronUp className="h-3 w-3" aria-hidden="true" /> : <ChevronDown className="h-3 w-3" aria-hidden="true" />}
+                filters
+              </button>
             </div>
           </div>
-          <div data-testid="repo-filter-bar" className="flex flex-col gap-2 border-b border-border px-4 py-2.5">
+          <div
+            id="repo-filter-bar"
+            data-testid="repo-filter-bar"
+            className={`${areMobileFiltersOpen ? "flex" : "hidden"} max-h-[50dvh] shrink-0 flex-col gap-2 overflow-y-auto border-b border-border px-4 py-2.5 lg:flex lg:max-h-none lg:overflow-visible`}
+          >
             <form
               onSubmit={(event) => {
                 event.preventDefault();
@@ -1684,7 +1723,7 @@ function IssuesPage() {
               </div>
             </div>
           </div>
-          <div ref={issueListScrollRef} className="flex-1 overflow-y-auto">
+          <div ref={issueListScrollRef} className="min-h-0 flex-1 overflow-y-auto">
             <div data-testid="issue-list">
               {isLoading ? (
                 <div data-testid="issue-list-loading" aria-label="Loading issues">
@@ -1710,7 +1749,7 @@ function IssuesPage() {
                           key={issue.id}
                           issue={issue}
                           selected={issue.id === selectedIssueId}
-                          onSelect={setSelectedIssueId}
+                          onSelect={selectIssue}
                           queueStatus={queueStatusById.get(issue.id) ?? null}
                           verifyState={
                             verifyingIssueIds.has(issue.id)
@@ -1754,7 +1793,10 @@ function IssuesPage() {
           </div>
         </div>
 
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <div
+          data-testid="issue-detail-pane"
+          className={`${mobilePane === "list" ? "hidden lg:flex" : "flex"} min-h-0 flex-1 flex-col overflow-hidden`}
+        >
           {selectedIssue ? (
             <>
               {(() => {
@@ -1774,6 +1816,8 @@ function IssuesPage() {
               <DetailHeader
                 title={selectedIssue.title}
                 titleMultiline
+                onBack={() => setMobilePane("list")}
+                backLabel="All issues"
                 accentTone="warning"
                 failed={selectedIssue.workStatus === "failed"}
                 stageBar={<StageProgressBar stages={buildIssueStages(selectedIssue)} testId="issue-stage-progress" />}
@@ -2115,13 +2159,25 @@ function IssuesPage() {
               </div>
             </>
           ) : (
-            <div className="flex flex-1 items-center justify-center text-body text-muted-foreground">
-              Select an issue from the left panel.
+            <div className="flex flex-1 flex-col items-center justify-center gap-3 px-4 text-body text-muted-foreground">
+              <span className="text-center">
+                <span className="hidden lg:inline">Select an issue from the left panel.</span>
+                <span className="lg:hidden">No issue selected.</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setMobilePane("list")}
+                data-testid="issue-detail-empty-back"
+                className="inline-flex min-h-8 items-center gap-1 rounded-md border border-border px-2.5 text-label uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background lg:hidden"
+              >
+                All issues
+              </button>
             </div>
           )}
         </div>
 
         <IssueLogPanel
+          mobileHidden={mobilePane === "list"}
           logs={issueLogs}
           selected={Boolean(selectedIssue)}
           selectedKey={selectedIssue?.id ?? null}
