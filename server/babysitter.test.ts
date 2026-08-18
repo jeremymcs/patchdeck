@@ -4601,8 +4601,159 @@ test("babysitPR does not pull rejected or resolved items into in_progress", asyn
   const updated = await storage.getPR(pr.id);
   const updatedRejected = updated?.feedbackItems.find((i) => i.id === rejectedItem.id);
   const updatedResolved = updated?.feedbackItems.find((i) => i.id === resolvedItem.id);
-  assert.equal(updatedRejected?.status, "rejected", "rejected item should keep its status");
+  // Rejected items are no longer pulled into in_progress (no code fix), but a
+  // rejected review thread now gets a closing GitHub follow-up + resolution.
+  assert.equal(updatedRejected?.decision, "reject", "rejected item should keep its decision");
   assert.equal(updatedResolved?.status, "resolved", "resolved item should keep its status");
+
+  delete process.env.CODEFACTORY_HOME;
+});
+
+test("babysitPR does not re-reply to its own rejected audit-trail comments", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig({ autoUpdateDocs: false });
+  // A comment PatchDeck itself posted (contains the audit trail marker) that was
+  // rejected must not trigger another follow-up reply, or it would loop forever.
+  const ownReply = makeFeedbackItem({
+    id: "gh-review-comment-own-audit-reply",
+    author: "cwbcheng",
+    body: `已在提交 \`abc123\` 中处理。\n\n<!-- codefactory-feedback:gh-review-comment-1 -->`,
+    status: "rejected",
+    decision: "reject",
+    statusReason: "PatchDeck audit trail comment",
+  });
+  const pr = await storage.addPR({
+    number: 106,
+    title: "Verbose PR",
+    repo: "alex-morgan-o/lolodex",
+    branch: "feature/verbose",
+    author: "octocat",
+    url: "https://github.com/alex-morgan-o/lolodex/pull/106",
+    status: "watching",
+    feedbackItems: [ownReply],
+    accepted: 0,
+    rejected: 1,
+    flagged: 0,
+    testsPassed: null,
+    lintPassed: null,
+    lastChecked: null,
+  });
+
+  let postedFollowUpCount = 0;
+  const babysitter = new PRBabysitter(
+    storage,
+    makeWatcherGitHubService({
+      fetchFeedbackItemsForPR: async () => [ownReply],
+      fetchPullSummary: async () => makePullSummary(pr),
+      listFailingStatuses: async () => [],
+      postFollowUpForFeedbackItem: async () => {
+        postedFollowUpCount += 1;
+      },
+    }),
+    {
+      resolveAgent: async () => "codex",
+      ciPollIntervalMs: 0,
+      evaluateFixNecessityWithAgent: async () => {
+        throw new Error("own audit-trail reply should not be evaluated");
+      },
+      applyFixesWithAgent: async () => {
+        throw new Error("own audit-trail reply should not trigger a fix run");
+      },
+      runCommand: makeGitRunCommand(),
+    },
+  );
+
+  await babysitter.babysitPR(pr.id, "codex");
+
+  assert.equal(postedFollowUpCount, 0, "PatchDeck's own rejected audit-trail comment must not be re-replied");
+  const updated = await storage.getPR(pr.id);
+  const item = updated?.feedbackItems.find((i) => i.id === ownReply.id);
+  assert.equal(item?.status, "rejected");
+});
+
+test("babysitPR replies to and resolves rejected review threads", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig({ autoUpdateDocs: false });
+  const rejectedItem = makeFeedbackItem({
+    id: "gh-review-comment-rejected-thread",
+    status: "rejected",
+    decision: "reject",
+    decisionReason: "The referenced code does not exist in this branch.",
+    statusReason: "The referenced code does not exist in this branch.",
+  });
+  const pr = await storage.addPR({
+    number: 106,
+    title: "Verbose PR",
+    repo: "alex-morgan-o/lolodex",
+    branch: "feature/verbose",
+    author: "octocat",
+    url: "https://github.com/alex-morgan-o/lolodex/pull/106",
+    status: "watching",
+    feedbackItems: [rejectedItem],
+    accepted: 0,
+    rejected: 1,
+    flagged: 0,
+    testsPassed: null,
+    lintPassed: null,
+    lastChecked: null,
+  });
+
+  const worktreeRoot = await mkdtemp(path.join(os.tmpdir(), "codefactory-home-"));
+  process.env.CODEFACTORY_HOME = worktreeRoot;
+  let feedbackFetchCount = 0;
+  const pullSummary = makePullSummary(pr);
+  const postedFollowUps: Array<{ id: string; body: string; resolve?: boolean }> = [];
+  const resolvedThreads: string[] = [];
+
+  const babysitter = new PRBabysitter(
+    storage,
+    {
+      buildOctokit: async () => ({}) as never,
+      fetchFeedbackItemsForPR: async () => {
+        feedbackFetchCount += 1;
+        if (feedbackFetchCount === 1) return [rejectedItem];
+        return [{ ...rejectedItem, threadResolved: true }];
+      },
+      fetchPullSummary: async () => pullSummary,
+      listFailingStatuses: async () => [],
+      checkCISettled: async () => true,
+      listOpenPullsForRepo: async () => [],
+      postFollowUpForFeedbackItem: async (_octokit, _parsed, item, body, options) => {
+        postedFollowUps.push({ id: item.id, body, resolve: options?.resolve });
+        if (options?.resolve && item.threadId) {
+          resolvedThreads.push(item.threadId);
+        }
+      },
+      resolveReviewThread: async (_octokit, _parsed, threadId) => {
+        resolvedThreads.push(threadId);
+      },
+      resolveGitHubAuthToken: async () => "test-token",
+      addReactionToComment: async () => {},
+      postStatusReplyForFeedbackItem: async () => null,
+      updateStatusReply: async () => {},
+    },
+    {
+      resolveAgent: async () => "codex",
+      ciPollIntervalMs: 0,
+      evaluateFixNecessityWithAgent: async () => {
+        throw new Error("evaluateFixNecessityWithAgent should not be called for already-rejected items");
+      },
+      applyFixesWithAgent: async () => ({ code: 0, stdout: "", stderr: "" }),
+      runCommand: makeGitRunCommand(),
+    },
+  );
+
+  await babysitter.babysitPR(pr.id, "codex");
+
+  const updated = await storage.getPR(pr.id);
+  const updatedItem = updated?.feedbackItems.find((i) => i.id === rejectedItem.id);
+
+  assert.equal(postedFollowUps.length, 1, "rejected review thread should get a GitHub follow-up");
+  assert.equal(postedFollowUps[0]?.id, rejectedItem.id);
+  assert.equal(postedFollowUps[0]?.resolve, true, "follow-up should resolve the conversation");
+  assert.match(postedFollowUps[0]?.body ?? "", /Rejected/, "follow-up body should explain the rejection");
+  assert.equal(resolvedThreads.includes(rejectedItem.threadId ?? ""), true, "thread should be resolved on GitHub");
+  assert.equal(updatedItem?.threadResolved, true, "feedback item should be marked thread-resolved");
 
   delete process.env.CODEFACTORY_HOME;
 });
@@ -4610,7 +4761,14 @@ test("babysitPR does not pull rejected or resolved items into in_progress", asyn
 test("babysitPR skips run when no items are pending or queued", async () => {
   const storage = new MemStorage();
   await storage.updateConfig({ autoUpdateDocs: false });
-  const rejectedItem = makeFeedbackItem({ status: "rejected", decision: "reject" });
+  // Non-review-thread rejected feedback does not require a GitHub follow-up,
+  // so the run can be skipped entirely.
+  const rejectedItem = makeFeedbackItem({
+    status: "rejected",
+    decision: "reject",
+    replyKind: "general_comment",
+    threadId: null,
+  });
   const pr = await storage.addPR({
     number: 106,
     title: "Verbose PR",
@@ -6031,12 +6189,23 @@ test("runQueuedBabysitPR falls back to the next coding agent when enabled", asyn
   });
   const evaluatedAgents: string[] = [];
 
+  let feedbackFetchCount = 0;
   const babysitter = new PRBabysitter(
     storage,
     makeWatcherGitHubService({
-      fetchFeedbackItemsForPR: async () => [existingItem],
+      fetchFeedbackItemsForPR: async () => {
+        feedbackFetchCount += 1;
+        if (feedbackFetchCount === 1) return [existingItem];
+        // The rejected thread was replied to and resolved on GitHub.
+        return [{ ...existingItem, threadResolved: true }];
+      },
       fetchPullSummary: async () => makePullSummary(pr),
       listFailingStatuses: async () => [],
+      postFollowUpForFeedbackItem: async (_octokit, _parsed, item, _body, options) => {
+        if (options?.resolve && item.threadId) {
+          existingItem.threadResolved = true;
+        }
+      },
     }),
     {
       resolveAgent: async (agent) => agent,
@@ -6065,6 +6234,7 @@ test("runQueuedBabysitPR falls back to the next coding agent when enabled", asyn
   const updated = await storage.getPR(pr.id);
   assert.equal(updated?.status, "watching");
   assert.equal(updated?.feedbackItems[0]?.status, "rejected");
+  assert.equal(updated?.feedbackItems[0]?.threadResolved, true);
 
   const logs = await storage.getLogs(pr.id);
   assert.ok(logs.some((log) => log.level === "warn" && log.message.includes("Falling back from claude to codex")));
