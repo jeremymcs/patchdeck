@@ -56,7 +56,7 @@ export function DetailHeader({
         </button>
       )}
       <div className="mb-1 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
-        <div className="min-w-0">
+        <div className="min-w-0 sm:min-w-[12rem] sm:flex-1">
           <div className="flex flex-wrap items-center gap-2">
             {statusDot}
             <span className={titleClass} title={title}>
@@ -80,7 +80,7 @@ export function DetailHeader({
           {stageBar && <div className="mt-2">{stageBar}</div>}
         </div>
         {actions && (
-          <div className="-mx-1 flex min-w-0 overflow-x-auto px-1 pb-1 sm:mx-0 sm:shrink-0 sm:flex-wrap sm:justify-end sm:overflow-visible sm:px-0 sm:pb-0 [&>*]:shrink-0">
+          <div className="-mx-1 flex min-w-0 overflow-x-auto px-1 pb-1 sm:mx-0 sm:flex-wrap sm:justify-end sm:px-0 sm:pb-0 [&>*]:shrink-0 sm:[&>*]:shrink">
             <div className="flex min-w-max items-center gap-2 sm:min-w-0 sm:flex-wrap sm:justify-end [&_button]:min-h-8 sm:[&_button]:min-h-0">
               {actions}
             </div>

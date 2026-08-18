@@ -616,6 +616,9 @@ test("mobile layout primitives keep narrow viewport constraints wired", async ()
   assertHasStringValue(activityMenuSourceFile, "mobile activity menu viewport height", /max-h-\[calc\(100dvh-6rem\)\]/);
   assertHasStringValue(detailHeaderSourceFile, "mobile detail header stacks actions", /flex-col gap-3 sm:flex-row/);
   assertHasStringValue(detailHeaderSourceFile, "mobile detail action rail scrolls", /overflow-x-auto/);
+  // The action rail must stay shrinkable, or it crushes the title/meta column.
+  assertHasStringValue(detailHeaderSourceFile, "detail title keeps a width floor", /sm:min-w-\[12rem\] sm:flex-1/);
+  assertHasStringValue(detailHeaderSourceFile, "detail action rail can shrink and wrap", /sm:flex-wrap sm:justify-end/);
   assertHasStringValue(metaBreadcrumbSourceFile, "mobile metadata avoids word columns", /whitespace-nowrap/);
   assertHasStringValue(prsSourceFile, "mobile PR activity panel is viewport bounded", /max-h-\[42dvh\]/);
   assertHasStringValue(issuesSourceFile, "mobile issue activity panel is viewport bounded", /max-h-\[42dvh\]/);

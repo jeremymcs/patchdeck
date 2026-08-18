@@ -631,7 +631,7 @@ function IssueLogRow({ entry }: { entry: LogEntry }) {
 }
 
 // Expanded activity rail: viewport-bounded below `lg`, a fixed side column above it.
-const ISSUE_ACTIVITY_PANEL_CLASS = "max-h-[42dvh] min-h-0 w-full shrink-0 flex-col border-t border-border lg:max-h-none lg:min-h-0 lg:w-80 lg:border-l lg:border-t-0";
+const ISSUE_ACTIVITY_PANEL_CLASS = "max-h-[42dvh] min-h-0 w-full shrink-0 flex-col border-t border-border lg:max-h-none lg:min-h-0 lg:w-64 xl:w-80 lg:border-l lg:border-t-0";
 
 function IssueLogPanel({
   logs,
@@ -1462,7 +1462,7 @@ function IssuesPage() {
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden lg:flex-row">
         <div
           data-testid="issue-list-pane"
-          className={`${mobilePane === "detail" ? "hidden lg:flex" : "flex"} min-h-0 w-full flex-col overflow-hidden border-b border-border lg:w-[34rem] xl:w-[36rem] lg:shrink-0 lg:border-b-0 lg:border-r`}
+          className={`${mobilePane === "detail" ? "hidden lg:flex" : "flex"} min-h-0 w-full flex-col overflow-hidden border-b border-border lg:w-[22rem] xl:w-[34rem] 2xl:w-[36rem] lg:shrink-0 lg:border-b-0 lg:border-r`}
         >
           <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-2 text-label uppercase tracking-wider text-muted-foreground">
             <div className="min-w-0">

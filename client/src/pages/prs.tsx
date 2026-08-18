@@ -1036,7 +1036,7 @@ function PRDescriptionPanel({ pr }: { pr: PR }) {
 }
 
 // Expanded activity rail: viewport-bounded below `lg`, a fixed side column above it.
-const PR_ACTIVITY_PANEL_CLASS = "max-h-[42dvh] min-h-0 w-full shrink-0 flex-col border-t border-border lg:max-h-none lg:min-h-0 lg:w-80 lg:border-l lg:border-t-0";
+const PR_ACTIVITY_PANEL_CLASS = "max-h-[42dvh] min-h-0 w-full shrink-0 flex-col border-t border-border lg:max-h-none lg:min-h-0 lg:w-64 xl:w-80 lg:border-l lg:border-t-0";
 
 function RightPanel({
   prId,
@@ -1616,7 +1616,7 @@ export default function Dashboard() {
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden lg:flex-row">
         <div
           data-testid="pr-list-pane"
-          className={`${mobilePane === "detail" ? "hidden lg:flex" : "flex"} min-h-0 w-full flex-col overflow-hidden border-b border-border lg:w-[28rem] xl:w-[30rem] lg:shrink-0 lg:border-b-0 lg:border-r`}
+          className={`${mobilePane === "detail" ? "hidden lg:flex" : "flex"} min-h-0 w-full flex-col overflow-hidden border-b border-border lg:w-[20rem] xl:w-[28rem] 2xl:w-[30rem] lg:shrink-0 lg:border-b-0 lg:border-r`}
         >
           <div className="sticky top-0 z-10 flex shrink-0 border-b border-border bg-background">
             <button
@@ -1963,9 +1963,18 @@ export default function Dashboard() {
           ) : selectedPRSummary ? (
             // The detail payload is fetched separately; on mobile this pane is the
             // whole screen, so an unqualified empty state would read as a dead end.
-            <div className="flex flex-1 items-center justify-center gap-2 px-4 text-body text-muted-foreground" data-testid="pr-detail-loading">
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-              Loading pull request…
+            <div className="flex flex-1 flex-col items-center justify-center gap-3 px-4 text-body text-muted-foreground" data-testid="pr-detail-loading">
+              <span className="inline-flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                Loading pull request…
+              </span>
+              <button
+                type="button"
+                onClick={() => setMobilePane("list")}
+                className="inline-flex min-h-8 items-center gap-1 rounded-md border border-border px-2.5 text-label uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background lg:hidden"
+              >
+                All pull requests
+              </button>
             </div>
           ) : (
             <div className="flex flex-1 flex-col items-center justify-center gap-3 px-4 text-body text-muted-foreground">
