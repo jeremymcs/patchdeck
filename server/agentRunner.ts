@@ -288,7 +288,7 @@ export async function applyFixesWithAgent(params: {
   onStdoutChunk?: (chunk: string) => void;
   onStderrChunk?: (chunk: string) => void;
 }): Promise<CommandResult> {
-  const { agent, cwd, prompt, settings, env, timeoutMs = 1800000, onStdoutChunk, onStderrChunk } = params;
+  const { agent, cwd, prompt, settings, env, timeoutMs = 5400000, onStdoutChunk, onStderrChunk } = params;
 
   if (agent === "codex") {
     const result = await runAgentCommand(

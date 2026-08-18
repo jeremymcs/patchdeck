@@ -5,9 +5,16 @@ updates:
     schedule:
       interval: weekly
     groups:
+      # Only minor and patch updates are safe to batch. Grouping majors here
+      # once produced a single PR carrying ten breaking upgrades (tailwindcss 4,
+      # zod 4, typescript 7 and more), which could not be reviewed or landed as
+      # one unit. Majors now arrive as individual PRs.
       npm-dependencies:
         patterns:
           - "*"
+        update-types:
+          - minor
+          - patch
 
   - package-ecosystem: github-actions
     directory: /
