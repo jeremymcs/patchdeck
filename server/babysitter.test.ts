@@ -7699,6 +7699,97 @@ test("babysitPR records conflict repair failure when agent leaves conflict marke
   delete process.env.CODEFACTORY_HOME;
 });
 
+test("babysitPR commits agent-resolved conflicts even when the agent does not stage them", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig({ autoUpdateDocs: false });
+  const pr = await storage.addPR({
+    number: 106,
+    title: "Verbose PR",
+    repo: "alex-morgan-o/lolodex",
+    branch: "feature/verbose",
+    author: "octocat",
+    url: "https://github.com/alex-morgan-o/lolodex/pull/106",
+    status: "watching",
+    feedbackItems: [],
+    accepted: 0,
+    rejected: 0,
+    flagged: 0,
+    testsPassed: null,
+    lintPassed: null,
+    lastChecked: null,
+  });
+
+  const worktreeRoot = await mkdtemp(path.join(os.tmpdir(), "codefactory-home-"));
+  process.env.CODEFACTORY_HOME = worktreeRoot;
+  const pullSummary = makePullSummary(pr, { mergeable: false });
+  const gitRunner = makeGitRunCommand({
+    localHeadSha: "merge123",
+    remoteHeadSha: "merge123",
+  });
+  // The agent resolves the conflict by editing the file but never stages it,
+  // so the unmerged index entries persist until PatchDeck stages them.
+  let staged = false;
+  let conflictAgentCalled = false;
+
+  const babysitter = new PRBabysitter(
+    storage,
+    {
+      buildOctokit: async () => ({}) as never,
+      fetchFeedbackItemsForPR: async () => [],
+      fetchPullSummary: async () => pullSummary,
+      listFailingStatuses: async () => [],
+      checkCISettled: async () => true,
+      listOpenPullsForRepo: async () => [],
+      postFollowUpForFeedbackItem: async () => undefined,
+      resolveReviewThread: async () => undefined,
+      resolveGitHubAuthToken: async () => "test-token",
+      addReactionToComment: async () => {},
+      postStatusReplyForFeedbackItem: async () => null,
+      updateStatusReply: async () => {},
+    },
+    {
+      resolveAgent: async () => "codex",
+      ciPollIntervalMs: 0,
+      evaluateFixNecessityWithAgent: async () => ({
+        needsFix: false,
+        reason: "No fix needed",
+      }),
+      applyFixesWithAgent: async ({ prompt }) => {
+        conflictAgentCalled = true;
+        assert.match(prompt, /merge conflicts/i);
+        return { code: 0, stdout: "resolved\n", stderr: "" };
+      },
+      runCommand: async (command: string, args: string[], opts?: Record<string, unknown>) => {
+        if (command === "git" && args[0] === "merge") {
+          return { code: 1, stdout: "", stderr: "CONFLICT" };
+        }
+        if (command === "git" && args[0] === "add") {
+          staged = true;
+          return { code: 0, stdout: "", stderr: "" };
+        }
+        if (command === "git" && args[0] === "diff" && args[1] === "--name-only" && args[2] === "--diff-filter=U") {
+          return { code: 0, stdout: staged ? "" : "src/conflict.ts\n", stderr: "" };
+        }
+        return gitRunner(command, args, opts);
+      },
+    },
+  );
+
+  await babysitter.babysitPR(pr.id, "codex");
+
+  const updated = await storage.getPR(pr.id);
+  const runs = await storage.listAgentRuns({ prId: pr.id });
+  const logs = await storage.getLogs(pr.id);
+
+  assert.equal(conflictAgentCalled, true);
+  assert.equal(staged, true, "PatchDeck should stage agent-resolved conflict files");
+  assert.equal(updated?.status, "watching");
+  assert.equal(runs[0]?.status, "completed");
+  assert.ok(logs.some((log) => log.phase === "conflict" && log.message.includes("Merge conflicts resolved and committed")));
+
+  delete process.env.CODEFACTORY_HOME;
+});
+
 test("babysitPR skips conflict resolution when autoResolveMergeConflicts is disabled", async () => {
   const storage = new MemStorage();
   await storage.updateConfig({ autoResolveMergeConflicts: false, autoUpdateDocs: false });
