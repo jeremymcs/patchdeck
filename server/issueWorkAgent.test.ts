@@ -156,6 +156,58 @@ test("runIssueWorkRepair commits, pushes, and verifies the issue branch", async 
   assert.match(extractIssueWorkSummary("ISSUE_WORK_SUMMARY: fixed the toggle"), /fixed the toggle/);
 });
 
+test("runIssueWorkRepair reports a Codex timeout instead of a models cache warning", async () => {
+  const result = await runIssueWorkRepair({
+    repo: "acme/widgets",
+    issueNumber: 17,
+    issueTitle: "Fix the toggle",
+    issueUrl: "https://github.com/acme/widgets/issues/17",
+    issueBody: "The toggle is stuck",
+    labels: ["bug"],
+    author: "alice",
+    baseBranch: "main",
+    repoCloneUrl: "https://github.com/acme/widgets.git",
+    agent: "codex",
+    dependencies: {
+      preparePrWorktree: async () => ({
+        repoCacheDir: "/tmp/repo-cache",
+        worktreePath: "/tmp/worktree",
+      }),
+      removePrWorktree: async () => undefined,
+      applyFixesWithAgent: async () => ({
+        code: 124,
+        stdout: "",
+        stderr: [
+          "Reading additional input from stdin...",
+          "ERROR codex_models_manager::cache: failed to load models cache: missing field `base_instructions` at line 95 column 5",
+          "OpenAI Codex v0.146.1",
+          "Command timed out after 5400000ms",
+        ].join("\n"),
+        timedOut: true,
+      }),
+      readFile: async () => {
+        throw Object.assign(new Error("missing"), { code: "ENOENT" });
+      },
+      runCommand: async (command: string, args: string[]) => {
+        if (command !== "git") {
+          throw new Error(`Unexpected command: ${command}`);
+        }
+        if (args[2] === "checkout" && args[3] === "-b") {
+          return { stdout: "", stderr: "", code: 0 };
+        }
+        if (args[0] === "config" && args[1] === "--get") {
+          return { stdout: "set\n", stderr: "", code: 0 };
+        }
+        throw new Error(`Unexpected git args: ${args.join(" ")}`);
+      },
+    },
+  });
+
+  assert.equal(result.accepted, false);
+  assert.equal(result.rejectionReason, "agent failed (124): Command timed out after 5400000ms");
+  assert.doesNotMatch(result.rejectionReason ?? "", /models cache/i);
+});
+
 const SAMPLE_SUBTASKS: IssueSubtask[] = [
   { id: "bug-1", title: "Verifier exit code inverted", summary: "Treats 0 as the only pass.", status: "pending" },
   { id: "bug-2", title: "Preference overrides plan", summary: "Falls back to preference silently.", status: "pending" },

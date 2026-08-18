@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import type { AgentRuntimeSettings, CodingAgent, CommandResult } from "./agentRunner";
-import { applyFixesWithAgent, runCommand, summarizeCommandResult } from "./agentRunner";
+import { applyFixesWithAgent, runCommand, summarizeAgentCommandFailure } from "./agentRunner";
 import { preparePrWorktree, removePrWorktree } from "./repoWorkspace";
 import type { IssueSubtask, IssueSubtaskStatus } from "@shared/schema";
 import path from "node:path";
@@ -490,7 +490,7 @@ export async function runIssueWorkRepair(
     if (agentResult.code !== 0) {
       return {
         accepted: false,
-        rejectionReason: summarizeCommandResult(agentResult, `agent failed (${agentResult.code})`),
+        rejectionReason: `agent failed (${agentResult.code}): ${summarizeAgentCommandFailure(agentResult)}`,
         summary: extractIssueWorkSummary(agentResult.stdout),
         fixBranch,
         agentResult,
