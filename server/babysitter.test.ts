@@ -6025,6 +6025,86 @@ test("babysitPR logs metadata when skipping a duplicate in-progress run", async 
   assert.equal(typeof skipLog?.metadata?.activeAgeMs, "number");
 });
 
+test("runQueuedBabysitPR does not mark a live in-progress run failed when a queued job fires before replay context is persisted", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig({ autoUpdateDocs: false });
+  const pr = await storage.addPR({
+    number: 107,
+    title: "Live run PR",
+    repo: "alex-morgan-o/lolodex",
+    branch: "feature/live",
+    author: "octocat",
+    url: "https://github.com/alex-morgan-o/lolodex/pull/107",
+    status: "watching",
+    feedbackItems: [],
+    accepted: 0,
+    rejected: 0,
+    flagged: 0,
+    testsPassed: null,
+    lintPassed: null,
+    lastChecked: null,
+  });
+  let releaseFetch!: () => void;
+  let markFetchStarted!: () => void;
+  const fetchStarted = new Promise<void>((resolve) => {
+    markFetchStarted = resolve;
+  });
+  const fetchReleased = new Promise<void>((resolve) => {
+    releaseFetch = resolve;
+  });
+
+  const babysitter = new PRBabysitter(
+    storage,
+    makeWatcherGitHubService({
+      fetchPullSummary: async () => {
+        markFetchStarted();
+        await fetchReleased;
+        return makePullSummary(pr);
+      },
+      listFailingStatuses: async () => [],
+    }),
+    {
+      resolveAgent: async () => "codex",
+      ciPollIntervalMs: 0,
+      evaluateFixNecessityWithAgent: async () => ({
+        needsFix: false,
+        reason: "No code change needed",
+      }),
+      applyFixesWithAgent: async () => ({ code: 0, stdout: "", stderr: "" }),
+      runCommand: makeGitRunCommand(),
+    },
+  );
+
+  const firstRun = babysitter.babysitPR(pr.id, "codex");
+  await fetchStarted;
+
+  const runsBefore = await storage.listAgentRuns({ prId: pr.id });
+  assert.equal(runsBefore.length, 1);
+  assert.equal(runsBefore[0]?.status, "running");
+  assert.equal(runsBefore[0]?.prompt, null);
+
+  // A watcher-triggered babysit_pr job firing while the run is still live must
+  // not mark the run failed just because its replay context is not persisted yet.
+  await babysitter.runQueuedBabysitPR(pr.id, "codex");
+
+  const runsAfter = await storage.listAgentRuns({ prId: pr.id });
+  assert.equal(runsAfter.length, 1);
+  assert.equal(runsAfter[0]?.status, "running");
+  assert.equal(runsAfter[0]?.lastError, null);
+
+  const logs = await storage.getLogs(pr.id);
+  assert.ok(logs.some((log) =>
+    log.phase === "run"
+    && log.message.includes("another run is already in progress")
+  ));
+
+  releaseFetch();
+  await firstRun;
+
+  const run = await storage.getAgentRun(runsBefore[0]!.id);
+  assert.equal(run?.status, "completed");
+});
+
 test("runQueuedBabysitPR archives merged PRs instead of running or rescheduling work", async () => {
   const storage = new MemStorage();
   await storage.updateConfig({ autoUpdateDocs: false });
@@ -6399,7 +6479,7 @@ test("runQueuedBabysitPR launches code-owner fallback after the default run fail
   assert.notEqual(applyCalls[1]?.cwd, process.cwd());
   assert.ok(applyCalls[1]?.cwd?.startsWith(path.join(worktreeRoot, "worktrees")));
   assert.match(applyCalls[1]?.cwd ?? "", /code-owner-fallback$/);
-  assert.equal(applyCalls[1]?.timeoutMs, 30 * 60 * 1000);
+  assert.equal(applyCalls[1]?.timeoutMs, 90 * 60 * 1000);
   assert.equal(updated?.status, "watching");
   assert.equal(run?.status, "completed");
   assert.equal(run?.phase, "code-owner-fallback.completed");
