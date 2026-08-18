@@ -38,7 +38,7 @@ export function DashboardErrorsPanel({
   return (
     <section
       id="dashboard-errors"
-      className="shrink-0 border-b border-destructive/40 bg-destructive/10 px-4 py-3"
+      className="max-h-[35dvh] shrink-0 overflow-y-auto border-b border-destructive/40 bg-destructive/10 px-4 py-3 lg:max-h-none lg:overflow-visible"
       data-testid="dashboard-errors-panel"
     >
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
@@ -89,11 +89,11 @@ export function DashboardErrorsPanel({
         </div>
       ) : (
         <>
-          <div className="grid gap-2 lg:grid-cols-2">
+          <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
             {activities.failed.slice(0, 4).map((activity) => (
               <div
                 key={activity.id}
-                className="rounded-md border border-destructive/40 bg-background/70 px-3 py-2"
+                className="min-w-0 rounded-md border border-destructive/40 bg-background/70 px-3 py-2"
                 data-testid={`dashboard-error-${activity.id}`}
               >
                 <div className="flex min-w-0 items-start justify-between gap-3">

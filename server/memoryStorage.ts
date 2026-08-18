@@ -761,6 +761,48 @@ export class MemStorage implements IStorage {
     return this.cloneBackgroundJob(updated);
   }
 
+  async promoteBackgroundJob(
+    id: string,
+    availableAt: string,
+    updatedAt: string,
+  ): Promise<BackgroundJob | undefined> {
+    const existing = this.backgroundJobs.get(id);
+    if (!existing || existing.status !== "queued" || existing.availableAt <= availableAt) {
+      return undefined;
+    }
+
+    const updated = applyBackgroundJobUpdate(existing, { availableAt, updatedAt });
+    this.backgroundJobs.set(id, updated);
+    return this.cloneBackgroundJob(updated);
+  }
+
+  async requeueFailedBackgroundJob(
+    id: string,
+    availableAt: string,
+    updatedAt: string,
+  ): Promise<BackgroundJob | undefined> {
+    const existing = this.backgroundJobs.get(id);
+    if (!existing || existing.status !== "failed") {
+      return undefined;
+    }
+
+    const updated = applyBackgroundJobUpdate(existing, {
+      status: "queued",
+      availableAt,
+      leaseOwner: null,
+      leaseToken: null,
+      leaseExpiresAt: null,
+      heartbeatAt: null,
+      // A fresh attempt budget: the park interval has elapsed, so this is a new
+      // recovery cycle rather than a continuation of the exhausted one.
+      attemptCount: 0,
+      completedAt: null,
+      updatedAt,
+    });
+    this.backgroundJobs.set(id, updated);
+    return this.cloneBackgroundJob(updated);
+  }
+
   async retryBackgroundJob(
     id: string,
     leaseToken: string,

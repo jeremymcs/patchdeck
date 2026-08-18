@@ -90,6 +90,7 @@ type ConfigRow = {
   github_comment_app_name: string;
   post_github_progress_replies: number;
   auto_heal_ci: number;
+  max_agent_retry_attempts: number;
   max_healing_attempts_per_session: number;
   max_healing_attempts_per_fingerprint: number;
   max_concurrent_healing_runs: number;
@@ -587,6 +588,7 @@ export class SqliteStorage implements IStorage {
         github_comment_app_name TEXT NOT NULL DEFAULT 'patchdeck',
         post_github_progress_replies INTEGER NOT NULL DEFAULT 0,
         auto_heal_ci INTEGER NOT NULL DEFAULT 0,
+        max_agent_retry_attempts INTEGER NOT NULL DEFAULT 3,
         max_healing_attempts_per_session INTEGER NOT NULL DEFAULT 3,
         max_healing_attempts_per_fingerprint INTEGER NOT NULL DEFAULT 2,
         max_concurrent_healing_runs INTEGER NOT NULL DEFAULT 1,
@@ -953,6 +955,7 @@ export class SqliteStorage implements IStorage {
     this.ensureColumn("config", "github_comment_app_name", "TEXT NOT NULL DEFAULT 'patchdeck'");
     this.ensureColumn("config", "post_github_progress_replies", "INTEGER NOT NULL DEFAULT 0");
     this.ensureColumn("config", "auto_heal_ci", "INTEGER NOT NULL DEFAULT 0");
+    this.ensureColumn("config", "max_agent_retry_attempts", "INTEGER NOT NULL DEFAULT 3");
     this.ensureColumn("config", "max_healing_attempts_per_session", "INTEGER NOT NULL DEFAULT 3");
     this.ensureColumn("config", "max_healing_attempts_per_fingerprint", "INTEGER NOT NULL DEFAULT 2");
     this.ensureColumn("config", "max_concurrent_healing_runs", "INTEGER NOT NULL DEFAULT 1");
@@ -1088,6 +1091,7 @@ export class SqliteStorage implements IStorage {
         row.post_github_progress_replies ?? Number(DEFAULT_CONFIG.postGitHubProgressReplies),
       ),
       autoHealCI: Boolean(row.auto_heal_ci ?? Number(DEFAULT_CONFIG.autoHealCI)),
+      maxAgentRetryAttempts: row.max_agent_retry_attempts ?? DEFAULT_CONFIG.maxAgentRetryAttempts,
       maxHealingAttemptsPerSession: row.max_healing_attempts_per_session ?? DEFAULT_CONFIG.maxHealingAttemptsPerSession,
       maxHealingAttemptsPerFingerprint: row.max_healing_attempts_per_fingerprint ?? DEFAULT_CONFIG.maxHealingAttemptsPerFingerprint,
       maxConcurrentHealingRuns: row.max_concurrent_healing_runs ?? DEFAULT_CONFIG.maxConcurrentHealingRuns,
@@ -1142,6 +1146,7 @@ export class SqliteStorage implements IStorage {
           github_comment_app_name,
           post_github_progress_replies,
           auto_heal_ci,
+          max_agent_retry_attempts,
           max_healing_attempts_per_session,
           max_healing_attempts_per_fingerprint,
           max_concurrent_healing_runs,
@@ -1156,7 +1161,7 @@ export class SqliteStorage implements IStorage {
           trusted_reviewers_json,
           priority_issue_authors_json,
           ignored_bots_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           github_token = excluded.github_token,
           github_tokens_json = excluded.github_tokens_json,
@@ -1182,6 +1187,7 @@ export class SqliteStorage implements IStorage {
           github_comment_app_name = excluded.github_comment_app_name,
           post_github_progress_replies = excluded.post_github_progress_replies,
           auto_heal_ci = excluded.auto_heal_ci,
+          max_agent_retry_attempts = excluded.max_agent_retry_attempts,
           max_healing_attempts_per_session = excluded.max_healing_attempts_per_session,
           max_healing_attempts_per_fingerprint = excluded.max_healing_attempts_per_fingerprint,
           max_concurrent_healing_runs = excluded.max_concurrent_healing_runs,
@@ -1222,6 +1228,7 @@ export class SqliteStorage implements IStorage {
         config.githubCommentAppName,
         Number(config.postGitHubProgressReplies),
         Number(config.autoHealCI),
+        config.maxAgentRetryAttempts,
         config.maxHealingAttemptsPerSession,
         config.maxHealingAttemptsPerFingerprint,
         config.maxConcurrentHealingRuns,
@@ -2036,7 +2043,7 @@ export class SqliteStorage implements IStorage {
              poll_interval_ms, max_changes_per_run, auto_resolve_merge_conflicts, auto_create_releases,
              auto_update_docs, auto_prs, auto_issues, include_repository_links_in_github_comments, github_comment_app_name,
              post_github_progress_replies,
-             auto_heal_ci, max_healing_attempts_per_session,
+             auto_heal_ci, max_agent_retry_attempts, max_healing_attempts_per_session,
              max_healing_attempts_per_fingerprint, max_concurrent_healing_runs, healing_cooldown_ms,
              auto_heal_deployments, deployment_check_delay_ms, deployment_check_timeout_ms,
              deployment_check_poll_interval_ms, max_concurrent_issue_evaluations, max_concurrent_issue_work,
@@ -3000,6 +3007,97 @@ export class SqliteStorage implements IStorage {
 
   async failBackgroundJob(id: string, leaseToken: string, error: string, completedAt: string): Promise<BackgroundJob | undefined> {
     return this.finalizeBackgroundJob(id, leaseToken, "failed", error, completedAt);
+  }
+
+  async promoteBackgroundJob(
+    id: string,
+    availableAt: string,
+    updatedAt: string,
+  ): Promise<BackgroundJob | undefined> {
+    return this.withWriteTransaction(() => {
+      const current = this.get<BackgroundJobRow>(`
+        SELECT id, kind, target_id, dedupe_key, status, priority, available_at,
+               lease_owner, lease_token, lease_expires_at, heartbeat_at, attempt_count,
+               last_error, payload_json, created_at, updated_at, completed_at
+        FROM background_jobs
+        WHERE id = ? AND status = 'queued' AND available_at > ?
+      `, id, availableAt);
+
+      if (!current) {
+        return undefined;
+      }
+
+      const updated = applyBackgroundJobUpdate(this.parseBackgroundJobRow(current), {
+        availableAt,
+        updatedAt,
+      });
+
+      this.run(`
+        UPDATE background_jobs
+        SET available_at = ?, updated_at = ?
+        WHERE id = ? AND status = 'queued'
+      `,
+        updated.availableAt,
+        updated.updatedAt,
+        id,
+      );
+
+      return updated;
+    });
+  }
+
+  async requeueFailedBackgroundJob(
+    id: string,
+    availableAt: string,
+    updatedAt: string,
+  ): Promise<BackgroundJob | undefined> {
+    return this.withWriteTransaction(() => {
+      const current = this.get<BackgroundJobRow>(`
+        SELECT id, kind, target_id, dedupe_key, status, priority, available_at,
+               lease_owner, lease_token, lease_expires_at, heartbeat_at, attempt_count,
+               last_error, payload_json, created_at, updated_at, completed_at
+        FROM background_jobs
+        WHERE id = ? AND status = 'failed'
+      `, id);
+
+      if (!current) {
+        return undefined;
+      }
+
+      const updated = applyBackgroundJobUpdate(this.parseBackgroundJobRow(current), {
+        status: "queued",
+        availableAt,
+        leaseOwner: null,
+        leaseToken: null,
+        leaseExpiresAt: null,
+        heartbeatAt: null,
+        // A fresh attempt budget: the park interval has elapsed, so this is a new
+        // recovery cycle rather than a continuation of the exhausted one.
+        attemptCount: 0,
+        completedAt: null,
+        updatedAt,
+      });
+
+      this.run(`
+        UPDATE background_jobs
+        SET status = 'queued',
+            available_at = ?,
+            lease_owner = NULL,
+            lease_token = NULL,
+            lease_expires_at = NULL,
+            heartbeat_at = NULL,
+            attempt_count = 0,
+            completed_at = NULL,
+            updated_at = ?
+        WHERE id = ? AND status = 'failed'
+      `,
+        updated.availableAt,
+        updated.updatedAt,
+        id,
+      );
+
+      return updated;
+    });
   }
 
   async retryBackgroundJob(
