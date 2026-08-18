@@ -2,7 +2,9 @@ import { randomUUID } from "crypto";
 import type { BackgroundJob, BackgroundJobKind } from "@shared/schema";
 import type { IStorage } from "./storage";
 import { BackgroundJobQueue } from "./backgroundJobQueue";
+import { classifyFailure, computeRetryDelayMs, resolveMaxAttempts, type FailureClass } from "./failureRecovery";
 import { childLogger } from "./logger";
+import { DEFAULT_CONFIG } from "./defaultConfig";
 
 const log = childLogger("jobs");
 const DRAIN_ALLOWED_KINDS: ReadonlySet<BackgroundJobKind> = new Set<BackgroundJobKind>(["sync_watched_repos"]);
@@ -45,8 +47,8 @@ export class BackgroundJobDispatcher {
   private readonly pollIntervalMs: number;
   private readonly leaseMs: number;
   private readonly heartbeatIntervalMs: number;
-  private readonly maxAttempts: number;
-  private readonly retryBackoffMs: number;
+  private readonly maxAttempts: number | null;
+  private readonly retryBackoffMs: number | null;
   private readonly now: () => Date;
   private readonly onError: (error: unknown) => void;
   private readonly onReclaimedJobs: (jobs: BackgroundJob[]) => void;
@@ -79,8 +81,10 @@ export class BackgroundJobDispatcher {
     this.pollIntervalMs = params.pollIntervalMs ?? 1_000;
     this.leaseMs = params.leaseMs ?? 30_000;
     this.heartbeatIntervalMs = params.heartbeatIntervalMs ?? 10_000;
-    this.maxAttempts = Math.max(1, params.maxAttempts ?? 3);
-    this.retryBackoffMs = Math.max(0, params.retryBackoffMs ?? 30_000);
+    // Left unset in production so the classified retry policy applies. Tests
+    // pin them to keep retries instant and bounded.
+    this.maxAttempts = params.maxAttempts === undefined ? null : Math.max(1, params.maxAttempts);
+    this.retryBackoffMs = params.retryBackoffMs === undefined ? null : Math.max(0, params.retryBackoffMs);
     this.now = params.now ?? (() => new Date());
     this.onError = params.onError ?? ((error) => {
       log.warn(
@@ -276,7 +280,7 @@ export class BackgroundJobDispatcher {
     error: unknown,
   ): Promise<void> {
     const now = this.now();
-    const action = this.resolveFailureAction(job, error);
+    const { action, failureClass } = await this.resolveFailureAction(job, error);
 
     try {
       switch (action) {
@@ -297,16 +301,37 @@ export class BackgroundJobDispatcher {
             availableAt: error instanceof DeferBackgroundJobError ? error.availableAt : now,
           });
           return;
-        case "retry":
+        case "retry": {
+          const delayMs = this.retryBackoffMs ?? computeRetryDelayMs(job.attemptCount);
+          log.info(
+            {
+              jobId: job.id,
+              kind: job.kind,
+              attempt: job.attemptCount,
+              failureClass,
+              delayMs,
+            },
+            "Background job retrying after failure",
+          );
           await this.queue.retry({
             jobId: job.id,
             leaseToken,
             error: summarizeError(error),
             now,
-            availableAt: new Date(now.getTime() + this.retryBackoffMs),
+            availableAt: new Date(now.getTime() + delayMs),
           });
           return;
+        }
         case "fail":
+          log.warn(
+            {
+              jobId: job.id,
+              kind: job.kind,
+              attempt: job.attemptCount,
+              failureClass,
+            },
+            "Background job parked; automation needs a human for this one",
+          );
           await this.queue.fail({
             jobId: job.id,
             leaseToken,
@@ -327,17 +352,55 @@ export class BackgroundJobDispatcher {
     }
   }
 
-  private resolveFailureAction(job: BackgroundJob, error: unknown): "cancel" | "defer" | "retry" | "fail" {
+  /**
+   * Decide what happens to a failed job. Retry budget depends on why it failed:
+   * infrastructure blips retry generously because they cost a request, while an
+   * unclassified failure on a job kind that can invoke a coding agent is capped
+   * by the user's `maxAgentRetryAttempts` spend setting. Failures a human has to
+   * clear (expired agent auth, missing CLI) park immediately — retrying them
+   * only burns time.
+   */
+  private async resolveFailureAction(
+    job: BackgroundJob,
+    error: unknown,
+  ): Promise<{ action: "cancel" | "defer" | "retry" | "fail"; failureClass: FailureClass | null }> {
     if (error instanceof CancelBackgroundJobError) {
-      return "cancel";
+      return { action: "cancel", failureClass: "terminal" };
     }
     if (error instanceof DeferBackgroundJobError) {
-      return "defer";
+      return { action: "defer", failureClass: null };
     }
     if (error instanceof TerminalBackgroundJobError) {
-      return "fail";
+      return { action: "fail", failureClass: "terminal" };
     }
-    return job.attemptCount < this.maxAttempts ? "retry" : "fail";
+
+    const failureClass = classifyFailure(error);
+    const policyAttempts = resolveMaxAttempts({
+      kind: job.kind,
+      failureClass,
+      maxAgentRetryAttempts: await this.resolveMaxAgentRetryAttempts(),
+    });
+    const maxAttempts = this.maxAttempts === null
+      ? policyAttempts
+      : Math.min(this.maxAttempts, policyAttempts);
+
+    return {
+      action: job.attemptCount < maxAttempts ? "retry" : "fail",
+      failureClass,
+    };
+  }
+
+  private async resolveMaxAgentRetryAttempts(): Promise<number> {
+    try {
+      const config = await this.storage.getConfig();
+      return config.maxAgentRetryAttempts;
+    } catch (error) {
+      log.warn(
+        { err: error instanceof Error ? error.message : String(error) },
+        "Could not read agent retry setting; using the default",
+      );
+      return DEFAULT_CONFIG.maxAgentRetryAttempts;
+    }
   }
 }
 

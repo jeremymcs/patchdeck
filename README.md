@@ -179,6 +179,7 @@ Most configuration is editable in Settings:
 - GitHub comment branding
 - GitHub progress replies
 - CI healing
+- Agent retry attempts for failed work
 - Theme
 
 Key defaults:
@@ -188,6 +189,11 @@ Key defaults:
 - Automatic release creation is disabled.
 - Automatic CI healing is disabled.
 - Automatic deployment healing is disabled.
+- Failed work retries automatically with exponential backoff. **Max agent retry attempts** (default 3)
+  bounds how often a retry may re-run the coding agent; network and GitHub failures retry on a
+  separate, more generous budget because they cost a request rather than an agent run. Work that
+  needs a person — expired agent credentials, a missing CLI — is parked and shown under
+  **Needs attention**, and is retried again roughly hourly so it resumes on its own once fixed.
 - Drain mode pauses new agent work without deleting tracked state.
 
 ## Authentication

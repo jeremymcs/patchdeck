@@ -55,6 +55,7 @@ import { classifyCIFailures, type ClassifiedCIFailure } from "./ciFailureClassif
 import { isFailingCheckSnapshot } from "./ciCheckIngestor";
 import { runCIHealingRepairAttempt } from "./ciHealingAgent";
 import { childLogger } from "./logger";
+import { classifyFailure, resolveMaxAttempts } from "./failureRecovery";
 import { getCodeFactoryPaths } from "./paths";
 import { isResourceBudgetBelowReserve } from "./rateLimitState";
 import { runWithRequestPriority } from "./requestPriority";
@@ -2112,10 +2113,40 @@ export class PRBabysitter {
     return true;
   }
 
+  /**
+   * Whether the background job driving this run still has attempts left. Runs
+   * started outside the queue (manual, in tests) report false so their failures
+   * surface immediately as they always have.
+   */
+  private async willRetryBabysitFailure(
+    error: unknown,
+    attemptCount: number | undefined,
+  ): Promise<boolean> {
+    if (attemptCount === undefined) {
+      return false;
+    }
+
+    if (error instanceof TerminalBabysitterError) {
+      return false;
+    }
+
+    try {
+      const config = await this.storage.getConfig();
+      return attemptCount < resolveMaxAttempts({
+        kind: "babysit_pr",
+        failureClass: classifyFailure(error),
+        maxAgentRetryAttempts: config.maxAgentRetryAttempts,
+      });
+    } catch {
+      return false;
+    }
+  }
+
   async runQueuedBabysitPR(
     prId: string,
     preferredAgent: CodingAgent,
     agentSettings?: AgentRuntimeSettings,
+    jobAttemptCount?: number,
   ): Promise<void> {
     const interruptedRun = (await this.storage.listAgentRuns({ status: "running", prId }))
       .slice()
@@ -2126,6 +2157,7 @@ export class PRBabysitter {
         agentSettings,
         allowDuringDrain: true,
         rethrowOnFailure: true,
+        jobAttemptCount,
       });
       return;
     }
@@ -2148,6 +2180,7 @@ export class PRBabysitter {
         agentSettings,
         allowDuringDrain: true,
         rethrowOnFailure: true,
+        jobAttemptCount,
       });
       return;
     }
@@ -2161,6 +2194,7 @@ export class PRBabysitter {
       agentSettings,
       allowDuringDrain: true,
       rethrowOnFailure: true,
+      jobAttemptCount,
     });
   }
 
@@ -3062,6 +3096,8 @@ export class PRBabysitter {
       agentSettings?: AgentRuntimeSettings;
       allowDuringDrain?: boolean;
       rethrowOnFailure?: boolean;
+      /** Attempts already made by the background job driving this run, when there is one. */
+      jobAttemptCount?: number;
     },
   ): Promise<void> {
     const runId = options?.runId || randomUUID();
@@ -5480,6 +5516,10 @@ export class PRBabysitter {
       const currentPr = await this.storage.getPR(prId);
       const isGitHubError = error instanceof GitHubIntegrationError;
       const isNonCritical = isGitHubError && branchMoved;
+      // The job queue may still retry this run. If it will, leave the PR and its
+      // feedback in a working state — marking them failed here is what used to
+      // force a human to re-queue the PR by hand.
+      const willRetry = await this.willRetryBabysitFailure(error, options?.jobAttemptCount);
       let finalMessage = message;
       let rethrowError: unknown = error;
 
@@ -5497,6 +5537,7 @@ export class PRBabysitter {
 
         const shouldRunCodeOwnerFallback = Boolean(
           options?.rethrowOnFailure
+          && !willRetry
           && !recoveryMode
           && !forcedFixPrompt
           && !isNonCritical
@@ -5558,7 +5599,9 @@ export class PRBabysitter {
           }
         }
 
-        if (followUpTasks.length > 0) {
+        const nextStatus = isNonCritical || willRetry ? "watching" : "error";
+
+        if (followUpTasks.length > 0 && !willRetry) {
           const affectedIds = new Set(followUpTasks.map((item) => item.id));
           const updatedItems = currentPr.feedbackItems.map((item) => {
             if (!affectedIds.has(item.id)) return item;
@@ -5573,12 +5616,12 @@ export class PRBabysitter {
             accepted: updatedCounters.accepted,
             rejected: updatedCounters.rejected,
             flagged: updatedCounters.flagged,
-            status: isNonCritical ? "watching" : "error",
+            status: nextStatus,
             lastChecked: this.now().toISOString(),
           });
         } else {
           await this.storage.updatePR(currentPr.id, {
-            status: isNonCritical ? "watching" : "error",
+            status: nextStatus,
             lastChecked: this.now().toISOString(),
           });
         }

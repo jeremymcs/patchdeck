@@ -523,3 +523,142 @@ test("BackgroundJobDispatcher fails handler errors after retry attempts are exha
     dispatcher.stop();
   }
 });
+
+test("BackgroundJobDispatcher keeps retrying infrastructure failures past the agent spend cap", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig({ maxAgentRetryAttempts: 1 });
+  const queue = new BackgroundJobQueue(storage);
+  const job = await queue.enqueue("babysit_pr", "pr-1", "babysit_pr:pr-1", {
+    prId: "pr-1",
+  });
+
+  let attempts = 0;
+  const dispatcher = new BackgroundJobDispatcher({
+    storage,
+    queue,
+    workerId: "dispatcher-1",
+    pollIntervalMs: 5,
+    leaseMs: 30_000,
+    heartbeatIntervalMs: 10,
+    retryBackoffMs: 0,
+    handlers: {
+      babysit_pr: async () => {
+        attempts += 1;
+        throw new Error("connect ECONNRESET 140.82.121.6:443");
+      },
+    },
+  });
+
+  try {
+    await dispatcher.start();
+    await waitForCondition(async () => (await storage.getBackgroundJob(job.id))?.status === "failed", 1_000);
+
+    const stored = await storage.getBackgroundJob(job.id);
+    assert.equal(attempts, 10, "a network failure retries on the free budget, not the agent budget");
+    assert.equal(stored?.attemptCount, 10);
+  } finally {
+    dispatcher.stop();
+  }
+});
+
+test("BackgroundJobDispatcher parks agent availability failures without burning retries", async () => {
+  const storage = new MemStorage();
+  const queue = new BackgroundJobQueue(storage);
+  const job = await queue.enqueue("babysit_pr", "pr-1", "babysit_pr:pr-1", {
+    prId: "pr-1",
+  });
+
+  let attempts = 0;
+  const dispatcher = new BackgroundJobDispatcher({
+    storage,
+    queue,
+    workerId: "dispatcher-1",
+    pollIntervalMs: 5,
+    leaseMs: 30_000,
+    heartbeatIntervalMs: 10,
+    retryBackoffMs: 0,
+    handlers: {
+      babysit_pr: async () => {
+        attempts += 1;
+        throw new Error("Claude apply failed: authentication failed");
+      },
+    },
+  });
+
+  try {
+    await dispatcher.start();
+    await waitForCondition(async () => (await storage.getBackgroundJob(job.id))?.status === "failed", 500);
+
+    const stored = await storage.getBackgroundJob(job.id);
+    assert.equal(attempts, 1, "retrying an expired credential cannot help");
+    assert.equal(stored?.status, "failed");
+  } finally {
+    dispatcher.stop();
+  }
+});
+
+test("BackgroundJobDispatcher caps agent-invoking retries with the user's spend setting", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig({ maxAgentRetryAttempts: 2 });
+  const queue = new BackgroundJobQueue(storage);
+  const job = await queue.enqueue("work_issue", "owner/repo#7", "work_issue:owner/repo#7", {});
+
+  let attempts = 0;
+  const dispatcher = new BackgroundJobDispatcher({
+    storage,
+    queue,
+    workerId: "dispatcher-1",
+    pollIntervalMs: 5,
+    leaseMs: 30_000,
+    heartbeatIntervalMs: 10,
+    retryBackoffMs: 0,
+    handlers: {
+      work_issue: async () => {
+        attempts += 1;
+        throw new Error("agent produced no usable patch");
+      },
+    },
+  });
+
+  try {
+    await dispatcher.start();
+    await waitForCondition(async () => (await storage.getBackgroundJob(job.id))?.status === "failed", 500);
+
+    assert.equal(attempts, 2);
+  } finally {
+    dispatcher.stop();
+  }
+});
+
+test("BackgroundJobDispatcher does not apply the agent spend cap to api-only work", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig({ maxAgentRetryAttempts: 1 });
+  const queue = new BackgroundJobQueue(storage);
+  const job = await queue.enqueue("sync_watched_repos", "all", "sync_watched_repos:all", {});
+
+  let attempts = 0;
+  const dispatcher = new BackgroundJobDispatcher({
+    storage,
+    queue,
+    workerId: "dispatcher-1",
+    pollIntervalMs: 5,
+    leaseMs: 30_000,
+    heartbeatIntervalMs: 10,
+    retryBackoffMs: 0,
+    handlers: {
+      sync_watched_repos: async () => {
+        attempts += 1;
+        throw new Error("repo sweep hit an unexpected state");
+      },
+    },
+  });
+
+  try {
+    await dispatcher.start();
+    await waitForCondition(async () => (await storage.getBackgroundJob(job.id))?.status === "failed", 1_000);
+
+    assert.equal(attempts, 8, "syncing costs a GitHub request, not an agent run");
+  } finally {
+    dispatcher.stop();
+  }
+});
