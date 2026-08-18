@@ -39,6 +39,7 @@ const DEFAULT_SETTING_VALUES = {
   batchWindowSeconds: 600,
   maxChangesPerRun: 20,
   maxConcurrentBabysitRuns: 3,
+  maxAgentRetryAttempts: 3,
   maxHealingAttemptsPerSession: 3,
   maxHealingAttemptsPerFingerprint: 2,
   maxConcurrentHealingRuns: 1,
@@ -1347,6 +1348,14 @@ export default function Settings() {
                 value={config?.maxConcurrentBabysitRuns ?? 3}
                 onChange={(v) => updateConfigMutation.mutate({ maxConcurrentBabysitRuns: v })}
                 defaultValue={DEFAULT_SETTING_VALUES.maxConcurrentBabysitRuns}
+                disabled={updateConfigMutation.isPending}
+              />
+              <SettingRow
+                label="Max agent retry attempts"
+                description="How many times failed work may re-run the agent before it parks for you. Network and GitHub failures retry regardless — they cost a request, not a run."
+                value={config?.maxAgentRetryAttempts ?? 3}
+                onChange={(v) => updateConfigMutation.mutate({ maxAgentRetryAttempts: v })}
+                defaultValue={DEFAULT_SETTING_VALUES.maxAgentRetryAttempts}
                 disabled={updateConfigMutation.isPending}
               />
             </div>

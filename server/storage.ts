@@ -201,6 +201,8 @@ export interface IStorage {
   cancelBackgroundJob(id: string, leaseToken: string, error: string | null, completedAt: string): Promise<BackgroundJob | undefined>;
   requeueExpiredBackgroundJobs(now: string): Promise<number>;
   clearFailedBackgroundJobs(filters?: { kind?: BackgroundJobKind; targetId?: string }): Promise<number>;
+  requeueFailedBackgroundJob(id: string, availableAt: string, updatedAt: string): Promise<BackgroundJob | undefined>;
+  promoteBackgroundJob(id: string, availableAt: string, updatedAt: string): Promise<BackgroundJob | undefined>;
 
   // Social media changelogs
   getSocialChangelogs(): Promise<SocialChangelog[]>;

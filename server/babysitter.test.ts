@@ -8658,3 +8658,172 @@ test("isTrustedReviewer matches authors case-insensitively and ignores @ prefix"
   assert.equal(isTrustedReviewer("alice", ["octocat", "alice", "bob"]), true);
   assert.equal(isTrustedReviewer("eve", ["octocat", "alice", "bob"]), false);
 });
+
+test("babysitPR leaves the PR watching while the job still has retries left", async () => {
+  // Goal: a failing run used to park the PR in `error` and mark its feedback `failed`, so the
+  // only way forward was a human re-queueing it. While the background job still has attempts,
+  // the PR must stay workable so the retry picks it up on its own.
+  const storage = new MemStorage();
+  await storage.updateConfig({ autoUpdateDocs: false });
+  const existingItem = makeFeedbackItem();
+  const pr = await storage.addPR({
+    number: 106,
+    title: "Verbose PR",
+    repo: "alex-morgan-o/lolodex",
+    branch: "feature/verbose",
+    author: "octocat",
+    url: "https://github.com/alex-morgan-o/lolodex/pull/106",
+    status: "watching",
+    feedbackItems: [existingItem],
+    accepted: 0,
+    rejected: 0,
+    flagged: 0,
+    testsPassed: null,
+    lintPassed: null,
+    lastChecked: null,
+  });
+
+  const worktreeRoot = await mkdtemp(path.join(os.tmpdir(), "codefactory-home-"));
+  process.env.CODEFACTORY_HOME = worktreeRoot;
+  const pullSummary = makePullSummary(pr);
+  let applyCalled = false;
+
+  const babysitter = new PRBabysitter(
+    storage,
+    {
+      buildOctokit: async () => ({}) as never,
+      fetchFeedbackItemsForPR: async () => [existingItem],
+      fetchPullSummary: async () => pullSummary,
+      listFailingStatuses: async () => [],
+    checkCISettled: async () => true,
+      listOpenPullsForRepo: async () => [],
+      postFollowUpForFeedbackItem: async () => {
+        throw new Error("GitHub follow-up failed");
+      },
+      resolveReviewThread: async () => undefined,
+      resolveGitHubAuthToken: async () => "test-token",
+      addReactionToComment: async () => {},
+      postStatusReplyForFeedbackItem: async () => null,
+      updateStatusReply: async () => {},
+    },
+    {
+      resolveAgent: async () => "codex",
+      ciPollIntervalMs: 0,
+      evaluateFixNecessityWithAgent: async () => ({
+        needsFix: true,
+        reason: "Comment requires a code change",
+      }),
+      applyFixesWithAgent: async ({ onStdoutChunk, onStderrChunk }) => {
+        applyCalled = true;
+        onStdoutChunk?.("agent stdout line\n");
+        onStderrChunk?.("agent stderr line\n");
+        return {
+          code: 0,
+          stdout: "agent stdout line\n",
+          stderr: "agent stderr line\n",
+        };
+      },
+      runCommand: makeGitRunCommand({
+        localHeadSha: "def456",
+        remoteHeadSha: "def456",
+      }),
+    },
+  );
+
+  await babysitter.babysitPR(pr.id, "codex", { jobAttemptCount: 0 });
+
+  const updated = await storage.getPR(pr.id);
+  const logs = await storage.getLogs(pr.id);
+
+  assert.equal(applyCalled, true);
+  assert.equal(updated?.status, "watching", "a retryable failure must not park the PR");
+  assert.ok(
+    updated?.feedbackItems.every((item) => item.status !== "failed"),
+    "feedback must stay workable so the retry can pick it up",
+  );
+  assert.ok(logs.some((log) => log.phase === "run" && log.message.includes("GitHub follow-up failed")));
+  assert.ok(logs.some((log) => log.phase === "cleanup" && log.message.includes("Worktree cleanup complete")));
+
+  delete process.env.CODEFACTORY_HOME;
+});
+
+test("babysitPR parks the PR once the job is out of retries", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig({ autoUpdateDocs: false });
+  const existingItem = makeFeedbackItem();
+  const pr = await storage.addPR({
+    number: 106,
+    title: "Verbose PR",
+    repo: "alex-morgan-o/lolodex",
+    branch: "feature/verbose",
+    author: "octocat",
+    url: "https://github.com/alex-morgan-o/lolodex/pull/106",
+    status: "watching",
+    feedbackItems: [existingItem],
+    accepted: 0,
+    rejected: 0,
+    flagged: 0,
+    testsPassed: null,
+    lintPassed: null,
+    lastChecked: null,
+  });
+
+  const worktreeRoot = await mkdtemp(path.join(os.tmpdir(), "codefactory-home-"));
+  process.env.CODEFACTORY_HOME = worktreeRoot;
+  const pullSummary = makePullSummary(pr);
+  let applyCalled = false;
+
+  const babysitter = new PRBabysitter(
+    storage,
+    {
+      buildOctokit: async () => ({}) as never,
+      fetchFeedbackItemsForPR: async () => [existingItem],
+      fetchPullSummary: async () => pullSummary,
+      listFailingStatuses: async () => [],
+    checkCISettled: async () => true,
+      listOpenPullsForRepo: async () => [],
+      postFollowUpForFeedbackItem: async () => {
+        throw new Error("GitHub follow-up failed");
+      },
+      resolveReviewThread: async () => undefined,
+      resolveGitHubAuthToken: async () => "test-token",
+      addReactionToComment: async () => {},
+      postStatusReplyForFeedbackItem: async () => null,
+      updateStatusReply: async () => {},
+    },
+    {
+      resolveAgent: async () => "codex",
+      ciPollIntervalMs: 0,
+      evaluateFixNecessityWithAgent: async () => ({
+        needsFix: true,
+        reason: "Comment requires a code change",
+      }),
+      applyFixesWithAgent: async ({ onStdoutChunk, onStderrChunk }) => {
+        applyCalled = true;
+        onStdoutChunk?.("agent stdout line\n");
+        onStderrChunk?.("agent stderr line\n");
+        return {
+          code: 0,
+          stdout: "agent stdout line\n",
+          stderr: "agent stderr line\n",
+        };
+      },
+      runCommand: makeGitRunCommand({
+        localHeadSha: "def456",
+        remoteHeadSha: "def456",
+      }),
+    },
+  );
+
+  await babysitter.babysitPR(pr.id, "codex", { jobAttemptCount: 3 });
+
+  const updated = await storage.getPR(pr.id);
+  const logs = await storage.getLogs(pr.id);
+
+  assert.equal(applyCalled, true);
+  assert.equal(updated?.status, "error", "the last attempt still surfaces the failure");
+  assert.ok(logs.some((log) => log.phase === "run" && log.message.includes("GitHub follow-up failed")));
+  assert.ok(logs.some((log) => log.phase === "cleanup" && log.message.includes("Worktree cleanup complete")));
+
+  delete process.env.CODEFACTORY_HOME;
+});
