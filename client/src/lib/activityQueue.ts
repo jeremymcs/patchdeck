@@ -31,13 +31,22 @@ export function buildQueueStatusIndex(snapshot: ActivitySnapshot, nowMs = Date.n
     const availableDelayMs = getAvailableDelayMs(activity, nowMs);
     const waitMs = availableDelayMs + inProgressBudgetMs + queuedBudgetMs;
 
+    // A queued job with attempts behind it is backing off after a failure, not
+    // waiting its turn. Say so, and say why — automation retrying quietly looks
+    // identical to automation being stuck.
+    const isRetrying = availableDelayMs > 0 && activity.attemptCount > 0;
+
     statusById.set(activity.targetId, {
-      label: position === 1 ? "up next" : `#${position} in queue`,
-      detail: availableDelayMs > 0
-        ? `available in ~${formatDuration(availableDelayMs)}`
-        : waitMs > 0
-          ? `starts in ~${formatDuration(waitMs)}`
-          : "starting soon",
+      label: isRetrying
+        ? `retrying (attempt ${activity.attemptCount + 1})`
+        : position === 1 ? "up next" : `#${position} in queue`,
+      detail: isRetrying
+        ? `retry in ~${formatDuration(availableDelayMs)}${activity.lastError ? ` - ${activity.lastError}` : ""}`
+        : availableDelayMs > 0
+          ? `available in ~${formatDuration(availableDelayMs)}`
+          : waitMs > 0
+            ? `starts in ~${formatDuration(waitMs)}`
+            : "starting soon",
       className: availableDelayMs > 0
         ? "border-warning-border bg-warning-muted text-warning-foreground"
         : "border-primary/50 text-primary",

@@ -616,7 +616,33 @@ test("mobile layout primitives keep narrow viewport constraints wired", async ()
   assertHasStringValue(activityMenuSourceFile, "mobile activity menu viewport height", /max-h-\[calc\(100dvh-6rem\)\]/);
   assertHasStringValue(detailHeaderSourceFile, "mobile detail header stacks actions", /flex-col gap-3 sm:flex-row/);
   assertHasStringValue(detailHeaderSourceFile, "mobile detail action rail scrolls", /overflow-x-auto/);
+  // The action rail must stay shrinkable, or it crushes the title/meta column.
+  assertHasStringValue(detailHeaderSourceFile, "detail title keeps a width floor", /sm:min-w-\[12rem\] sm:flex-1/);
+  assertHasStringValue(detailHeaderSourceFile, "detail action rail can shrink and wrap", /sm:flex-wrap sm:justify-end/);
   assertHasStringValue(metaBreadcrumbSourceFile, "mobile metadata avoids word columns", /whitespace-nowrap/);
   assertHasStringValue(prsSourceFile, "mobile PR activity panel is viewport bounded", /max-h-\[42dvh\]/);
   assertHasStringValue(issuesSourceFile, "mobile issue activity panel is viewport bounded", /max-h-\[42dvh\]/);
+});
+
+test("mobile single-pane master/detail navigation stays wired", async () => {
+  const { sourceFile: detailHeaderSourceFile } = await parseProjectFile("client/src/components/detail/DetailHeader.tsx");
+  const { sourceFile: prsSourceFile } = await parseProjectFile("client/src/pages/prs.tsx");
+  const { sourceFile: issuesSourceFile } = await parseProjectFile("client/src/pages/issues.tsx");
+
+  assertHasTestId(detailHeaderSourceFile, "mobile back affordance", "detail-back-to-list");
+  assertHasStringValue(detailHeaderSourceFile, "back affordance is mobile only", /lg:hidden/);
+
+  for (const [label, sourceFile] of [["issues", issuesSourceFile], ["PRs", prsSourceFile]] as const) {
+    // The shell owns the viewport so the panes scroll internally instead of the page.
+    assertHasStringValue(sourceFile, `${label} page shell is viewport height`, /^flex h-dvh flex-col overflow-hidden$/);
+    // Exactly one pane is mounted below `lg`.
+    assertHasExpression(sourceFile, `${label} list pane hides behind the detail`, /mobilePane === "detail" \? "hidden lg:flex" : "flex"/);
+    assertHasExpression(sourceFile, `${label} detail pane hides behind the list`, /mobilePane === "list" \? "hidden lg:flex" : "flex"/);
+    assertHasExpression(sourceFile, `${label} activity rail follows the detail pane`, /mobileHidden=\{mobilePane === "list"\}/);
+    // Filters collapse on mobile so the list is not squeezed to a sliver.
+    assertHasExpression(sourceFile, `${label} filters collapse on mobile`, /areMobileFiltersOpen \? "flex" : "hidden"/);
+  }
+
+  assertHasTestId(issuesSourceFile, "issue filter toggle", "button-toggle-issue-filters");
+  assertHasTestId(prsSourceFile, "PR filter toggle", "button-toggle-pr-filters");
 });

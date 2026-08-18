@@ -232,7 +232,7 @@ export async function evaluateFixNecessityWithAgent(params: {
           outputFile,
           extractionPrompt,
         ], settings),
-        { cwd, timeoutMs: 180000 },
+        { cwd, timeoutMs: 420000 },
       );
 
       if (result.code !== 0) {
@@ -268,7 +268,7 @@ export async function evaluateFixNecessityWithAgent(params: {
   const result = await runAgentCommand(
     "claude",
     claudeArgs,
-    { cwd, timeoutMs: 180000 },
+    { cwd, timeoutMs: 420000 },
   );
 
   if (result.code !== 0) {
@@ -288,7 +288,7 @@ export async function applyFixesWithAgent(params: {
   onStdoutChunk?: (chunk: string) => void;
   onStderrChunk?: (chunk: string) => void;
 }): Promise<CommandResult> {
-  const { agent, cwd, prompt, settings, env, timeoutMs = 900000, onStdoutChunk, onStderrChunk } = params;
+  const { agent, cwd, prompt, settings, env, timeoutMs = 1800000, onStdoutChunk, onStderrChunk } = params;
 
   if (agent === "codex") {
     const result = await runAgentCommand(

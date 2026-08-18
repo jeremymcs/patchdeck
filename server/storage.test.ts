@@ -1359,3 +1359,85 @@ test("MemStorage repo sync state matches the SqliteStorage contract", async () =
     { repo: "o/r", kind: "prs", lastSyncedAt: "t1", nextEligibleAt: null },
   ]);
 });
+
+test("both storages requeue a parked background job with a fresh attempt budget", async () => {
+  // Goal: parking must be reversible without a human. Reviving resets the attempt count so the
+  // job gets a full recovery cycle rather than failing again on its first tick.
+  const root = await mkdtemp(path.join(os.tmpdir(), "codefactory-storage-"));
+  const sqlite = new SqliteStorage(root);
+  const memory = new MemStorage();
+
+  try {
+    for (const storage of [sqlite, memory]) {
+      const job = await storage.enqueueBackgroundJob({
+        kind: "babysit_pr",
+        targetId: "pr-1",
+        dedupeKey: "babysit_pr:pr-1",
+        payload: { prId: "pr-1" },
+        availableAt: "2026-04-02T10:00:00.000Z",
+      });
+
+      const claimed = await storage.claimNextBackgroundJob({
+        workerId: "worker-1",
+        leaseToken: "lease-1",
+        leaseExpiresAt: "2026-04-02T10:00:30.000Z",
+        now: "2026-04-02T10:00:00.000Z",
+      });
+      assert.equal(claimed?.id, job.id);
+
+      await storage.failBackgroundJob(job.id, "lease-1", "agent run failed", "2026-04-02T10:00:20.000Z");
+
+      const revived = await storage.requeueFailedBackgroundJob(
+        job.id,
+        "2026-04-02T11:00:00.000Z",
+        "2026-04-02T11:00:00.000Z",
+      );
+
+      assert.equal(revived?.status, "queued");
+      assert.equal(revived?.attemptCount, 0);
+      assert.equal(revived?.leaseToken, null);
+      assert.equal(revived?.availableAt, "2026-04-02T11:00:00.000Z");
+
+      const reclaimable = await storage.claimNextBackgroundJob({
+        workerId: "worker-2",
+        leaseToken: "lease-2",
+        leaseExpiresAt: "2026-04-02T11:00:30.000Z",
+        now: "2026-04-02T11:00:00.000Z",
+      });
+      assert.equal(reclaimable?.id, job.id, "a revived job must be claimable again");
+
+      const missing = await storage.requeueFailedBackgroundJob(
+        "does-not-exist",
+        "2026-04-02T11:00:00.000Z",
+        "2026-04-02T11:00:00.000Z",
+      );
+      assert.equal(missing, undefined);
+
+      // A job backing off into the future must be pullable forward, so a manual
+      // "run now" is not silently swallowed by queue dedupe.
+      const backingOff = await storage.enqueueBackgroundJob({
+        kind: "work_issue",
+        targetId: "acme/widgets#3",
+        dedupeKey: "work_issue:acme/widgets#3",
+        payload: {},
+        availableAt: "2026-04-02T13:00:00.000Z",
+      });
+
+      const promoted = await storage.promoteBackgroundJob(
+        backingOff.id,
+        "2026-04-02T12:00:00.000Z",
+        "2026-04-02T12:00:00.000Z",
+      );
+      assert.equal(promoted?.availableAt, "2026-04-02T12:00:00.000Z");
+
+      const alreadyDue = await storage.promoteBackgroundJob(
+        backingOff.id,
+        "2026-04-02T12:30:00.000Z",
+        "2026-04-02T12:30:00.000Z",
+      );
+      assert.equal(alreadyDue, undefined, "never push a claimable job further out");
+    }
+  } finally {
+    sqlite.close();
+  }
+});

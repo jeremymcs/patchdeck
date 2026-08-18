@@ -55,6 +55,7 @@ import { classifyCIFailures, type ClassifiedCIFailure } from "./ciFailureClassif
 import { isFailingCheckSnapshot } from "./ciCheckIngestor";
 import { runCIHealingRepairAttempt } from "./ciHealingAgent";
 import { childLogger } from "./logger";
+import { classifyFailure, resolveMaxAttempts } from "./failureRecovery";
 import { getCodeFactoryPaths } from "./paths";
 import { isResourceBudgetBelowReserve } from "./rateLimitState";
 import { runWithRequestPriority } from "./requestPriority";
@@ -69,6 +70,7 @@ import {
   applyEvaluationDecision,
   isFeedbackClosedStatus,
   markInProgress,
+  markReviewConversationResolved,
   markResolved,
   markFailed,
   markRetry,
@@ -938,7 +940,11 @@ function collectAuditTrailErrors(params: {
   const errors: string[] = [];
 
   for (const item of followUpTasks) {
-    if (!hasAuditTrail(item, pr.feedbackItems, runStartedAtMs)) {
+    // Rejected review-thread items are closed with an explanation reply and
+    // conversation resolution; there is no code change to audit, so only the
+    // thread resolution is verified for them.
+    const isRejectedReviewThread = item.decision === "reject" && item.replyKind === "review_thread";
+    if (!isRejectedReviewThread && !hasAuditTrail(item, pr.feedbackItems, runStartedAtMs)) {
       errors.push(`missing audit trail for ${item.id}`);
     }
 
@@ -954,11 +960,24 @@ function collectAuditTrailErrors(params: {
 }
 
 function needsGitHubFollowUp(item: FeedbackItem, feedbackItems: FeedbackItem[]): boolean {
-  if (item.decision !== "accept") {
-    return false;
-  }
+  // Accepted feedback items awaiting applied work.
+  const isAcceptedWork = item.decision === "accept"
+    && (item.status === "queued" || item.status === "in_progress");
 
-  if (item.status !== "queued" && item.status !== "in_progress") {
+  // Rejected review-thread items still need a closing reply (why it was
+  // rejected) plus conversation resolution, matching the agent prompt:
+  // "For rejected feedback: reply ... with what was done, or why it was
+  // rejected. Resolve the GitHub conversation after replying."
+  // PatchDeck's own status/audit-trail replies are excluded: they were
+  // rejected as "not new work", not as reviewer feedback, so they must not
+  // trigger another reply (that would loop on our own comments).
+  const rejectedInternalReply = item.decision === "reject"
+    && /PatchDeck (agent command|audit trail|status) comment|Automation audit trail follow-up/i.test(item.statusReason ?? "");
+  const isRejectedReviewThread = item.decision === "reject"
+    && item.replyKind === "review_thread"
+    && !rejectedInternalReply;
+
+  if (!isAcceptedWork && !isRejectedReviewThread) {
     return false;
   }
 
@@ -1100,11 +1119,18 @@ function buildFeedbackFollowUpBody(
   agentSummary?: string,
 ): string {
   const shortSha = headSha.trim() ? headSha.trim().slice(0, 7) : "";
-  const headline = shortSha
-    ? `Addressed in commit \`${shortSha}\`.`
-    : "Addressed in the latest update.";
+  const rejected = item.decision === "reject";
+  const headline = rejected
+    ? "Rejected — no code change made."
+    : shortSha
+      ? `Addressed in commit \`${shortSha}\`.`
+      : "Addressed in the latest update.";
 
   const parts = [headline];
+
+  if (rejected && item.statusReason) {
+    parts.push("", `**Reason:** ${item.statusReason}`);
+  }
 
   // For non-review-thread items the follow-up is posted as a top-level PR
   // comment, so include a reference to the original comment for a clear audit
@@ -2112,10 +2138,40 @@ export class PRBabysitter {
     return true;
   }
 
+  /**
+   * Whether the background job driving this run still has attempts left. Runs
+   * started outside the queue (manual, in tests) report false so their failures
+   * surface immediately as they always have.
+   */
+  private async willRetryBabysitFailure(
+    error: unknown,
+    attemptCount: number | undefined,
+  ): Promise<boolean> {
+    if (attemptCount === undefined) {
+      return false;
+    }
+
+    if (error instanceof TerminalBabysitterError) {
+      return false;
+    }
+
+    try {
+      const config = await this.storage.getConfig();
+      return attemptCount < resolveMaxAttempts({
+        kind: "babysit_pr",
+        failureClass: classifyFailure(error),
+        maxAgentRetryAttempts: config.maxAgentRetryAttempts,
+      });
+    } catch {
+      return false;
+    }
+  }
+
   async runQueuedBabysitPR(
     prId: string,
     preferredAgent: CodingAgent,
     agentSettings?: AgentRuntimeSettings,
+    jobAttemptCount?: number,
   ): Promise<void> {
     const interruptedRun = (await this.storage.listAgentRuns({ status: "running", prId }))
       .slice()
@@ -2126,6 +2182,7 @@ export class PRBabysitter {
         agentSettings,
         allowDuringDrain: true,
         rethrowOnFailure: true,
+        jobAttemptCount,
       });
       return;
     }
@@ -2148,6 +2205,7 @@ export class PRBabysitter {
         agentSettings,
         allowDuringDrain: true,
         rethrowOnFailure: true,
+        jobAttemptCount,
       });
       return;
     }
@@ -2161,6 +2219,7 @@ export class PRBabysitter {
       agentSettings,
       allowDuringDrain: true,
       rethrowOnFailure: true,
+      jobAttemptCount,
     });
   }
 
@@ -3062,6 +3121,8 @@ export class PRBabysitter {
       agentSettings?: AgentRuntimeSettings;
       allowDuringDrain?: boolean;
       rethrowOnFailure?: boolean;
+      /** Attempts already made by the background job driving this run, when there is one. */
+      jobAttemptCount?: number;
     },
   ): Promise<void> {
     const runId = options?.runId || randomUUID();
@@ -3340,6 +3401,92 @@ export class PRBabysitter {
       return true;
     };
 
+    const finalizeCodeOwnerFallbackWorktree = async (params: {
+      prId: string;
+      cwd: string;
+      repoCacheDir: string;
+      remoteName: string;
+      headRef: string;
+      agent: CodingAgent;
+    }): Promise<void> => {
+      const { prId, cwd, repoCacheDir, remoteName, headRef, agent } = params;
+      const phase = "code-owner-fallback";
+
+      // Commit any uncommitted agent edits so the local head captures them.
+      const committed = await commitDirtyWorktree({
+        currentPrId: prId,
+        cwd,
+        commitArgs: ["commit", "--no-verify", "--no-edit", "-m", `Apply ${agent} code-owner fallback fixes for PR`],
+        phase,
+        context: "code-owner fallback agent run",
+      });
+
+      // If the agent already committed but did not push (or we just committed),
+      // push the local head to the PR branch. When the agent already pushed,
+      // local HEAD equals the remote HEAD and the push is a no-op success.
+      const pushResult = await runLoggedCommand({
+        currentPrId: prId,
+        command: "git",
+        args: ["push", remoteName, `HEAD:${headRef}`],
+        cwd,
+        timeoutMs: 120000,
+        phase,
+        successMessage: `Pushed code-owner fallback work to ${remoteName}/${headRef}`,
+      });
+      if (pushResult.code !== 0) {
+        throw new Error(formatGitFailure(`pushing ${remoteName}/${headRef} after code-owner fallback`, pushResult));
+      }
+
+      // Confirm the pushed head is visible on the remote.
+      const remoteFetch = await runLoggedCommand({
+        currentPrId: prId,
+        command: "git",
+        args: ["-C", repoCacheDir, "fetch", remoteName, headRef],
+        timeoutMs: 120000,
+        phase,
+        successMessage: `Fetched ${remoteName}/${headRef} after code-owner fallback push`,
+      });
+      if (remoteFetch.code !== 0) {
+        throw new Error(formatGitFailure(`fetching ${remoteName}/${headRef} after code-owner fallback push`, remoteFetch));
+      }
+
+      const remoteHead = await runLoggedCommand({
+        currentPrId: prId,
+        command: "git",
+        args: ["-C", repoCacheDir, "rev-parse", "FETCH_HEAD"],
+        timeoutMs: 5000,
+        phase,
+        successMessage: "Collected remote PR head SHA after code-owner fallback push",
+      });
+      if (remoteHead.code !== 0) {
+        throw new Error(formatGitFailure("reading remote PR head after code-owner fallback push", remoteHead));
+      }
+
+      const localHead = await runLoggedCommand({
+        currentPrId: prId,
+        command: "git",
+        args: ["rev-parse", "HEAD"],
+        cwd,
+        timeoutMs: 5000,
+        phase,
+        successMessage: "Collected local PR head SHA after code-owner fallback",
+      });
+      if (localHead.code !== 0) {
+        throw new Error(formatGitFailure("reading local PR head after code-owner fallback", localHead));
+      }
+
+      if (localHead.stdout.trim() !== remoteHead.stdout.trim()) {
+        throw new Error(
+          `Code-owner fallback work was not reflected on ${remoteName}/${headRef} (local ${localHead.stdout.trim().slice(0, 8)}, remote ${remoteHead.stdout.trim().slice(0, 8)})`,
+        );
+      }
+
+      await queueLog(prId, "info", `Code-owner fallback work finalized on ${remoteName}/${headRef}`, {
+        phase,
+        metadata: { committed, remoteHead: remoteHead.stdout.trim().slice(0, 12) },
+      });
+    };
+
     const runCodeOwnerFallbackAfterFailure = async (params: {
       pr: PR;
       failureMessage: string;
@@ -3480,6 +3627,20 @@ export class PRBabysitter {
           await queueLog(pr.id, "info", `${agent} code-owner fallback completed successfully`, {
             phase: "code-owner-fallback",
             metadata: { agent, cwd },
+          });
+
+          // The code-owner fallback agent is asked to commit and push its own
+          // changes, but agents sometimes finish without doing so (e.g. a
+          // truncated model response). If the worktree has uncommitted changes
+          // or a local commit that was not pushed, PatchDeck finalizes the PR
+          // branch so the review threads can be closed against the real head.
+          await finalizeCodeOwnerFallbackWorktree({
+            prId: pr.id,
+            cwd: worktreePath,
+            repoCacheDir,
+            remoteName,
+            headRef: pullSummary.headRef,
+            agent,
           });
 
           return { agent, prompt };
@@ -5254,7 +5415,12 @@ export class PRBabysitter {
           },
         });
 
-        await updateItemStatus(item.id, STATUS_MESSAGES.resolved(headShaForFollowUp));
+        await updateItemStatus(
+          item.id,
+          item.decision === "reject"
+            ? "**Rejected** — replied to the review thread and resolved the conversation."
+            : STATUS_MESSAGES.resolved(headShaForFollowUp),
+        );
       }
 
       pr = await this.syncFeedbackForPR(pr.id, {
@@ -5286,9 +5452,16 @@ export class PRBabysitter {
 
       if (followUpTasks.length > 0) {
         const resolvedIds = new Set(followUpTasks.map((item) => item.id));
-        const resolvedItems = pr.feedbackItems.map((item) =>
-          resolvedIds.has(item.id) ? markResolved(item) : item,
-        );
+        const resolvedItems = pr.feedbackItems.map((item) => {
+          if (!resolvedIds.has(item.id)) {
+            return item;
+          }
+          // Rejected review threads keep their rejection decision; only the
+          // conversation resolution flag is advanced.
+          return item.decision === "reject"
+            ? markReviewConversationResolved(item)
+            : markResolved(item);
+        });
         const resolvedCounters = countDecisions(resolvedItems);
         const resolvedPR = await this.storage.updatePR(pr.id, {
           feedbackItems: resolvedItems,
@@ -5480,6 +5653,10 @@ export class PRBabysitter {
       const currentPr = await this.storage.getPR(prId);
       const isGitHubError = error instanceof GitHubIntegrationError;
       const isNonCritical = isGitHubError && branchMoved;
+      // The job queue may still retry this run. If it will, leave the PR and its
+      // feedback in a working state — marking them failed here is what used to
+      // force a human to re-queue the PR by hand.
+      const willRetry = await this.willRetryBabysitFailure(error, options?.jobAttemptCount);
       let finalMessage = message;
       let rethrowError: unknown = error;
 
@@ -5497,6 +5674,7 @@ export class PRBabysitter {
 
         const shouldRunCodeOwnerFallback = Boolean(
           options?.rethrowOnFailure
+          && !willRetry
           && !recoveryMode
           && !forcedFixPrompt
           && !isNonCritical
@@ -5558,7 +5736,9 @@ export class PRBabysitter {
           }
         }
 
-        if (followUpTasks.length > 0) {
+        const nextStatus = isNonCritical || willRetry ? "watching" : "error";
+
+        if (followUpTasks.length > 0 && !willRetry) {
           const affectedIds = new Set(followUpTasks.map((item) => item.id));
           const updatedItems = currentPr.feedbackItems.map((item) => {
             if (!affectedIds.has(item.id)) return item;
@@ -5573,12 +5753,12 @@ export class PRBabysitter {
             accepted: updatedCounters.accepted,
             rejected: updatedCounters.rejected,
             flagged: updatedCounters.flagged,
-            status: isNonCritical ? "watching" : "error",
+            status: nextStatus,
             lastChecked: this.now().toISOString(),
           });
         } else {
           await this.storage.updatePR(currentPr.id, {
-            status: isNonCritical ? "watching" : "error",
+            status: nextStatus,
             lastChecked: this.now().toISOString(),
           });
         }

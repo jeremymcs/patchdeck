@@ -1,4 +1,4 @@
-import { ExternalLink } from "lucide-react";
+import { ChevronLeft, ExternalLink } from "lucide-react";
 import type { ReactNode } from "react";
 import { toneFailedBgClass, toneHeaderAccentClass, type StatusTone } from "@/lib/statusTones";
 
@@ -15,6 +15,9 @@ export type DetailHeaderProps = {
   stageBar?: ReactNode;
   accentTone?: StatusTone;
   failed?: boolean;
+  /** Mobile-only affordance: returns the single-pane layout to the list view. */
+  onBack?: () => void;
+  backLabel?: string;
 };
 
 export function DetailHeader({
@@ -30,6 +33,8 @@ export function DetailHeader({
   stageBar,
   accentTone,
   failed = false,
+  onBack,
+  backLabel = "Back to list",
 }: DetailHeaderProps) {
   const titleClass = titleMultiline
     ? "line-clamp-2 break-words text-title font-semibold leading-snug tracking-tight"
@@ -39,8 +44,19 @@ export function DetailHeader({
 
   return (
     <div className={`shrink-0 border-b border-border px-4 py-3${accentClass}${failedBg ? ` ${failedBg}` : ""}`}>
+      {onBack && (
+        <button
+          type="button"
+          onClick={onBack}
+          data-testid="detail-back-to-list"
+          className="-ml-1 mb-2 inline-flex min-h-8 items-center gap-1 rounded-md px-1 text-label font-medium uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background lg:hidden"
+        >
+          <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+          {backLabel}
+        </button>
+      )}
       <div className="mb-1 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
-        <div className="min-w-0">
+        <div className="min-w-0 sm:min-w-[12rem] sm:flex-1">
           <div className="flex flex-wrap items-center gap-2">
             {statusDot}
             <span className={titleClass} title={title}>
@@ -64,7 +80,7 @@ export function DetailHeader({
           {stageBar && <div className="mt-2">{stageBar}</div>}
         </div>
         {actions && (
-          <div className="-mx-1 flex min-w-0 overflow-x-auto px-1 pb-1 sm:mx-0 sm:shrink-0 sm:flex-wrap sm:justify-end sm:overflow-visible sm:px-0 sm:pb-0 [&>*]:shrink-0">
+          <div className="-mx-1 flex min-w-0 overflow-x-auto px-1 pb-1 sm:mx-0 sm:flex-wrap sm:justify-end sm:px-0 sm:pb-0 [&>*]:shrink-0 sm:[&>*]:shrink">
             <div className="flex min-w-max items-center gap-2 sm:min-w-0 sm:flex-wrap sm:justify-end [&_button]:min-h-8 sm:[&_button]:min-h-0">
               {actions}
             </div>

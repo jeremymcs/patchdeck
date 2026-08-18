@@ -4,6 +4,7 @@ import type { CodingAgent } from "./agentRunner";
 import { resolveRepoAgentRuntimeSettings, resolveRepoCodingAgent } from "./agentSettings";
 import { TerminalBabysitterError, type PRBabysitter } from "./babysitter";
 import { CancelBackgroundJobError, DeferBackgroundJobError, TerminalBackgroundJobError, type BackgroundJobHandlers } from "./backgroundJobDispatcher";
+import { classifyFailure, resolveMaxAttempts } from "./failureRecovery";
 import { buildBackgroundJobDedupeKey, type ScheduleBackgroundJob } from "./backgroundJobQueue";
 import { buildActivityPayload } from "./activityPayload";
 import { createAdapter } from "./deploymentAdapters";
@@ -99,7 +100,7 @@ function resolvePassiveMonitorDefer(): { reason: string; availableAt: Date } | n
 export function createBackgroundJobHandlers(params: {
   storage: IStorage;
   babysitter?: Pick<PRBabysitter, "runQueuedBabysitPR" | "syncAndBabysitTrackedRepos">;
-  releaseManager?: Pick<ReleaseManager, "processReleaseRun">;
+  releaseManager?: Pick<ReleaseManager, "processReleaseRun" | "markReleaseRunFailed">;
   deploymentHealingManager?: DeploymentHealingManager;
   questionAnswerer?: typeof answerPRQuestion;
   scheduleBackgroundJob?: ScheduleBackgroundJob;
@@ -293,7 +294,7 @@ export function createBackgroundJobHandlers(params: {
           ?? resolveRepoCodingAgent(config, repoSettings);
         const agentSettings = resolveRepoAgentRuntimeSettings(config, repoSettings);
         try {
-          await babysitter.runQueuedBabysitPR(pr.id, preferredAgent, agentSettings);
+          await babysitter.runQueuedBabysitPR(pr.id, preferredAgent, agentSettings, job.attemptCount);
         } catch (error) {
           if (error instanceof TerminalBabysitterError) {
             throw new TerminalBackgroundJobError(error.message);
@@ -581,6 +582,34 @@ export function createBackgroundJobHandlers(params: {
           subtasks: subtasks.length >= 2 ? subtasks : undefined,
         });
       } catch (error) {
+        // A thrown error here used to be terminal, so a single network blip
+        // stranded the issue until someone cleared it by hand. Let the shared
+        // policy decide, and only announce failure on GitHub once the job is
+        // actually out of attempts.
+        const message = error instanceof Error ? error.message : String(error);
+        const failureClass = classifyFailure(error);
+        const willRetry = job.attemptCount < resolveMaxAttempts({
+          kind: job.kind,
+          failureClass,
+          maxAgentRetryAttempts: config.maxAgentRetryAttempts,
+        });
+
+        if (willRetry) {
+          await addIssueWorkStageLog(
+            targetId,
+            "working",
+            `Issue work attempt ${job.attemptCount} failed for ${issue.repoFullName}#${issue.number}; retrying`,
+            {
+              ...baseMetadata,
+              error: message,
+              failureClass,
+              attempt: job.attemptCount,
+            },
+            "warn",
+          );
+          throw error;
+        }
+
         if (progressRepliesEnabled) {
           await postIssueWorkStatusComment(
             octokit,
@@ -592,7 +621,7 @@ export function createBackgroundJobHandlers(params: {
               issueTitle: issue.title,
               issueUrl: issue.url,
               stage: "failed",
-              detail: error instanceof Error ? error.message : String(error),
+              detail: message,
             }),
             targetId,
             "failed",
@@ -604,11 +633,12 @@ export function createBackgroundJobHandlers(params: {
           `Issue work failed for ${issue.repoFullName}#${issue.number}`,
           {
             ...baseMetadata,
-            error: error instanceof Error ? error.message : String(error),
+            error: message,
+            failureClass,
           },
           "error",
         );
-        throw new TerminalBackgroundJobError(error instanceof Error ? error.message : String(error));
+        throw new TerminalBackgroundJobError(message);
       }
 
       if (!repairResult.accepted) {
@@ -868,7 +898,23 @@ export function createBackgroundJobHandlers(params: {
           return;
         }
 
-        await releaseManager.processReleaseRun(releaseRun.id);
+        try {
+          await releaseManager.processReleaseRun(releaseRun.id, { markErrorOnFailure: false });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          const failureClass = classifyFailure(error);
+          const config = await storage.getConfig();
+          const willRetry = job.attemptCount < resolveMaxAttempts({
+            kind: job.kind,
+            failureClass,
+            maxAgentRetryAttempts: config.maxAgentRetryAttempts,
+          });
+
+          if (!willRetry) {
+            await releaseManager.markReleaseRunFailed(releaseRun.id, message);
+          }
+          throw error;
+        }
       }
       : undefined,
 

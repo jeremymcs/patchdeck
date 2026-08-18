@@ -678,6 +678,7 @@ Partially update the configuration.  Only the provided fields are changed.
   "includeRepositoryLinksInGitHubComments": true,
   "postGitHubProgressReplies": false,
   "autoHealCI": false,
+  "maxAgentRetryAttempts": 3,
   "maxHealingAttemptsPerSession": 3,
   "maxHealingAttemptsPerFingerprint": 2,
   "maxConcurrentHealingRuns": 1,
@@ -1024,6 +1025,7 @@ Install the patchdeck code-review GitHub Actions workflow on a repository.
   includeRepositoryLinksInGitHubComments: boolean;
   postGitHubProgressReplies: boolean;
   autoHealCI: boolean;
+  maxAgentRetryAttempts: number; // Retries allowed for failed work that re-runs the coding agent; infrastructure failures use a separate budget
   maxHealingAttemptsPerSession: number;
   maxHealingAttemptsPerFingerprint: number;
   maxConcurrentHealingRuns: number;
