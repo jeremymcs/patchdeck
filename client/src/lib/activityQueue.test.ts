@@ -81,3 +81,41 @@ test("buildQueueStatusIndex summarizes queued and running activities", () => {
 test("getQueueStatusForTarget returns null for missing targets", () => {
   assert.equal(getQueueStatusForTarget(snapshot, "missing", Date.parse("2026-05-12T12:00:00.000Z")), null);
 });
+
+test("buildQueueStatusIndex distinguishes a backing-off retry from a normal queue wait", () => {
+  const retrying: ActivitySnapshot = {
+    failed: [],
+    inProgress: [],
+    queued: [
+      {
+        id: "queued-1",
+        kind: "work_issue",
+        status: "queued",
+        label: "Working issue #7",
+        detail: null,
+        targetId: "issue-7",
+        targetUrl: null,
+        queuedAt: "2026-05-12T11:00:00.000Z",
+        availableAt: "2026-05-12T12:05:00.000Z",
+        startedAt: null,
+        updatedAt: "2026-05-12T11:59:30.000Z",
+        attemptCount: 2,
+        lastError: "connect ECONNRESET",
+      },
+    ],
+    warnings: [],
+    generatedAt: "2026-05-12T12:00:00.000Z",
+  };
+
+  const index = buildQueueStatusIndex(retrying, Date.parse("2026-05-12T12:00:00.000Z"));
+  const status = index.get("issue-7");
+
+  assert.equal(status?.label, "retrying (attempt 3)");
+  assert.match(status?.detail ?? "", /retry in ~5m/);
+  assert.match(status?.detail ?? "", /ECONNRESET/);
+});
+
+test("buildQueueStatusIndex still reads as a queue position for untried work", () => {
+  const index = buildQueueStatusIndex(snapshot, Date.parse("2026-05-12T12:00:00.000Z"));
+  assert.equal(index.get("issue-7")?.label, "up next");
+});
