@@ -759,6 +759,7 @@ function makePlanIssue(
     autoWorkEligible: overrides.autoWorkEligible ?? false,
     evaluationStatus: overrides.evaluationStatus ?? null,
     updatedAt: overrides.updatedAt ?? "2026-05-01T00:00:00.000Z",
+    workAvailableAt: overrides.workAvailableAt ?? null,
   };
 }
 
@@ -1438,4 +1439,72 @@ test("syncRepos defers the next sweep for a repo whose issue list is unchanged",
     eligibleMs >= before + 9 * 60_000,
     `expected a ~10min cooldown, got ${(eligibleMs - before) / 60_000}min`,
   );
+});
+
+test("planAutomaticIssueQueueActions keeps a repo moving while one issue backs off after a failure", () => {
+  // Goal: a work job that failed and is waiting out its retry delay is not running. It must not
+  // hold its repo's single-flight slot, or one flaky issue freezes the whole repo until the
+  // delay elapses — the exact stall this recovery work exists to remove.
+  const now = new Date("2026-05-01T12:00:00.000Z");
+  const plan = planAutomaticIssueQueueActions({
+    repoSettings: [{ repo: "acme/widgets", issueAutoEvaluate: true, issueAutoWork: true }],
+    issues: [
+      makePlanIssue({
+        repo: "acme/widgets",
+        number: 1,
+        workStatus: "queued",
+        workAvailableAt: "2026-05-01T12:30:00.000Z",
+      }),
+      makePlanIssue({ repo: "acme/widgets", number: 2, autoWorkEligible: true, evaluationStatus: "approved" }),
+    ],
+    now,
+    activeEvaluationTargets: new Set(),
+    activeWorkCount: 0,
+    maxConcurrentIssueEvaluations: 2,
+    maxConcurrentIssueWork: 1,
+  });
+
+  assert.deepEqual(plan.work.map((entry) => entry.number), [2]);
+});
+
+test("planAutomaticIssueQueueActions still respects single-flight for a claimable queued job", () => {
+  // Guard the other side of the same rule: a job that is due now really is about to run, so the
+  // repo stays single-flight.
+  const now = new Date("2026-05-01T12:00:00.000Z");
+  const plan = planAutomaticIssueQueueActions({
+    repoSettings: [{ repo: "acme/widgets", issueAutoEvaluate: true, issueAutoWork: true }],
+    issues: [
+      makePlanIssue({
+        repo: "acme/widgets",
+        number: 1,
+        workStatus: "queued",
+        workAvailableAt: "2026-05-01T11:59:00.000Z",
+      }),
+      makePlanIssue({ repo: "acme/widgets", number: 2, autoWorkEligible: true, evaluationStatus: "approved" }),
+    ],
+    now,
+    activeEvaluationTargets: new Set(),
+    activeWorkCount: 0,
+    maxConcurrentIssueEvaluations: 2,
+    maxConcurrentIssueWork: 1,
+  });
+
+  assert.deepEqual(plan.work, []);
+});
+
+test("planAutomaticIssueQueueActions treats in-progress work as occupying the repo slot", () => {
+  const plan = planAutomaticIssueQueueActions({
+    repoSettings: [{ repo: "acme/widgets", issueAutoEvaluate: true, issueAutoWork: true }],
+    issues: [
+      makePlanIssue({ repo: "acme/widgets", number: 1, workStatus: "in_progress" }),
+      makePlanIssue({ repo: "acme/widgets", number: 2, autoWorkEligible: true, evaluationStatus: "approved" }),
+    ],
+    now: new Date("2026-05-01T12:00:00.000Z"),
+    activeEvaluationTargets: new Set(),
+    activeWorkCount: 0,
+    maxConcurrentIssueEvaluations: 2,
+    maxConcurrentIssueWork: 1,
+  });
+
+  assert.deepEqual(plan.work, []);
 });

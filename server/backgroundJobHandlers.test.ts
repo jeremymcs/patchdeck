@@ -831,10 +831,167 @@ test("process_release_run handler delegates to ReleaseManager for active rows", 
         processedIds.push(id);
         return releaseRun;
       },
+      markReleaseRunFailed: async () => releaseRun,
     },
   });
 
   await handlers.process_release_run!(job);
 
   assert.deepEqual(processedIds, [releaseRun.id]);
+});
+
+test("work_issue handler retries a thrown repair failure instead of stranding the issue", async () => {
+  // Goal: a thrown error used to be terminal, so one bad run left the issue excluded from
+  // auto-work until a human cleared it. It should now retry under the shared policy, and the
+  // GitHub "failed" notice should fire once — when the job actually runs out of attempts.
+  const storage = new MemStorage();
+  await storage.updateConfig({
+    watchedRepos: ["acme/widgets"],
+    codingAgent: "claude",
+    postGitHubProgressReplies: true,
+    maxAgentRetryAttempts: 2,
+  });
+  const queue = new BackgroundJobQueue(storage);
+  const job = await queue.enqueue(
+    "work_issue",
+    "acme/widgets#17",
+    "work_issue:acme/widgets#17",
+    {
+      repo: "acme/widgets",
+      issueNumber: 17,
+      issueTitle: "Fix the toggle",
+      issueUrl: "https://github.com/acme/widgets/issues/17",
+      baseBranch: "main",
+    },
+  );
+  const commentsCreated: Array<Record<string, unknown>> = [];
+  let repairCalls = 0;
+  const octokit = {
+    issues: {
+      get: async () => ({
+        data: {
+          number: 17,
+          title: "Fix the toggle",
+          body: "The toggle is stuck",
+          html_url: "https://github.com/acme/widgets/issues/17",
+          user: { login: "alice" },
+          labels: [{ name: "bug" }],
+          assignees: [],
+          comments: 2,
+          created_at: "2026-05-03T17:00:00.000Z",
+          updated_at: "2026-05-03T18:00:00.000Z",
+        },
+      }),
+      createComment: async (params: Record<string, unknown>) => {
+        commentsCreated.push(params);
+        return { data: { id: 123 } };
+      },
+    },
+  };
+
+  const dispatcher = new BackgroundJobDispatcher({
+    storage,
+    queue,
+    workerId: "dispatcher-1",
+    pollIntervalMs: 5,
+    leaseMs: 30_000,
+    heartbeatIntervalMs: 10,
+    retryBackoffMs: 0,
+    handlers: createBackgroundJobHandlers({
+      storage,
+      deps: {
+        buildOctokitFn: async () => octokit as never,
+        resolveGitHubAuthTokenFn: async () => "gho_token",
+        runIssueWorkRepairFn: async () => {
+          repairCalls += 1;
+          throw new Error("worktree checkout exploded");
+        },
+      },
+    }),
+  });
+
+  try {
+    await dispatcher.start();
+    await waitForCondition(async () => (await storage.getBackgroundJob(job.id))?.status === "failed", 1_000);
+
+    const stored = await storage.getBackgroundJob(job.id);
+    assert.equal(repairCalls, 2, "the failure should be retried up to the agent spend cap");
+    assert.equal(stored?.attemptCount, 2);
+
+    const failureNotices = commentsCreated.filter((params) => /Issue work failed/.test(String(params.body)));
+    assert.equal(failureNotices.length, 1, "only announce failure once the job is out of attempts");
+  } finally {
+    dispatcher.stop();
+  }
+});
+
+test("process_release_run handler retries before parking the run as errored", async () => {
+  // Goal: ReleaseManager used to swallow the error and leave the run in `error`, so only the
+  // manual retry endpoint could revive it. The run should only be marked failed once the
+  // dispatcher is out of attempts.
+  const storage = new MemStorage();
+  await storage.updateConfig({ maxAgentRetryAttempts: 2 });
+  const releaseRun = await storage.createReleaseRun({
+    repo: "acme/widgets",
+    baseBranch: "main",
+    triggerPrNumber: 42,
+    triggerPrTitle: "feat: add widget",
+    triggerPrUrl: "https://github.com/acme/widgets/pull/42",
+    triggerMergeSha: "merge-sha",
+    triggerMergedAt: "2026-04-02T12:00:00.000Z",
+    status: "detected",
+    decisionReason: null,
+    recommendedBump: null,
+    proposedVersion: null,
+    releaseTitle: null,
+    releaseNotes: null,
+    includedPrs: [],
+    targetSha: "merge-sha",
+    githubReleaseId: null,
+    githubReleaseUrl: null,
+    error: null,
+    completedAt: null,
+  });
+  const queue = new BackgroundJobQueue(storage);
+  const job = await queue.enqueue(
+    "process_release_run",
+    releaseRun.id,
+    `process_release_run:${releaseRun.id}`,
+    {},
+  );
+
+  let processCalls = 0;
+  const markedFailed: string[] = [];
+  const dispatcher = new BackgroundJobDispatcher({
+    storage,
+    queue,
+    workerId: "dispatcher-1",
+    pollIntervalMs: 5,
+    leaseMs: 30_000,
+    heartbeatIntervalMs: 10,
+    retryBackoffMs: 0,
+    handlers: createBackgroundJobHandlers({
+      storage,
+      releaseManager: {
+        processReleaseRun: async () => {
+          processCalls += 1;
+          throw new Error("release notes agent returned nothing usable");
+        },
+        markReleaseRunFailed: async (id) => {
+          markedFailed.push(id);
+          return releaseRun;
+        },
+      },
+    }),
+  });
+
+  try {
+    await dispatcher.start();
+    await waitForCondition(async () => (await storage.getBackgroundJob(job.id))?.status === "failed", 1_000);
+
+    assert.equal(processCalls, 2, "the run should be retried before it is shown as errored");
+    assert.deepEqual(markedFailed, [releaseRun.id], "mark it errored exactly once, at the end");
+  } finally {
+    dispatcher.stop();
+  }
 });

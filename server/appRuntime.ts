@@ -33,6 +33,7 @@ import { getDefaultStorage } from "./storage";
 import { PRBabysitter } from "./babysitter";
 import { resolveRepoAgentRuntimeSettings, resolveRepoCodingAgent } from "./agentSettings";
 import { commandExists, detectAgentUnavailability, type AgentUnavailabilityKind, type CodingAgent } from "./agentRunner";
+import { planFailedJobRecovery } from "./failureRecovery";
 import { applyEvaluationDecision, applyFlagDecision } from "./feedbackLifecycle";
 import { applyManualFeedbackDecision } from "./manualFeedback";
 import { childLogger } from "./logger";
@@ -316,9 +317,10 @@ export type PlanAutomaticIssueQueueInput = {
   repoSettings: Pick<WatchedRepo, "repo" | "issueAutoEvaluate" | "issueAutoWork">[];
   issues: Pick<
     Issue,
-    "id" | "repo" | "number" | "author" | "isWorked" | "workStatus" | "workPrUrl" | "externalWorkPrUrl" | "autoWorkEligible" | "evaluationStatus" | "updatedAt"
+    "id" | "repo" | "number" | "author" | "isWorked" | "workStatus" | "workPrUrl" | "externalWorkPrUrl" | "autoWorkEligible" | "evaluationStatus" | "updatedAt" | "workAvailableAt"
   >[];
   activeEvaluationTargets: Set<string>;
+  now?: Date;
   activeWorkCount: number;
   maxConcurrentIssueEvaluations: number;
   maxConcurrentIssueWork: number;
@@ -329,6 +331,33 @@ export type PlanAutomaticIssueQueueActions = {
   evaluations: Array<{ repo: string; number: number; id: string }>;
   work: Array<{ repo: string; number: number; id: string }>;
 };
+
+/**
+ * Whether an issue's work job is holding a concurrency slot right now. A queued
+ * job that is backing off after a failure is not running and will not run for a
+ * while, so it must not freeze the rest of its repo's queue.
+ */
+function occupiesWorkSlot(
+  issue: Pick<Issue, "workStatus" | "workAvailableAt">,
+  nowMs: number,
+): boolean {
+  if (issue.workStatus === "in_progress") {
+    return true;
+  }
+  if (issue.workStatus !== "queued") {
+    return false;
+  }
+  return !isBackingOff(issue.workAvailableAt, nowMs);
+}
+
+/** A queue entry scheduled for the future is waiting out a retry delay. */
+function isBackingOff(availableAt: string | null | undefined, nowMs: number): boolean {
+  if (!availableAt) {
+    return false;
+  }
+  const parsed = Date.parse(availableAt);
+  return Number.isFinite(parsed) && parsed > nowMs;
+}
 
 export function planAutomaticIssueQueueActions(
   input: PlanAutomaticIssueQueueInput,
@@ -350,10 +379,11 @@ export function planAutomaticIssueQueueActions(
 
   // Auto-work sweep first: budget is scarcer. Preserve per-repo single-flight semantics —
   // at most one work job per repo at a time, regardless of global budget.
+  const nowMs = (input.now ?? new Date()).getTime();
   for (const repo of autoWorkRepos) {
     if (workBudget <= 0) break;
     const repoIssues = input.issues.filter((issue) => issue.repo === repo);
-    if (repoIssues.some((issue) => issue.workStatus === "queued" || issue.workStatus === "in_progress")) {
+    if (repoIssues.some((issue) => occupiesWorkSlot(issue, nowMs))) {
       continue;
     }
     const candidate = repoIssues
@@ -503,13 +533,19 @@ function getLatestBackgroundJob(jobs: BackgroundJob[]): BackgroundJob | undefine
     .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())[0];
 }
 
-function issueWorkStatusFromJobs(jobs: BackgroundJob[]): { workStatus: Issue["workStatus"]; workJobId: string | null; lastError: string | null } {
+function issueWorkStatusFromJobs(jobs: BackgroundJob[]): {
+  workStatus: Issue["workStatus"];
+  workJobId: string | null;
+  workAvailableAt: string | null;
+  lastError: string | null;
+} {
   const latest = getLatestBackgroundJob(jobs);
 
   if (!latest) {
     return {
       workStatus: "idle",
       workJobId: null,
+      workAvailableAt: null,
       lastError: null,
     };
   }
@@ -518,6 +554,7 @@ function issueWorkStatusFromJobs(jobs: BackgroundJob[]): { workStatus: Issue["wo
     return {
       workStatus: "in_progress",
       workJobId: latest.id,
+      workAvailableAt: null,
       lastError: null,
     };
   }
@@ -526,7 +563,10 @@ function issueWorkStatusFromJobs(jobs: BackgroundJob[]): { workStatus: Issue["wo
     return {
       workStatus: "queued",
       workJobId: latest.id,
-      lastError: null,
+      workAvailableAt: latest.availableAt,
+      // A queued job that already has attempts behind it is backing off after a
+      // failure, so keep the reason visible instead of blanking it.
+      lastError: latest.attemptCount > 0 ? latest.lastError : null,
     };
   }
 
@@ -534,6 +574,7 @@ function issueWorkStatusFromJobs(jobs: BackgroundJob[]): { workStatus: Issue["wo
     return {
       workStatus: "failed",
       workJobId: latest.id,
+      workAvailableAt: null,
       lastError: latest.lastError,
     };
   }
@@ -541,6 +582,7 @@ function issueWorkStatusFromJobs(jobs: BackgroundJob[]): { workStatus: Issue["wo
   return {
     workStatus: "idle",
     workJobId: null,
+    workAvailableAt: null,
     lastError: null,
   };
 }
@@ -1010,6 +1052,65 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
     },
   });
 
+  /**
+   * Revive parked background jobs whose park interval has elapsed, and un-park
+   * PRs whose work is actually still in flight. Without this, a job that ran out
+   * of retries stays failed forever and its PR or issue is excluded from every
+   * later sweep until somebody clears it in the dashboard.
+   */
+  const recoverParkedWork = async () => {
+    const failedJobs = await storage.listBackgroundJobs({ status: "failed" });
+    const revivable = planFailedJobRecovery(failedJobs, Date.now());
+
+    for (const jobId of revivable) {
+      const now = new Date().toISOString();
+      const revived = await storage.requeueFailedBackgroundJob(jobId, now, now);
+      if (!revived) {
+        continue;
+      }
+
+      log.info(
+        { jobId, kind: revived.kind, targetId: revived.targetId },
+        "Revived parked background job for another recovery cycle",
+      );
+    }
+
+    if (revivable.length > 0) {
+      backgroundJobDispatcher.wake();
+    }
+
+    await clearStalePRErrorStatus();
+  };
+
+  /**
+   * A PR marked `error` by an earlier failed run should not stay that way while
+   * a job for it is queued or running — that combination is what made a human
+   * re-queue the PR by hand to get it moving again.
+   */
+  const clearStalePRErrorStatus = async () => {
+    const activeJobs = await storage.listBackgroundJobs({ kind: "babysit_pr" });
+    const activeTargets = new Set(
+      activeJobs
+        .filter((job) => job.status === "queued" || job.status === "leased")
+        .map((job) => job.targetId),
+    );
+    if (activeTargets.size === 0) {
+      return;
+    }
+
+    for (const targetId of Array.from(activeTargets)) {
+      const pr = await storage.getPR(targetId);
+      if (pr?.status !== "error") {
+        continue;
+      }
+
+      await storage.updatePR(pr.id, { status: "watching" });
+      await storage.addLog(pr.id, "info", "Cleared error state because PR work is queued again", {
+        phase: "watcher",
+      });
+    }
+  };
+
   let watcherTimer: NodeJS.Timeout | null = null;
   let watcherColdStartTimer: NodeJS.Timeout | null = null;
   let watcherIntervalMs = 0;
@@ -1025,6 +1126,11 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       if (config.autoPrs === false && config.autoIssues === false) {
         return;
       }
+
+      // Give parked work another cycle before anything else. This is what keeps
+      // automation running unattended: whatever blocked a job may well have been
+      // fixed since, and nothing else tells us that it was.
+      await recoverParkedWork();
 
       const rateLimit = getRateLimitState("core");
       if (rateLimit.limited && rateLimit.resetAt) {
@@ -1301,6 +1407,10 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       priority === undefined ? undefined : { priority },
     );
 
+    if (source === "manual") {
+      await promoteQueuedJob(job);
+    }
+
     await storage.addLog(targetId, "info", `${source === "automatic" ? "Queued automatic issue work" : "Queued manual issue work"} for ${issue.repoFullName}#${issue.number}`, {
       metadata: {
         repo: issue.repoFullName,
@@ -1396,6 +1506,7 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       workStatus: workState.workStatus,
       workStage,
       workJobId: workState.workJobId,
+      workAvailableAt: workState.workAvailableAt,
       workAttemptCount: issueWorkAttemptCountFromJobs(issueJobs),
       workQueuedAt: latestJob?.createdAt ?? null,
       workCompletedAt: latestJob?.completedAt ?? null,
@@ -1756,15 +1867,22 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
     }
     const issues = Array.from(issuesById.values());
 
-    const isJobActive = (status: string) => status === "queued" || status === "leased";
+    // A job backing off after a failure is not consuming a runner, so it must not
+    // consume concurrency budget either — otherwise one retrying issue stalls all
+    // issue work until its delay elapses.
+    const planNow = new Date();
+    const isJobActive = (job: BackgroundJob) =>
+      job.status === "leased"
+      || (job.status === "queued" && !isBackingOff(job.availableAt, planNow.getTime()));
     const activeEvaluationTargets = new Set(
-      evaluationJobs.filter((job) => isJobActive(job.status)).map((job) => job.targetId),
+      evaluationJobs.filter(isJobActive).map((job) => job.targetId),
     );
-    const activeWorkCount = workJobs.filter((job) => isJobActive(job.status)).length;
+    const activeWorkCount = workJobs.filter(isJobActive).length;
 
     const plan = planAutomaticIssueQueueActions({
       repoSettings,
       issues,
+      now: planNow,
       activeEvaluationTargets,
       activeWorkCount,
       maxConcurrentIssueEvaluations: config.maxConcurrentIssueEvaluations,
@@ -2040,6 +2158,21 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
     }, interval);
   };
 
+  /**
+   * Enqueueing dedupes against an existing queued job, so a job that is backing
+   * off after a failure would swallow a deliberate "run this now" and look like
+   * the button did nothing. Pull it forward instead.
+   */
+  const promoteQueuedJob = async (job: BackgroundJob): Promise<void> => {
+    const now = new Date().toISOString();
+    if (job.status !== "queued" || job.availableAt <= now) {
+      return;
+    }
+
+    await storage.promoteBackgroundJob(job.id, now, now);
+    backgroundJobDispatcher.wake();
+  };
+
   const queueBabysitWithAgent = async (pr: PR, preferredAgent: Config["codingAgent"]) => {
     const job = await scheduleBackgroundJob(
       "babysit_pr",
@@ -2054,6 +2187,7 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
         }),
       },
     );
+    await promoteQueuedJob(job);
     await storage.updatePR(pr.id, {
       workContract: markPRWorkQueuedContract(pr.workContract, {
         now: new Date(),

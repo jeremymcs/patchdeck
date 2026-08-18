@@ -313,6 +313,8 @@ export const issueSchema = z.object({
   workStatus: issueWorkStatusEnum,
   workStage: issueWorkStageEnum.optional(),
   workJobId: z.string().nullable(),
+  /** When a retrying work job becomes claimable again. Null unless it is backing off. */
+  workAvailableAt: z.string().nullable().optional(),
   workAttemptCount: z.number().int().nonnegative().optional(),
   workQueuedAt: z.string().nullable().optional(),
   workCompletedAt: z.string().nullable().optional(),
@@ -728,6 +730,7 @@ export const configSchema = z.object({
   deploymentCheckDelayMs: z.number(),
   deploymentCheckTimeoutMs: z.number(),
   deploymentCheckPollIntervalMs: z.number(),
+  maxAgentRetryAttempts: z.number().int().nonnegative().default(3),
   maxConcurrentIssueEvaluations: z.number().int().positive().default(2),
   maxConcurrentIssueWork: z.number().int().positive().default(1),
   maxConcurrentBabysitRuns: z.number().int().positive().default(3),
