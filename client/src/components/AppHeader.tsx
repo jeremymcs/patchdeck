@@ -382,16 +382,16 @@ export function AppHeader({
 }) {
   return (
     <header className="flex shrink-0 flex-col gap-2 border-b border-border bg-background/95 px-3 py-2.5 lg:grid lg:grid-cols-[1fr_auto_1fr] lg:items-center lg:px-4">
-      <div className="flex min-w-0 flex-wrap items-center gap-2.5 lg:justify-self-start">
+      <div className="flex min-w-0 items-center gap-2.5 lg:flex-wrap lg:justify-self-start">
         <Link
           href="/"
-          className="inline-flex items-center gap-2 rounded-md px-1 text-foreground transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
+          className="inline-flex shrink-0 items-center gap-2 rounded-md px-1 text-foreground transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
           aria-label="PatchDeck dashboard"
         >
           <PatchdeckMark />
           <span className="text-title font-semibold tracking-tight">PatchDeck</span>
         </Link>
-        <nav aria-label="Primary" className="flex flex-wrap items-center gap-1">
+        <nav aria-label="Primary" className="-mx-1 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto px-1 lg:mx-0 lg:flex-initial lg:flex-wrap lg:overflow-visible lg:px-0 [&>*]:shrink-0 lg:[&>*]:shrink">
           {PRIMARY_NAV_ITEMS.map((item) => {
             const selected = active === item.section;
             return (
@@ -407,21 +407,21 @@ export function AppHeader({
           })}
         </nav>
       </div>
-      <div className="flex min-w-0 items-center justify-center">
+      <div className="flex min-w-0 items-center justify-center max-lg:empty:hidden">
         <GitHubRateLimitNotice />
       </div>
-      <div className="flex min-w-0 flex-wrap items-center gap-2 lg:justify-self-end lg:justify-end">
+      <div className="-mx-1 flex min-w-0 items-center gap-2 overflow-x-auto px-1 pb-0.5 lg:mx-0 lg:flex-wrap lg:overflow-visible lg:px-0 lg:pb-0 lg:justify-self-end lg:justify-end [&>*]:shrink-0 lg:[&>*]:shrink">
         {status ? (
-          <div className="flex min-w-0 flex-wrap items-center gap-2 border-l border-border/70 pl-2 text-label text-muted-foreground lg:border-l-0 lg:pl-0">
+          <div className="flex min-w-0 items-center gap-2 border-l border-border/70 pl-2 text-label text-muted-foreground lg:flex-wrap lg:border-l-0 lg:pl-0 [&>*]:shrink-0 lg:[&>*]:shrink">
             {status}
           </div>
         ) : null}
         {actions ? (
-          <div className="flex min-w-0 flex-wrap items-center gap-2 [&_button]:min-h-8 [&_select]:min-h-8 sm:[&_button]:min-h-0 sm:[&_select]:min-h-0">
+          <div className="flex min-w-0 items-center gap-2 lg:flex-wrap [&>*]:shrink-0 lg:[&>*]:shrink [&_button]:min-h-8 [&_select]:min-h-8 sm:[&_button]:min-h-0 sm:[&_select]:min-h-0">
             {actions}
           </div>
         ) : null}
-        <nav aria-label="Secondary" className="flex flex-wrap items-center gap-1">
+        <nav aria-label="Secondary" className="flex items-center gap-1 lg:flex-wrap [&>*]:shrink-0 lg:[&>*]:shrink">
           {SECONDARY_NAV_ITEMS.map((item) => {
             const selected = active === item.section;
             return (
