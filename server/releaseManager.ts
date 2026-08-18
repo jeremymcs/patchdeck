@@ -300,7 +300,17 @@ export class ReleaseManager {
     return reset;
   }
 
-  async processReleaseRun(id: string): Promise<ReleaseRun | undefined> {
+  /**
+   * `markErrorOnFailure: false` leaves the run in its working state and rethrows,
+   * so the caller (the background job dispatcher) can retry before the run is
+   * shown to the user as errored. Errors used to be swallowed here, which left
+   * the run parked in `error` with a manual retry as the only way out.
+   */
+  async processReleaseRun(
+    id: string,
+    options: { markErrorOnFailure?: boolean } = {},
+  ): Promise<ReleaseRun | undefined> {
+    const markErrorOnFailure = options.markErrorOnFailure ?? true;
     const initial = await this.storage.getReleaseRun(id);
     if (!initial) {
       return undefined;
@@ -440,6 +450,9 @@ export class ReleaseManager {
 
         return published ?? undefined;
       } catch (error) {
+        if (!markErrorOnFailure) {
+          throw error;
+        }
         return this.failRun(id, summarizeError(error));
       } finally {
         this.inProgress.delete(id);
@@ -472,6 +485,11 @@ export class ReleaseManager {
     }
 
     return Array.from(deduped.values()).sort((a, b) => a.mergedAt.localeCompare(b.mergedAt));
+  }
+
+  /** Park a run as errored once the dispatcher has given up retrying it. */
+  async markReleaseRunFailed(id: string, error: string): Promise<ReleaseRun | undefined> {
+    return this.failRun(id, error);
   }
 
   private async failRun(id: string, error: string): Promise<ReleaseRun | undefined> {
