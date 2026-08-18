@@ -33,6 +33,13 @@ jobs:
     steps:
       - uses: googleapis/release-please-action@v5
         id: release
+        with:
+          # GitHub does not start workflow runs for pull requests opened with the
+          # default GITHUB_TOKEN, so the required lint-and-test check never ran on
+          # release PRs and every one of them sat permanently BLOCKED. A PAT makes
+          # the PR look author-created, which starts the checks. Falls back to the
+          # default token so the workflow still runs if the secret is absent.
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
 
   publish-npm:
     needs: release-please
