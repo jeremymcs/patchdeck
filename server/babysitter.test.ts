@@ -2753,6 +2753,7 @@ test("babysitPR uses a CODEFACTORY_HOME worktree, passes GitHub context, and ver
   assert.match(receivedPrompt, /GitHub follow-up replies and review-thread resolution will be handled by the babysitter/i);
   assert.match(receivedPrompt, /auditToken=codefactory-feedback:gh-review-comment-1/);
   assert.match(receivedPrompt, /FEEDBACK_SUMMARY_START/);
+  assert.match(receivedPrompt, /write every summary block in Simplified Chinese/);
   assert.equal(receivedEnv?.GITHUB_TOKEN, "test-token");
   assert.equal(receivedEnv?.GH_TOKEN, "test-token");
 

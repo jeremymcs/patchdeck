@@ -585,6 +585,7 @@ function buildAgentFixPrompt(params: {
     "   <A concise 1-2 sentence summary of what you did or why you were blocked>",
     "   FEEDBACK_SUMMARY_END",
     "   Include one block per audit token. These summaries will be posted as follow-up comments on the PR.",
+    "Language: write every summary block in Simplified Chinese. These summaries are posted on the PR, so use the same language for the whole comment.",
     "4) If documentation tasks were assigned, emit exactly one docs summary block in the following format:",
     "   DOCS_SUMMARY_START <changed|no_change>",
     "   <A concise 1-2 sentence summary of the docs you updated, or why no docs changes were necessary after inspection>",
