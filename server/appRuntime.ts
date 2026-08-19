@@ -66,6 +66,7 @@ import {
   getLatestSemverTagForRepo,
   GitHubIntegrationError,
   installCodeReviewWorkflow,
+  fetchOpenIssueCount,
   listOpenIssuesForRepo,
   listOpenLinkedPullRequestsForIssue,
   listReleasesForRepo,
@@ -1596,9 +1597,19 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
           if (!page.hasMore || !options?.fullSweep) break;
         }
         if (didWork) {
+          let githubOpenCount: number | null | undefined;
+          try {
+            githubOpenCount = await fetchOpenIssueCount(octokit, parsed);
+          } catch (error) {
+            log.warn(
+              { err: error instanceof Error ? error.message : String(error), repo: repoSlug },
+              "Open issue count lookup failed; keeping last known coverage count",
+            );
+          }
           await storage.upsertRepoSyncState(repoSlug, "issues", {
             lastSyncedAt: new Date().toISOString(),
             nextEligibleAt: null,
+            ...(typeof githubOpenCount === "number" ? { githubOpenCount } : {}),
           });
           // Persist the etag only after a successful sync so a failure mid-sweep
           // re-probes and re-syncs next tick instead of 304-skipping stale data.
@@ -2509,26 +2520,16 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
         storage.getRepoSyncStates("issues"),
       ]);
       const syncByRepo = new Map(syncStates.map((state) => [state.repo, state]));
-      const octokit = await buildOctokit(config);
-      const coverage = await Promise.all(config.watchedRepos.map(async (repo): Promise<IssueCoverage> => {
+      return config.watchedRepos.map((repo): IssueCoverage => {
         const localCount = counts.repoTotals[repo] ?? 0;
         const syncState = syncByRepo.get(repo);
-        const parsed = parseRepoSlug(repo);
-        if (!parsed) {
-          return { repo, syncedOpenCount: localCount, githubOpenCount: null, lastSyncedAt: syncState?.lastSyncedAt ?? null };
-        }
-        try {
-          const result = await octokit.request("GET /search/issues", {
-            q: `repo:${repo} is:issue is:open`,
-            per_page: 1,
-          });
-          const githubOpenCount = typeof result.data?.total_count === "number" ? result.data.total_count : null;
-          return { repo, syncedOpenCount: localCount, githubOpenCount, lastSyncedAt: syncState?.lastSyncedAt ?? null };
-        } catch {
-          return { repo, syncedOpenCount: localCount, githubOpenCount: null, lastSyncedAt: syncState?.lastSyncedAt ?? null };
-        }
-      }));
-      return coverage;
+        return {
+          repo,
+          syncedOpenCount: localCount,
+          githubOpenCount: syncState?.githubOpenCount ?? null,
+          lastSyncedAt: syncState?.lastSyncedAt ?? null,
+        };
+      });
     },
 
     async createManualRelease(repoInput) {

@@ -60,6 +60,7 @@ export type RepoSyncState = {
   kind: RepoSyncKind;
   lastSyncedAt: string | null;
   nextEligibleAt: string | null;
+  githubOpenCount: number | null;
 };
 
 export interface IStorage {
@@ -132,7 +133,11 @@ export interface IStorage {
   upsertRepoSyncState(
     repo: string,
     kind: RepoSyncKind,
-    updates: { lastSyncedAt?: string | null; nextEligibleAt?: string | null },
+    updates: {
+      lastSyncedAt?: string | null;
+      nextEligibleAt?: string | null;
+      githubOpenCount?: number | null;
+    },
   ): Promise<void>;
 
   // CI healing

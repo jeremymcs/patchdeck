@@ -262,6 +262,15 @@ const RESOLVE_REVIEW_THREAD_MUTATION = `
     }
   }
 `;
+const OPEN_ISSUE_COUNT_QUERY = `
+  query CodeFactoryOpenIssueCount($owner: String!, $repo: String!) {
+    repository(owner: $owner, name: $repo) {
+      issues(states: OPEN) {
+        totalCount
+      }
+    }
+  }
+`;
 
 const statusReplyMutationSchema = z.object({
   addPullRequestReviewThreadReply: z.object({
@@ -2392,6 +2401,26 @@ export async function listOpenPullsForRepoConditional(
       pulls: collected.map((pull) => mapPullToSummary(pull, repo)),
     };
   });
+}
+
+export async function fetchOpenIssueCount(
+  octokit: Octokit,
+  repo: ParsedRepoSlug,
+): Promise<number | null> {
+  const response = await withGitHubErrorHandling("open issue count", repo, () =>
+    octokit.graphql<{
+      repository?: {
+        issues?: {
+          totalCount?: number | null;
+        } | null;
+      } | null;
+    }>(OPEN_ISSUE_COUNT_QUERY, {
+      owner: repo.owner,
+      repo: repo.repo,
+    }),
+  );
+  const count = response.repository?.issues?.totalCount;
+  return typeof count === "number" && Number.isFinite(count) ? count : null;
 }
 
 export async function listOpenIssuesForRepo(

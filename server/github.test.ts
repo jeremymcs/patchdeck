@@ -23,6 +23,7 @@ import {
   listOpenPullsForRepo,
   listOpenPullsForRepoConditional,
   probeRepoIssuesChanged,
+  fetchOpenIssueCount,
   listMergedPullsSince,
   listReleasesForRepo,
   listTagsForRepo,
@@ -1090,6 +1091,29 @@ test("probeRepoIssuesChanged reports notModified on a 304 and forwards If-None-M
 
   assert.equal(result.notModified, true);
   assert.equal(sentIfNoneMatch, 'W/"cached"');
+});
+
+test("fetchOpenIssueCount reads repository.issues.totalCount from GraphQL", async () => {
+  let received: { query: string; owner?: string; repo?: string } | null = null;
+  const octokit = {
+    graphql: async (query: string, params: { owner: string; repo: string }) => {
+      received = { query, ...params };
+      return { repository: { issues: { totalCount: 17 } } };
+    },
+  };
+
+  const count = await fetchOpenIssueCount(octokit as never, { owner: "owner", repo: "repo" });
+  assert.equal(count, 17);
+  assert.equal(received?.owner, "owner");
+  assert.equal(received?.repo, "repo");
+  assert.match(received?.query || "", /issues\(states: OPEN\)/);
+});
+
+test("fetchOpenIssueCount returns null when GraphQL omits totalCount", async () => {
+  const octokit = {
+    graphql: async () => ({ repository: { issues: {} } }),
+  };
+  assert.equal(await fetchOpenIssueCount(octokit as never, { owner: "owner", repo: "repo" }), null);
 });
 
 test("probeRepoIssuesChanged rethrows non-304 errors instead of skipping the sweep", async () => {

@@ -1333,6 +1333,7 @@ test("SqliteStorage persists repo sync state with partial updates across reopen"
       kind: "prs",
       lastSyncedAt: "2026-05-15T10:00:00.000Z",
       nextEligibleAt: "2026-05-15T12:00:00.000Z",
+      githubOpenCount: null,
     }]);
     // `kind` partitions the rows.
     assert.equal((await first.getRepoSyncStates("issues")).length, 1);
@@ -1356,8 +1357,36 @@ test("MemStorage repo sync state matches the SqliteStorage contract", async () =
   await storage.upsertRepoSyncState("o/r", "prs", { lastSyncedAt: "t1", nextEligibleAt: "t2" });
   await storage.upsertRepoSyncState("o/r", "prs", { nextEligibleAt: null });
   assert.deepEqual(await storage.getRepoSyncStates("prs"), [
-    { repo: "o/r", kind: "prs", lastSyncedAt: "t1", nextEligibleAt: null },
+    { repo: "o/r", kind: "prs", lastSyncedAt: "t1", nextEligibleAt: null, githubOpenCount: null },
   ]);
+});
+
+test("SqliteStorage persists githubOpenCount across reopen and partial updates", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "codefactory-storage-"));
+  const first = new SqliteStorage(root);
+  try {
+    await first.upsertRepoSyncState("o/r", "issues", {
+      lastSyncedAt: "2026-05-15T10:00:00.000Z",
+      githubOpenCount: 42,
+    });
+    await first.upsertRepoSyncState("o/r", "issues", {
+      nextEligibleAt: "2026-05-15T12:00:00.000Z",
+    });
+    const rows = await first.getRepoSyncStates("issues");
+    assert.equal(rows[0]?.githubOpenCount, 42);
+    assert.equal(rows[0]?.lastSyncedAt, "2026-05-15T10:00:00.000Z");
+  } finally {
+    first.close();
+  }
+
+  const second = new SqliteStorage(root);
+  try {
+    const rows = await second.getRepoSyncStates("issues");
+    assert.equal(rows[0]?.githubOpenCount, 42);
+    assert.equal(rows[0]?.nextEligibleAt, "2026-05-15T12:00:00.000Z");
+  } finally {
+    second.close();
+  }
 });
 
 test("both storages requeue a parked background job with a fresh attempt budget", async () => {

@@ -420,7 +420,11 @@ export class MemStorage implements IStorage {
   async upsertRepoSyncState(
     repo: string,
     kind: RepoSyncKind,
-    updates: { lastSyncedAt?: string | null; nextEligibleAt?: string | null },
+    updates: {
+      lastSyncedAt?: string | null;
+      nextEligibleAt?: string | null;
+      githubOpenCount?: number | null;
+    },
   ): Promise<void> {
     const key = `${repo}#${kind}`;
     const existing = this.repoSyncStates.get(key);
@@ -433,6 +437,9 @@ export class MemStorage implements IStorage {
       nextEligibleAt: "nextEligibleAt" in updates
         ? updates.nextEligibleAt ?? null
         : existing?.nextEligibleAt ?? null,
+      githubOpenCount: "githubOpenCount" in updates
+        ? updates.githubOpenCount ?? null
+        : existing?.githubOpenCount ?? null,
     });
   }
 

@@ -992,6 +992,7 @@ export class SqliteStorage implements IStorage {
     this.ensureColumn("prs", "pr_stage", "TEXT");
     this.ensureColumn("prs", "mergeable_state", "TEXT");
     this.ensureColumn("prs", "work_contract_json", "TEXT");
+    this.ensureColumn("repo_sync_state", "github_open_count", "INTEGER");
 
     const configExists = this.get<{ present: number }>("SELECT 1 AS present FROM config WHERE id = 1");
     if (!configExists) {
@@ -2362,23 +2363,33 @@ export class SqliteStorage implements IStorage {
       kind: string;
       last_synced_at: string | null;
       next_eligible_at: string | null;
-    }>("SELECT repo, kind, last_synced_at, next_eligible_at FROM repo_sync_state WHERE kind = ?", kind);
+      github_open_count: number | null;
+    }>("SELECT repo, kind, last_synced_at, next_eligible_at, github_open_count FROM repo_sync_state WHERE kind = ?", kind);
     return rows.map((row) => ({
       repo: row.repo,
       kind: row.kind as RepoSyncKind,
       lastSyncedAt: row.last_synced_at,
       nextEligibleAt: row.next_eligible_at,
+      githubOpenCount: typeof row.github_open_count === "number" ? row.github_open_count : null,
     }));
   }
 
   async upsertRepoSyncState(
     repo: string,
     kind: RepoSyncKind,
-    updates: { lastSyncedAt?: string | null; nextEligibleAt?: string | null },
+    updates: {
+      lastSyncedAt?: string | null;
+      nextEligibleAt?: string | null;
+      githubOpenCount?: number | null;
+    },
   ): Promise<void> {
     this.withWriteTransaction(() => {
-      const existing = this.get<{ last_synced_at: string | null; next_eligible_at: string | null }>(
-        "SELECT last_synced_at, next_eligible_at FROM repo_sync_state WHERE repo = ? AND kind = ?",
+      const existing = this.get<{
+        last_synced_at: string | null;
+        next_eligible_at: string | null;
+        github_open_count: number | null;
+      }>(
+        "SELECT last_synced_at, next_eligible_at, github_open_count FROM repo_sync_state WHERE repo = ? AND kind = ?",
         repo,
         kind,
       );
@@ -2388,15 +2399,20 @@ export class SqliteStorage implements IStorage {
       const nextEligibleAt = "nextEligibleAt" in updates
         ? updates.nextEligibleAt ?? null
         : existing?.next_eligible_at ?? null;
+      const githubOpenCount = "githubOpenCount" in updates
+        ? updates.githubOpenCount ?? null
+        : existing?.github_open_count ?? null;
       this.run(
-        `INSERT INTO repo_sync_state (repo, kind, last_synced_at, next_eligible_at) VALUES (?, ?, ?, ?)
+        `INSERT INTO repo_sync_state (repo, kind, last_synced_at, next_eligible_at, github_open_count) VALUES (?, ?, ?, ?, ?)
          ON CONFLICT(repo, kind) DO UPDATE SET
            last_synced_at = excluded.last_synced_at,
-           next_eligible_at = excluded.next_eligible_at`,
+           next_eligible_at = excluded.next_eligible_at,
+           github_open_count = excluded.github_open_count`,
         repo,
         kind,
         lastSyncedAt,
         nextEligibleAt,
+        githubOpenCount,
       );
     });
   }
