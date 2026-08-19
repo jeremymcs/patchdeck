@@ -3109,35 +3109,80 @@ export async function listMergedPullsSince(
   const sinceMergedAtMs = parseDateMs(options?.sinceMergedAt);
   const sinceMergeCommitSha = options?.sinceMergeCommitSha?.trim() || null;
 
-  const pulls = await withGitHubErrorHandling("merged pull requests", repo, () =>
-    octokit.paginate(octokit.pulls.list, {
-      owner: repo.owner,
-      repo: repo.repo,
-      state: "closed",
-      base: baseRef,
-      sort: "updated",
-      direction: "desc",
-      per_page: 100,
-    }),
-  );
+  if (typeof octokit.pulls?.list !== "function") {
+    const pulls = await withGitHubErrorHandling("merged pull requests", repo, () =>
+      octokit.paginate(octokit.pulls.list, {
+        owner: repo.owner,
+        repo: repo.repo,
+        state: "closed",
+        base: baseRef,
+        sort: "updated",
+        direction: "desc",
+        per_page: 100,
+      }),
+    );
 
-  const merged = pulls
-    .map((pull) => normalizeMergedPullSummary(pull, repo))
-    .filter((pull): pull is MergedPRSummary => Boolean(pull))
-    .filter((pull) => {
-      if (sinceMergedAtMs === null) return true;
-      return Date.parse(pull.mergedAt) > sinceMergedAtMs;
-    });
+    const merged = pulls
+      .map((pull) => normalizeMergedPullSummary(pull, repo))
+      .filter((pull): pull is MergedPRSummary => Boolean(pull))
+      .filter((pull) => {
+        if (sinceMergedAtMs === null) return true;
+        return Date.parse(pull.mergedAt) > sinceMergedAtMs;
+      });
 
-  let boundedBySha = merged;
-  if (sinceMergeCommitSha) {
-    const boundaryIndex = merged.findIndex((pull) => pull.mergeCommitSha === sinceMergeCommitSha);
-    if (boundaryIndex >= 0) {
-      boundedBySha = merged.slice(0, boundaryIndex);
+    let boundedBySha = merged;
+    if (sinceMergeCommitSha) {
+      const boundaryIndex = merged.findIndex((pull) => pull.mergeCommitSha === sinceMergeCommitSha);
+      if (boundaryIndex >= 0) {
+        boundedBySha = merged.slice(0, boundaryIndex);
+      }
     }
+
+    return boundedBySha.sort((a, b) => Date.parse(a.mergedAt) - Date.parse(b.mergedAt));
   }
 
-  return boundedBySha.sort((a, b) => Date.parse(a.mergedAt) - Date.parse(b.mergedAt));
+  return withGitHubErrorHandling("merged pull requests", repo, async () => {
+    const perPage = 100;
+    const collected: MergedPRSummary[] = [];
+
+    for (let page = 1; ; page += 1) {
+      const response = await octokit.pulls.list({
+        owner: repo.owner,
+        repo: repo.repo,
+        state: "closed",
+        base: baseRef,
+        sort: "updated",
+        direction: "desc",
+        per_page: perPage,
+        page,
+      });
+      const pageItems = response.data;
+      let foundShaBoundary = false;
+      let pageAllOlderThanSince = sinceMergedAtMs !== null && pageItems.length > 0;
+
+      for (const pull of pageItems) {
+        const updatedMs = Date.parse(pull.updated_at || pull.merged_at || "");
+        if (sinceMergedAtMs === null || !Number.isFinite(updatedMs) || updatedMs > sinceMergedAtMs) {
+          pageAllOlderThanSince = false;
+        }
+        if (foundShaBoundary) continue;
+        if (sinceMergeCommitSha && pull.merge_commit_sha === sinceMergeCommitSha) {
+          foundShaBoundary = true;
+          continue;
+        }
+        const summary = normalizeMergedPullSummary(pull, repo);
+        if (!summary) continue;
+        if (sinceMergedAtMs !== null && Date.parse(summary.mergedAt) <= sinceMergedAtMs) continue;
+        collected.push(summary);
+      }
+
+      if (foundShaBoundary || pageItems.length < perPage || pageAllOlderThanSince) {
+        break;
+      }
+    }
+
+    return collected.sort((a, b) => Date.parse(a.mergedAt) - Date.parse(b.mergedAt));
+  });
 }
 
 export async function listUnreleasedMergedPulls(

@@ -2607,6 +2607,52 @@ test("listMergedPullsSince applies timestamp and merge-sha boundaries", async ()
   assert.equal(merged[0]?.mergeCommitSha, "sha-30");
 });
 
+test("listMergedPullsSince stops paging once updated_at is older than the since bound", async () => {
+  const pages: number[] = [];
+  const octokit = {
+    pulls: {
+      list: async (params: { page: number; per_page: number }) => {
+        pages.push(params.page);
+        if (params.page === 1) {
+          return {
+            data: Array.from({ length: params.per_page }, (_unused, index) => ({
+              number: 200 - index,
+              title: `new ${index}`,
+              html_url: `https://github.com/octo/example/pull/${200 - index}`,
+              user: { login: "a" },
+              merged_at: "2026-03-28T12:00:00Z",
+              updated_at: "2026-03-28T12:00:00Z",
+              merge_commit_sha: `sha-${200 - index}`,
+            })),
+          };
+        }
+        return {
+          data: [{
+            number: 1,
+            title: "ancient",
+            html_url: "https://github.com/octo/example/pull/1",
+            user: { login: "b" },
+            merged_at: "2026-01-01T00:00:00Z",
+            updated_at: "2026-01-01T00:00:00Z",
+            merge_commit_sha: "sha-1",
+          }],
+        };
+      },
+    },
+  };
+
+  const merged = await listMergedPullsSince(
+    octokit as never,
+    { owner: "octo", repo: "example" },
+    { baseRef: "main", sinceMergedAt: "2026-03-01T00:00:00Z" },
+  );
+
+  assert.deepEqual(pages, [1, 2]);
+  assert.equal(merged.length, 100);
+  assert.equal(merged.some((pull) => pull.number === 1), false);
+  assert.equal(merged.some((pull) => pull.number === 200), true);
+});
+
 test("listMergedPullsSince uses the repository default branch when none is provided", async () => {
   const listPulls = Symbol("listPulls");
   let repoLookups = 0;
