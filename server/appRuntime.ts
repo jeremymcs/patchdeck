@@ -68,13 +68,13 @@ import {
   installCodeReviewWorkflow,
   fetchOpenIssueCount,
   listOpenIssuesForRepo,
+  listOpenIssuesForRepoConditional,
   listOpenLinkedPullRequestsForIssue,
   listReleasesForRepo,
   listUnreleasedMergedPulls,
   type MergedPRSummary,
   parsePRUrl,
   parseRepoSlug,
-  probeRepoIssuesChanged,
   addLabelsToIssue,
   removeLabelsFromIssue,
   resolveNextSemverTag,
@@ -1565,10 +1565,16 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
         // unchanged repo we skip the whole sweep instead of paginating it.
         const etagKey = `issues:open:${repoSlug}`;
         let pendingEtag: string | null = null;
+        let didWork = false;
         if (nextOffset === 0) {
           const cachedEtag = (await storage.getGithubEtag(etagKey)) ?? null;
-          const probe = await probeRepoIssuesChanged(octokit, parsed, cachedEtag);
-          if (probe.notModified) {
+          const conditional = await listOpenIssuesForRepoConditional(
+            octokit,
+            parsed,
+            cachedEtag,
+            { limit, offset: 0 },
+          );
+          if (conditional.notModified) {
             // A 304 confirms the repo's issue list is current. Record the
             // freshness check and defer the next sweep — a quiet repo does not
             // need an every-tick slot.
@@ -1580,21 +1586,32 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
             issueRepoCursor = index === -1 ? issueRepoCursor : (index + 1) % repoCount;
             continue;
           }
-          pendingEtag = probe.etag;
-        }
-
-        let didWork = false;
-        for (let i = 0; i < loops; i += 1) {
-          const page = await listOpenIssuesForRepo(octokit, parsed, { limit, offset: nextOffset });
+          pendingEtag = conditional.etag;
           const seenAt = new Date().toISOString();
-          if (nextOffset === 0) {
-            await storage.markRepoIssuesStale(repoSlug);
-          }
-          await storage.upsertSyncedIssues(repoSlug, page.items, seenAt);
-          nextOffset = page.hasMore ? nextOffset + limit : 0;
+          await storage.markRepoIssuesStale(repoSlug);
+          await storage.upsertSyncedIssues(repoSlug, conditional.items, seenAt);
+          nextOffset = conditional.hasMore ? limit : 0;
           issueRepoSyncOffsets.set(repoSlug, nextOffset);
           didWork = true;
-          if (!page.hasMore || !options?.fullSweep) break;
+          if (conditional.hasMore && options?.fullSweep) {
+            for (let i = 1; i < loops; i += 1) {
+              const page = await listOpenIssuesForRepo(octokit, parsed, { limit, offset: nextOffset });
+              await storage.upsertSyncedIssues(repoSlug, page.items, new Date().toISOString());
+              nextOffset = page.hasMore ? nextOffset + limit : 0;
+              issueRepoSyncOffsets.set(repoSlug, nextOffset);
+              if (!page.hasMore) break;
+            }
+          }
+        } else {
+          for (let i = 0; i < loops; i += 1) {
+            const page = await listOpenIssuesForRepo(octokit, parsed, { limit, offset: nextOffset });
+            const seenAt = new Date().toISOString();
+            await storage.upsertSyncedIssues(repoSlug, page.items, seenAt);
+            nextOffset = page.hasMore ? nextOffset + limit : 0;
+            issueRepoSyncOffsets.set(repoSlug, nextOffset);
+            didWork = true;
+            if (!page.hasMore || !options?.fullSweep) break;
+          }
         }
         if (didWork) {
           let githubOpenCount: number | null | undefined;

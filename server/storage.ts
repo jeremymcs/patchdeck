@@ -124,7 +124,8 @@ export interface IStorage {
 
   // GitHub conditional-request etags (If-None-Match), keyed by a stable request URL.
   getGithubEtag(url: string): Promise<string | undefined>;
-  setGithubEtag(url: string, etag: string): Promise<void>;
+  getGithubEtagRecord(url: string): Promise<{ etag: string; payload: string | null } | undefined>;
+  setGithubEtag(url: string, etag: string, payload?: string | null): Promise<void>;
   clearGithubEtag(url: string): Promise<void>;
 
   // Per-repo sync state (backoff + last-synced), persisted so a restart does

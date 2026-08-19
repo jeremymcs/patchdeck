@@ -23,6 +23,7 @@ import {
   listOpenPullsForRepo,
   listOpenPullsForRepoConditional,
   probeRepoIssuesChanged,
+  listOpenIssuesForRepoConditional,
   fetchOpenIssueCount,
   listMergedPullsSince,
   listReleasesForRepo,
@@ -1068,6 +1069,69 @@ test("probeRepoIssuesChanged returns the response etag on a 200", async () => {
   if (!result.notModified) {
     assert.equal(result.etag, 'W/"fresh"');
   }
+});
+
+test("listOpenIssuesForRepoConditional returns mapped issues and the page-1 etag on a 200", async () => {
+  let listCalls = 0;
+  const octokit = {
+    issues: {
+      listForRepo: async (params: { page: number; headers?: Record<string, string> }) => {
+        listCalls += 1;
+        assert.equal(params.page, 1);
+        assert.equal(params.headers?.["if-none-match"], 'W/"cached"');
+        return {
+          data: [{
+            number: 7,
+            title: "Issue 7",
+            body: "body",
+            html_url: "https://github.com/owner/repo/issues/7",
+            user: { login: "alice" },
+            labels: [],
+            assignees: [],
+            comments: 0,
+            created_at: "2026-05-03T17:00:00.000Z",
+            updated_at: "2026-05-03T18:00:00.000Z",
+          }],
+          headers: { etag: 'W/"issues-v1"' },
+        };
+      },
+    },
+  };
+
+  const result = await listOpenIssuesForRepoConditional(
+    octokit as never,
+    { owner: "owner", repo: "repo" },
+    'W/"cached"',
+    { offset: 0, limit: 100 },
+  );
+
+  assert.equal(result.notModified, false);
+  if (!result.notModified) {
+    assert.equal(result.etag, 'W/"issues-v1"');
+    assert.equal(result.items.length, 1);
+    assert.equal(result.items[0]?.number, 7);
+    assert.equal(result.hasMore, false);
+  }
+  assert.equal(listCalls, 1);
+});
+
+test("listOpenIssuesForRepoConditional reports notModified on a 304", async () => {
+  const octokit = {
+    issues: {
+      listForRepo: async () => {
+        const error = new Error("Not modified") as Error & { status: number };
+        error.status = 304;
+        throw error;
+      },
+    },
+  };
+
+  const result = await listOpenIssuesForRepoConditional(
+    octokit as never,
+    { owner: "owner", repo: "repo" },
+    'W/"cached"',
+  );
+  assert.equal(result.notModified, true);
 });
 
 test("probeRepoIssuesChanged reports notModified on a 304 and forwards If-None-Match", async () => {

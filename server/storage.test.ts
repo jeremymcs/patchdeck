@@ -1311,6 +1311,29 @@ test("MemStorage GitHub etag round-trip matches the SqliteStorage contract", asy
   assert.equal(await storage.getGithubEtag("issues:open:owner/repo"), undefined);
 });
 
+test("SqliteStorage persists GitHub etag payloads across reopen without dropping them on etag-only writes", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "codefactory-storage-"));
+  const first = new SqliteStorage(root);
+  try {
+    await first.setGithubEtag("prs:open:owner/repo", 'W/"pulls-v1"', JSON.stringify([{ number: 5 }]));
+    await first.setGithubEtag("prs:open:owner/repo", 'W/"pulls-v2"');
+    const record = await first.getGithubEtagRecord("prs:open:owner/repo");
+    assert.equal(record?.etag, 'W/"pulls-v2"');
+    assert.equal(record?.payload, JSON.stringify([{ number: 5 }]));
+  } finally {
+    first.close();
+  }
+
+  const second = new SqliteStorage(root);
+  try {
+    const record = await second.getGithubEtagRecord("prs:open:owner/repo");
+    assert.equal(record?.etag, 'W/"pulls-v2"');
+    assert.equal(record?.payload, JSON.stringify([{ number: 5 }]));
+  } finally {
+    second.close();
+  }
+});
+
 test("SqliteStorage persists repo sync state with partial updates across reopen", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "codefactory-storage-"));
   const first = new SqliteStorage(root);

@@ -2528,6 +2528,105 @@ export type RepoIssuesProbeResult =
   | { notModified: true }
   | { notModified: false; etag: string | null };
 
+export type ConditionalIssueList =
+  | { notModified: true }
+  | { notModified: false; etag: string | null; items: GitHubIssueSummary[]; hasMore: boolean };
+
+type GitHubIssueListItem = Awaited<ReturnType<Octokit["issues"]["listForRepo"]>>["data"][number];
+
+function mapIssueListItem(issue: GitHubIssueListItem, repo: ParsedRepoSlug): GitHubIssueSummary | null {
+  if (issue.pull_request) return null;
+  return {
+    number: issue.number,
+    title: issue.title || `Issue #${issue.number}`,
+    body: typeof issue.body === "string" ? issue.body : null,
+    bodyHtml: typeof issue.body === "string" ? renderGitHubMarkdown(issue.body) : null,
+    url: issue.html_url || `https://github.com/${repo.owner}/${repo.repo}/issues/${issue.number}`,
+    repoFullName: `${repo.owner}/${repo.repo}`,
+    repoCloneUrl: `https://github.com/${repo.owner}/${repo.repo}.git`,
+    author: issue.user?.login || "",
+    labels: Array.isArray(issue.labels)
+      ? issue.labels
+          .map((label) => (typeof label === "string" ? label : label?.name ?? ""))
+          .filter((label): label is string => Boolean(label))
+      : [],
+    assignees: Array.isArray(issue.assignees)
+      ? issue.assignees
+          .map((assignee) => assignee?.login || "")
+          .filter((assignee): assignee is string => Boolean(assignee))
+      : [],
+    comments: typeof issue.comments === "number" ? issue.comments : 0,
+    createdAt: issue.created_at || new Date().toISOString(),
+    updatedAt: issue.updated_at || issue.created_at || new Date().toISOString(),
+  };
+}
+
+/**
+ * Conditional GET of a repo's open issues. Page 1 carries `If-None-Match`; a
+ * 304 means the list is unchanged and costs no primary rate-limit budget. A
+ * 200 reuses that page instead of fetching page 1 twice.
+ */
+export async function listOpenIssuesForRepoConditional(
+  octokit: Octokit,
+  repo: ParsedRepoSlug,
+  cachedEtag: string | null,
+  options: { offset: number; limit: number } = { offset: 0, limit: 100 },
+): Promise<ConditionalIssueList> {
+  if (typeof octokit.issues?.listForRepo !== "function" || options.offset > 0) {
+    const page = await listOpenIssuesForRepo(octokit, repo, options);
+    return { notModified: false, etag: null, ...page };
+  }
+
+  return withGitHubErrorHandling("open issues", repo, async () => {
+    const perPage = 100;
+    const desired = options.limit + 1;
+    const collected: GitHubIssueSummary[] = [];
+    let firstPageEtag: string | null = null;
+
+    for (let page = 1; ; page += 1) {
+      let response;
+      try {
+        response = await octokit.issues.listForRepo({
+          owner: repo.owner,
+          repo: repo.repo,
+          state: "open",
+          sort: "updated",
+          direction: "desc",
+          per_page: perPage,
+          page,
+          ...(page === 1 && cachedEtag ? { headers: { "if-none-match": cachedEtag } } : {}),
+        });
+      } catch (error) {
+        if (page === 1 && (error as { status?: number } | undefined)?.status === 304) {
+          return { notModified: true };
+        }
+        throw error;
+      }
+
+      if (page === 1) {
+        const etag = response.headers?.etag;
+        firstPageEtag = typeof etag === "string" ? etag : null;
+      }
+
+      for (const issue of response.data) {
+        const mapped = mapIssueListItem(issue, repo);
+        if (mapped) collected.push(mapped);
+      }
+
+      if (response.data.length < perPage || collected.length >= desired) {
+        break;
+      }
+    }
+
+    return {
+      notModified: false,
+      etag: firstPageEtag,
+      items: collected.slice(0, options.limit),
+      hasMore: collected.length > options.limit,
+    };
+  });
+}
+
 /**
  * Conditional GET of a repo's open-issue list (page 1, sorted by `updated`).
  * A 304 means no issue has changed since `cachedEtag` was stored, so the

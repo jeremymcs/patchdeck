@@ -993,6 +993,7 @@ export class SqliteStorage implements IStorage {
     this.ensureColumn("prs", "mergeable_state", "TEXT");
     this.ensureColumn("prs", "work_contract_json", "TEXT");
     this.ensureColumn("repo_sync_state", "github_open_count", "INTEGER");
+    this.ensureColumn("github_etags", "payload", "TEXT");
 
     const configExists = this.get<{ present: number }>("SELECT 1 AS present FROM config WHERE id = 1");
     if (!configExists) {
@@ -2339,13 +2340,28 @@ export class SqliteStorage implements IStorage {
     return row?.etag;
   }
 
-  async setGithubEtag(url: string, etag: string): Promise<void> {
+  async getGithubEtagRecord(url: string): Promise<{ etag: string; payload: string | null } | undefined> {
+    const row = this.get<{ etag: string; payload: string | null }>(
+      "SELECT etag, payload FROM github_etags WHERE url = ?",
+      url,
+    );
+    if (!row) return undefined;
+    return { etag: row.etag, payload: row.payload ?? null };
+  }
+
+  async setGithubEtag(url: string, etag: string, payload?: string | null): Promise<void> {
     this.withWriteTransaction(() => {
+      const existing = this.get<{ payload: string | null }>(
+        "SELECT payload FROM github_etags WHERE url = ?",
+        url,
+      );
+      const nextPayload = payload === undefined ? existing?.payload ?? null : payload;
       this.run(
-        `INSERT INTO github_etags (url, etag, updated_at) VALUES (?, ?, ?)
-         ON CONFLICT(url) DO UPDATE SET etag = excluded.etag, updated_at = excluded.updated_at`,
+        `INSERT INTO github_etags (url, etag, payload, updated_at) VALUES (?, ?, ?, ?)
+         ON CONFLICT(url) DO UPDATE SET etag = excluded.etag, payload = excluded.payload, updated_at = excluded.updated_at`,
         url,
         etag,
+        nextPayload,
         new Date().toISOString(),
       );
     });

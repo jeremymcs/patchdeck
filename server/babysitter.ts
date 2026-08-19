@@ -115,6 +115,19 @@ const APP_REPOSITORY_URL = "https://github.com/jeremymcs/patchdeck";
 export const APP_COMMENT_FOOTER = formatAppCommentFooter(APP_NAME, true);
 const AUDIT_TOKEN_PATTERN = /\bcodefactory-feedback:[^\s<>()[\]{}"']+/g;
 
+function parseStoredPullList(
+  record: { etag: string; payload: string | null } | undefined,
+): { etag: string | null; pulls: GitHubPullSummary[] } | null {
+  if (!record?.payload) return null;
+  try {
+    const parsed = JSON.parse(record.payload) as unknown;
+    if (!Array.isArray(parsed)) return null;
+    return { etag: record.etag, pulls: parsed as GitHubPullSummary[] };
+  } catch {
+    return null;
+  }
+}
+
 export class TerminalBabysitterError extends Error {
   constructor(message: string) {
     super(message);
@@ -2599,7 +2612,9 @@ export class PRBabysitter {
         // last sweep, so the cached list is reused and the fetch costs no
         // primary rate-limit budget. The etag and list are cached together in
         // memory so they cannot drift out of sync across a restart.
-        const cachedPrList = this.prListCache.get(repoSlug);
+        const etagKey = `prs:open:${repoSlug}`;
+        const storedPrList = parseStoredPullList(await this.storage.getGithubEtagRecord(etagKey));
+        const cachedPrList = this.prListCache.get(repoSlug) ?? storedPrList;
         const conditional = await this.github.listOpenPullsForRepoConditional(
           octokit,
           repo,
@@ -2609,13 +2624,27 @@ export class PRBabysitter {
         if (conditional.notModified && cachedPrList) {
           openPulls = cachedPrList.pulls;
           prListUnchanged = true;
+          this.prListCache.set(repoSlug, cachedPrList);
         } else if (conditional.notModified) {
-          // Etag hit without a cached list (should not happen, since both are
-          // stored together) — fall back to a full fetch.
-          openPulls = await this.github.listOpenPullsForRepo(octokit, repo);
+          // 304 without a stored list (upgrade path): refetch without
+          // If-None-Match once, then persist so the next restart is free.
+          const fresh = await this.github.listOpenPullsForRepoConditional(octokit, repo, null);
+          openPulls = fresh.notModified ? [] : fresh.pulls;
+          const freshEtag = fresh.notModified ? null : fresh.etag;
+          this.prListCache.set(repoSlug, { etag: freshEtag, pulls: openPulls });
+          if (freshEtag) {
+            await this.storage.setGithubEtag(etagKey, freshEtag, JSON.stringify(openPulls));
+          }
         } else {
           openPulls = conditional.pulls;
           this.prListCache.set(repoSlug, { etag: conditional.etag, pulls: conditional.pulls });
+          if (conditional.etag) {
+            await this.storage.setGithubEtag(
+              etagKey,
+              conditional.etag,
+              JSON.stringify(conditional.pulls),
+            );
+          }
         }
         // When the PR list is unchanged, defer the next sweep — a quiet repo
         // does not need an every-tick slot. Any change returns it to every-tick.

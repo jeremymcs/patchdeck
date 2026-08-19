@@ -1120,12 +1120,16 @@ test("syncRepos syncs issues and persists the new etag when the issue list chang
     updated_at: "2026-05-03T18:00:00.000Z",
   };
   let graphqlCalls = 0;
+  let listForRepoCalls = 0;
   const fakeOctokit = {
     issues: {
-      listForRepo: async () => ({
-        data: [issuePayload],
-        headers: { etag: 'W/"issues-v1"' },
-      }),
+      listForRepo: async () => {
+        listForRepoCalls += 1;
+        return {
+          data: [issuePayload],
+          headers: { etag: 'W/"issues-v1"' },
+        };
+      },
     },
     graphql: async () => {
       graphqlCalls += 1;
@@ -1152,6 +1156,7 @@ test("syncRepos syncs issues and persists the new etag when the issue list chang
     "a successful sweep should persist the fresh etag for next tick",
   );
   assert.equal(graphqlCalls, 1);
+  assert.equal(listForRepoCalls, 1, "a changed issue list must reuse the probe page instead of fetching page 1 twice");
   assert.equal((await storage.getRepoSyncStates("issues"))[0]?.githubOpenCount, 4);
 });
 
