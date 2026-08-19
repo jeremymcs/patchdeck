@@ -611,13 +611,33 @@ async function enrichCheckRunsWithGitHubActionsSteps(
   return enrichedRuns;
 }
 
-export async function fetchCheckSnapshotsForRef(
+type LoadedCommitChecks = {
+  statuses: GitHubCommitStatusResponse[];
+  checkRuns: GitHubCheckRunResponse[];
+  settled: boolean;
+  failures: GitHubStatusFailure[];
+};
+
+const commitCheckCache = new WeakMap<object, Map<string, LoadedCommitChecks>>();
+
+function commitCheckCacheKey(repo: ParsedRepoSlug, sha: string): string {
+  return `${repo.owner}/${repo.repo}@${sha}`;
+}
+
+function invalidateCommitCheckCache(octokit: object, repo: ParsedRepoSlug, sha: string): void {
+  commitCheckCache.get(octokit)?.delete(commitCheckCacheKey(repo, sha));
+}
+
+async function loadCommitCheckState(
   octokit: Octokit,
   repo: ParsedRepoSlug,
-  prId: string,
   headSha: string,
-): Promise<CheckSnapshot[]> {
-  if (!headSha) return [];
+): Promise<LoadedCommitChecks> {
+  const key = commitCheckCacheKey(repo, headSha);
+  const cached = commitCheckCache.get(octokit)?.get(key);
+  if (cached?.settled) {
+    return cached;
+  }
 
   const [statusResponse, checkRunsResponse] = await Promise.all([
     withGitHubErrorHandling("commit statuses", repo, () => octokit.repos.getCombinedStatusForRef({
@@ -632,16 +652,61 @@ export async function fetchCheckSnapshotsForRef(
     })),
   ]);
 
+  const statuses = (statusResponse.data.statuses ?? []) as GitHubCommitStatusResponse[];
+  const checkRuns = (checkRunsResponse.data.check_runs ?? []) as GitHubCheckRunResponse[];
+  const failures: GitHubStatusFailure[] = [
+    ...statuses
+      .filter((status) => status.state === "failure" || status.state === "error")
+      .map((status) => ({
+        context: status.context || "status-check",
+        description: status.description || "Failed status check",
+        targetUrl: status.target_url || null,
+      })),
+    ...checkRuns
+      .filter((run) => run.conclusion === "failure" || run.conclusion === "timed_out" || run.conclusion === "cancelled")
+      .map((run) => ({
+        context: run.name || "check-run",
+        description: run.output?.summary || run.output?.title || `Check run ${run.conclusion}`,
+        targetUrl: run.html_url || null,
+      })),
+  ];
+  const hasAnyChecks = statuses.length > 0 || checkRuns.length > 0;
+  const hasPending = statuses.some((status) => status.state === "pending")
+    || checkRuns.some((run) => run.status !== "completed");
+  const loaded: LoadedCommitChecks = {
+    statuses,
+    checkRuns,
+    settled: hasAnyChecks && !hasPending,
+    failures,
+  };
+  let bucket = commitCheckCache.get(octokit);
+  if (!bucket) {
+    bucket = new Map();
+    commitCheckCache.set(octokit, bucket);
+  }
+  bucket.set(key, loaded);
+  return loaded;
+}
+
+export async function fetchCheckSnapshotsForRef(
+  octokit: Octokit,
+  repo: ParsedRepoSlug,
+  prId: string,
+  headSha: string,
+): Promise<CheckSnapshot[]> {
+  if (!headSha) return [];
+
+  const loaded = await loadCommitCheckState(octokit, repo, headSha);
   const checkRuns = await enrichCheckRunsWithGitHubActionsSteps(
     octokit,
     repo,
-    (checkRunsResponse.data.check_runs ?? []) as GitHubCheckRunResponse[],
+    loaded.checkRuns,
   );
 
   return normalizeCheckSnapshotsFromRef({
     prId,
     sha: headSha,
-    statuses: (statusResponse.data.statuses ?? []) as GitHubCommitStatusResponse[],
+    statuses: loaded.statuses,
     checkRuns,
   });
 }
@@ -695,6 +760,10 @@ export async function rerunFailedGitHubActionsRunsForSnapshots(
   }
 
   const reruns = Array.from(byRunId.values());
+  const shas = Array.from(new Set(snapshots.map((snapshot) => snapshot.sha).filter((sha) => Boolean(sha))));
+  for (const sha of shas) {
+    invalidateCommitCheckCache(octokit, repo, sha);
+  }
   for (const rerun of reruns) {
     await withGitHubErrorHandling("rerun failed workflow jobs", repo, () =>
       octokit.rest.actions.reRunWorkflowFailedJobs({
@@ -2949,40 +3018,8 @@ export async function listFailingStatuses(
   headSha: string,
 ): Promise<GitHubStatusFailure[]> {
   if (!headSha) return [];
-
-  // Fetch both commit statuses AND check runs in parallel.
-  // GitHub Actions CI/CD reports results as check runs (Checks API),
-  // while some integrations use the older commit status API.
-  const [statusResponse, checkRunsResponse] = await Promise.all([
-    withGitHubErrorHandling("commit statuses", repo, () => octokit.repos.getCombinedStatusForRef({
-      owner: repo.owner,
-      repo: repo.repo,
-      ref: headSha,
-    })),
-    withGitHubErrorHandling("check runs", repo, () => octokit.checks.listForRef({
-      owner: repo.owner,
-      repo: repo.repo,
-      ref: headSha,
-    })),
-  ]);
-
-  const fromStatuses: GitHubStatusFailure[] = statusResponse.data.statuses
-    .filter((status) => status.state === "failure" || status.state === "error")
-    .map((status) => ({
-      context: status.context || "status-check",
-      description: status.description || "Failed status check",
-      targetUrl: status.target_url || null,
-    }));
-
-  const fromCheckRuns: GitHubStatusFailure[] = checkRunsResponse.data.check_runs
-    .filter((run) => run.conclusion === "failure" || run.conclusion === "timed_out" || run.conclusion === "cancelled")
-    .map((run) => ({
-      context: run.name,
-      description: run.output?.summary || run.output?.title || `Check run ${run.conclusion}`,
-      targetUrl: run.html_url || null,
-    }));
-
-  return [...fromStatuses, ...fromCheckRuns];
+  const loaded = await loadCommitCheckState(octokit, repo, headSha);
+  return loaded.failures;
 }
 
 /**
@@ -2996,26 +3033,9 @@ export async function checkCISettled(
   headSha: string,
 ): Promise<boolean> {
   if (!headSha) return false;
-
   try {
-    const [statusResp, checkResp] = await Promise.all([
-      withGitHubErrorHandling("commit statuses (settled check)", repo, () => octokit.repos.getCombinedStatusForRef({
-        owner: repo.owner,
-        repo: repo.repo,
-        ref: headSha,
-      })),
-      withGitHubErrorHandling("check runs (settled check)", repo, () => octokit.checks.listForRef({
-        owner: repo.owner,
-        repo: repo.repo,
-        ref: headSha,
-      })),
-    ]);
-
-    const hasPendingStatus = statusResp.data.statuses.some((s) => s.state === "pending");
-    const hasPendingCheck = checkResp.data.check_runs.some((r) => r.status !== "completed");
-    const hasAnyChecks = statusResp.data.statuses.length > 0 || checkResp.data.check_runs.length > 0;
-
-    return hasAnyChecks && !hasPendingStatus && !hasPendingCheck;
+    const loaded = await loadCommitCheckState(octokit, repo, headSha);
+    return loaded.settled;
   } catch {
     return false;
   }
@@ -3038,45 +3058,8 @@ export async function fetchCiPollResult(
   headSha: string,
 ): Promise<CiPollResult> {
   if (!headSha) return { settled: false, failures: [] };
-
-  const [statusResponse, checkRunsResponse] = await Promise.all([
-    withGitHubErrorHandling("commit statuses", repo, () => octokit.repos.getCombinedStatusForRef({
-      owner: repo.owner,
-      repo: repo.repo,
-      ref: headSha,
-    })),
-    withGitHubErrorHandling("check runs", repo, () => octokit.checks.listForRef({
-      owner: repo.owner,
-      repo: repo.repo,
-      ref: headSha,
-    })),
-  ]);
-
-  const statuses = statusResponse.data.statuses;
-  const checkRuns = checkRunsResponse.data.check_runs;
-
-  const failures: GitHubStatusFailure[] = [
-    ...statuses
-      .filter((status) => status.state === "failure" || status.state === "error")
-      .map((status) => ({
-        context: status.context || "status-check",
-        description: status.description || "Failed status check",
-        targetUrl: status.target_url || null,
-      })),
-    ...checkRuns
-      .filter((run) => run.conclusion === "failure" || run.conclusion === "timed_out" || run.conclusion === "cancelled")
-      .map((run) => ({
-        context: run.name,
-        description: run.output?.summary || run.output?.title || `Check run ${run.conclusion}`,
-        targetUrl: run.html_url || null,
-      })),
-  ];
-
-  const hasAnyChecks = statuses.length > 0 || checkRuns.length > 0;
-  const hasPending = statuses.some((s) => s.state === "pending")
-    || checkRuns.some((r) => r.status !== "completed");
-
-  return { settled: hasAnyChecks && !hasPending, failures };
+  const loaded = await loadCommitCheckState(octokit, repo, headSha);
+  return { settled: loaded.settled, failures: loaded.failures };
 }
 
 export type MergedPRSummary = {

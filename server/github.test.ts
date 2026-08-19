@@ -10,6 +10,7 @@ import {
   buildFeedbackAuditToken,
   checkOnboardingStatus,
   fetchCheckSnapshotsForRef,
+  fetchCiPollResult,
   createGitHubRelease,
   fetchFeedbackItemsForPR,
   fetchFeedbackItemsForPRIfChanged,
@@ -826,6 +827,75 @@ test("fetchCheckSnapshotsForRef bounds parallel GitHub Actions job detail reques
     maxActiveRequests < runCount,
     `expected fewer than ${runCount} simultaneous job detail requests, saw ${maxActiveRequests}`,
   );
+});
+
+test("settled commit checks are fetched once per SHA and reused across helpers", async () => {
+  let statusCalls = 0;
+  let checkCalls = 0;
+  const octokit = {
+    repos: {
+      getCombinedStatusForRef: async () => {
+        statusCalls += 1;
+        return {
+          data: {
+            statuses: [{
+              state: "success",
+              context: "ci",
+              description: "ok",
+              target_url: null,
+            }],
+          },
+        };
+      },
+    },
+    checks: {
+      listForRef: async () => {
+        checkCalls += 1;
+        return { data: { check_runs: [] } };
+      },
+    },
+  };
+
+  const repo = { owner: "owner", repo: "cache-repo" };
+  const first = await fetchCiPollResult(octokit as never, repo, "sha-settled");
+  const second = await fetchCiPollResult(octokit as never, repo, "sha-settled");
+  await fetchCheckSnapshotsForRef(octokit as never, repo, "pr-1", "sha-settled");
+
+  assert.equal(first.settled, true);
+  assert.equal(second.settled, true);
+  assert.equal(statusCalls, 1);
+  assert.equal(checkCalls, 1);
+});
+
+test("unsettled commit checks are refetched on the next call", async () => {
+  let statusCalls = 0;
+  const octokit = {
+    repos: {
+      getCombinedStatusForRef: async () => {
+        statusCalls += 1;
+        return {
+          data: {
+            statuses: [{
+              state: statusCalls === 1 ? "pending" : "success",
+              context: "ci",
+              description: "ok",
+              target_url: null,
+            }],
+          },
+        };
+      },
+    },
+    checks: {
+      listForRef: async () => ({ data: { check_runs: [] } }),
+    },
+  };
+
+  const repo = { owner: "owner", repo: "pending-repo" };
+  const first = await fetchCiPollResult(octokit as never, repo, "sha-pending");
+  const second = await fetchCiPollResult(octokit as never, repo, "sha-pending");
+  assert.equal(first.settled, false);
+  assert.equal(second.settled, true);
+  assert.equal(statusCalls, 2);
 });
 
 test("listOpenPullsForRepo retries transient GitHub connection resets", async () => {
