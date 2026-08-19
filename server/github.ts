@@ -204,7 +204,7 @@ const REVIEW_THREADS_QUERY = `
           nodes {
             id
             isResolved
-            comments(first: 100) {
+            comments(first: 20) {
               nodes {
                 databaseId
               }
@@ -2169,6 +2169,96 @@ export async function postFollowUpForFeedbackItem(
   }
 
   await replyToIssueComment(octokit, parsed, body);
+}
+
+export type FeedbackListEtags = {
+  reviewComments: string | null;
+  reviews: string | null;
+  issueComments: string | null;
+};
+
+async function probeListEtag(
+  context: string,
+  parsed: ParsedPRUrl,
+  cachedEtag: string | null,
+  request: (headers: Record<string, string>) => Promise<{ headers?: { etag?: string } }>,
+): Promise<{ notModified: true } | { notModified: false; etag: string | null }> {
+  return withGitHubErrorHandling(context, parsed, async () => {
+    try {
+      const response = await request(cachedEtag ? { "if-none-match": cachedEtag } : {});
+      const etag = typeof response.headers?.etag === "string" ? response.headers.etag : null;
+      return { notModified: false, etag };
+    } catch (error) {
+      if ((error as { status?: number } | undefined)?.status === 304) {
+        return { notModified: true };
+      }
+      throw error;
+    }
+  });
+}
+
+export async function fetchFeedbackItemsForPRIfChanged(
+  octokit: Octokit,
+  parsed: ParsedPRUrl,
+  config: Config,
+  etags: FeedbackListEtags,
+): Promise<{ notModified: true } | { notModified: false; items: FeedbackItem[]; etags: FeedbackListEtags }> {
+  const canProbe = typeof octokit.pulls?.listReviewComments === "function"
+    && typeof octokit.pulls?.listReviews === "function"
+    && typeof octokit.issues?.listComments === "function";
+
+  if (canProbe) {
+    const [reviewComments, reviews, issueComments] = await Promise.all([
+      probeListEtag("review comments", parsed, etags.reviewComments, (headers) =>
+        octokit.pulls.listReviewComments({
+          owner: parsed.owner,
+          repo: parsed.repo,
+          pull_number: parsed.number,
+          per_page: 100,
+          page: 1,
+          headers,
+        }),
+      ),
+      probeListEtag("reviews", parsed, etags.reviews, (headers) =>
+        octokit.pulls.listReviews({
+          owner: parsed.owner,
+          repo: parsed.repo,
+          pull_number: parsed.number,
+          per_page: 100,
+          page: 1,
+          headers,
+        }),
+      ),
+      probeListEtag("issue comments", parsed, etags.issueComments, (headers) =>
+        octokit.issues.listComments({
+          owner: parsed.owner,
+          repo: parsed.repo,
+          issue_number: parsed.number,
+          per_page: 100,
+          page: 1,
+          headers,
+        }),
+      ),
+    ]);
+
+    if (reviewComments.notModified && reviews.notModified && issueComments.notModified) {
+      return { notModified: true };
+    }
+
+    const items = await fetchFeedbackItemsForPR(octokit, parsed, config);
+    return {
+      notModified: false,
+      items,
+      etags: {
+        reviewComments: reviewComments.notModified ? etags.reviewComments : reviewComments.etag,
+        reviews: reviews.notModified ? etags.reviews : reviews.etag,
+        issueComments: issueComments.notModified ? etags.issueComments : issueComments.etag,
+      },
+    };
+  }
+
+  const items = await fetchFeedbackItemsForPR(octokit, parsed, config);
+  return { notModified: false, items, etags };
 }
 
 export async function fetchFeedbackItemsForPR(

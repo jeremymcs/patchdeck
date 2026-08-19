@@ -12,6 +12,7 @@ import {
   fetchCheckSnapshotsForRef,
   createGitHubRelease,
   fetchFeedbackItemsForPR,
+  fetchFeedbackItemsForPRIfChanged,
   fetchIssueSummary,
   fetchPullCloseState,
   fetchPullSummary,
@@ -1650,12 +1651,12 @@ test("fetchFeedbackItemsForPR paginates review thread comments beyond the first 
                     id: "THREAD_node_999",
                     isResolved: true,
                     comments: {
-                      nodes: Array.from({ length: 100 }, (_unused, index) => ({
+                      nodes: Array.from({ length: 20 }, (_unused, index) => ({
                         databaseId: index + 1,
                       })),
                       pageInfo: {
                         hasNextPage: true,
-                        endCursor: "cursor-100",
+                        endCursor: "cursor-20",
                       },
                     },
                   },
@@ -1671,7 +1672,7 @@ test("fetchFeedbackItemsForPR paginates review thread comments beyond the first 
       }
 
       assert.equal(params.threadId, "THREAD_node_999");
-      assert.equal(params.cursor, "cursor-100");
+      assert.equal(params.cursor, "cursor-20");
 
       return {
         node: {
@@ -1718,11 +1719,86 @@ test("fetchFeedbackItemsForPR paginates review thread comments beyond the first 
     },
     {
       threadId: "THREAD_node_999",
-      cursor: "cursor-100",
+      cursor: "cursor-20",
     },
   ]);
   assert.match(graphqlCalls[0]?.query || "", /CodeFactoryReviewThreads/);
+  assert.match(graphqlCalls[0]?.query || "", /comments\(first: 20\)/);
   assert.match(graphqlCalls[1]?.query || "", /CodeFactoryReviewThreadComments/);
+});
+
+test("fetchFeedbackItemsForPRIfChanged skips GraphQL when all comment lists return 304", async () => {
+  let graphqlCalls = 0;
+  const notModified = () => {
+    const error = new Error("Not modified") as Error & { status: number };
+    error.status = 304;
+    throw error;
+  };
+  const octokit = {
+    graphql: async () => {
+      graphqlCalls += 1;
+      return {};
+    },
+    paginate: async () => {
+      throw new Error("paginate should not run on an all-304 probe");
+    },
+    pulls: {
+      listReviewComments: async () => notModified(),
+      listReviews: async () => notModified(),
+    },
+    issues: {
+      listComments: async () => notModified(),
+    },
+  };
+
+  const result = await fetchFeedbackItemsForPRIfChanged(
+    octokit as never,
+    { owner: "owner", repo: "repo", number: 1 },
+    config,
+    { reviewComments: 'W/"c"', reviews: 'W/"r"', issueComments: 'W/"i"' },
+  );
+
+  assert.equal(result.notModified, true);
+  assert.equal(graphqlCalls, 0);
+});
+
+test("fetchFeedbackItemsForPRIfChanged fetches feedback when any list changed", async () => {
+  let graphqlCalls = 0;
+  const notModified = () => {
+    const error = new Error("Not modified") as Error & { status: number };
+    error.status = 304;
+    throw error;
+  };
+  const octokit = {
+    graphql: async () => {
+      graphqlCalls += 1;
+      return { repository: { pullRequest: { reviewThreads: { nodes: [], pageInfo: {} } } } };
+    },
+    paginate: async () => [],
+    pulls: {
+      listReviewComments: async () => ({ data: [], headers: { etag: 'W/"c2"' } }),
+      listReviews: async () => notModified(),
+    },
+    issues: {
+      listComments: async () => notModified(),
+    },
+  };
+
+  const result = await fetchFeedbackItemsForPRIfChanged(
+    octokit as never,
+    { owner: "owner", repo: "repo", number: 1 },
+    config,
+    { reviewComments: 'W/"c"', reviews: 'W/"r"', issueComments: 'W/"i"' },
+  );
+
+  assert.equal(result.notModified, false);
+  if (!result.notModified) {
+    assert.deepEqual(result.items, []);
+    assert.equal(result.etags.reviewComments, 'W/"c2"');
+    assert.equal(result.etags.reviews, 'W/"r"');
+    assert.equal(result.etags.issueComments, 'W/"i"');
+  }
+  assert.equal(graphqlCalls, 1);
 });
 
 test("postFollowUpForFeedbackItem replies to review threads and resolveReviewThread resolves them", async () => {

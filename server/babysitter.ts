@@ -26,6 +26,7 @@ import {
   fetchCheckSnapshotsForRef,
   fetchCiPollResult,
   fetchFeedbackItemsForPR,
+  fetchFeedbackItemsForPRIfChanged,
   fetchPullCloseState,
   fetchPullSummary,
   formatRepoSlug,
@@ -44,6 +45,7 @@ import {
   APP_STATUS_COMMENT_PATTERN,
   type CiPollResult,
   type GitHubActionsRerun,
+  type FeedbackListEtags,
   type GitHubPullSummary,
   type GitHubStatusFailure,
   type ParsedPRUrl,
@@ -115,6 +117,19 @@ const APP_REPOSITORY_URL = "https://github.com/jeremymcs/patchdeck";
 export const APP_COMMENT_FOOTER = formatAppCommentFooter(APP_NAME, true);
 const AUDIT_TOKEN_PATTERN = /\bcodefactory-feedback:[^\s<>()[\]{}"']+/g;
 
+function feedbackEtagKeys(parsed: ParsedPRUrl): {
+  reviewComments: string;
+  reviews: string;
+  issueComments: string;
+} {
+  const prefix = `pr:${parsed.owner}/${parsed.repo}#${parsed.number}`;
+  return {
+    reviewComments: `${prefix}:review-comments`,
+    reviews: `${prefix}:reviews`,
+    issueComments: `${prefix}:issue-comments`,
+  };
+}
+
 function parseStoredPullList(
   record: { etag: string; payload: string | null } | undefined,
 ): { etag: string | null; pulls: GitHubPullSummary[] } | null {
@@ -140,6 +155,7 @@ type GitHubService = {
   buildOctokit: typeof buildOctokit;
   checkCISettled: typeof checkCISettled;
   fetchFeedbackItemsForPR: typeof fetchFeedbackItemsForPR;
+  fetchFeedbackItemsForPRIfChanged?: typeof fetchFeedbackItemsForPRIfChanged;
   fetchPullCloseState?: typeof fetchPullCloseState;
   fetchPullSummary: typeof fetchPullSummary;
   fetchCheckSnapshotsForRef?: typeof fetchCheckSnapshotsForRef;
@@ -221,6 +237,7 @@ const defaultGitHubService: GitHubService = {
   fetchCheckSnapshotsForRef,
   fetchCiPollResult,
   fetchFeedbackItemsForPR,
+  fetchFeedbackItemsForPRIfChanged,
   fetchPullCloseState,
   fetchPullSummary,
   getAuthenticatedLogin: async (octokit) => {
@@ -2424,7 +2441,32 @@ export class PRBabysitter {
       });
     }
 
-    const incomingFeedback = await this.github.fetchFeedbackItemsForPR(octokit, parsed, config);
+    const etagKeys = feedbackEtagKeys(parsed);
+    const previousEtags: FeedbackListEtags = {
+      reviewComments: (await this.storage.getGithubEtag(etagKeys.reviewComments)) ?? null,
+      reviews: (await this.storage.getGithubEtag(etagKeys.reviews)) ?? null,
+      issueComments: (await this.storage.getGithubEtag(etagKeys.issueComments)) ?? null,
+    };
+    const feedbackResult = this.github.fetchFeedbackItemsForPRIfChanged
+      ? await this.github.fetchFeedbackItemsForPRIfChanged(octokit, parsed, config, previousEtags)
+      : {
+        notModified: false as const,
+        items: await this.github.fetchFeedbackItemsForPR(octokit, parsed, config),
+        etags: previousEtags,
+      };
+    if (feedbackResult.notModified) {
+      return pr;
+    }
+    const incomingFeedback = feedbackResult.items;
+    if (feedbackResult.etags.reviewComments) {
+      await this.storage.setGithubEtag(etagKeys.reviewComments, feedbackResult.etags.reviewComments);
+    }
+    if (feedbackResult.etags.reviews) {
+      await this.storage.setGithubEtag(etagKeys.reviews, feedbackResult.etags.reviews);
+    }
+    if (feedbackResult.etags.issueComments) {
+      await this.storage.setGithubEtag(etagKeys.issueComments, feedbackResult.etags.issueComments);
+    }
     const { merged, newCount } = mergeFeedbackItems(pr.feedbackItems, incomingFeedback);
     const counters = countDecisions(merged);
 
