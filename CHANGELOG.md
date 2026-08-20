@@ -1,5 +1,45 @@
 # Changelog
 
+## [1.4.0](https://github.com/jeremymcs/patchdeck/compare/v1.3.0...v1.4.0) (2026-08-20)
+
+
+### Features
+
+* recover from failed automation without manual clearing ([24a1ce4](https://github.com/jeremymcs/patchdeck/commit/24a1ce4abb374ad6932a1621132b7c405209d088))
+* recover from failed automation without manual clearing ([16a6b40](https://github.com/jeremymcs/patchdeck/commit/16a6b4008509c822b3f51f3d3746ba8e17779573))
+
+
+### Bug Fixes
+
+* cut GitHub API spend on coverage, etags, feedback, CI, and releases ([9a2c34d](https://github.com/jeremymcs/patchdeck/commit/9a2c34dfd31181e034667f75a1e39c8e6144f60c))
+* finalize code-owner fallback worktree before cleanup ([d7087a4](https://github.com/jeremymcs/patchdeck/commit/d7087a45febf1320e51da62c92cb6130702c0cbd))
+* finalize code-owner fallback worktree before cleanup ([5e51db4](https://github.com/jeremymcs/patchdeck/commit/5e51db4aa6bfe85e4b4f9ab89fa06b3f9f3815d2))
+* increase agent evaluation and apply timeouts for slow models ([d87114b](https://github.com/jeremymcs/patchdeck/commit/d87114b71d4262ca7da513ca285d459276a6203b))
+* increase agent evaluation and apply timeouts for slow models ([bf4ecc8](https://github.com/jeremymcs/patchdeck/commit/bf4ecc8cf40544d2cadd14e0d0dc7807571375a5))
+* persist PR list etags and reuse issue page 1 ([cafc106](https://github.com/jeremymcs/patchdeck/commit/cafc106bfe21f625892c06ac7edb443cb015877f))
+* prevent reply loop on PatchDeck's own audit-trail comments ([9f9a29a](https://github.com/jeremymcs/patchdeck/commit/9f9a29a9f148a80448fa04029ff078e12661a557))
+* raise agent apply and fallback timeouts for large fix batches ([f980a1a](https://github.com/jeremymcs/patchdeck/commit/f980a1a31469695d8791eeffe509e1c65f4330dc))
+* raise agent apply and fallback timeouts for large fix batches ([4932b78](https://github.com/jeremymcs/patchdeck/commit/4932b7806cc5e3fafd8944eca91a7f1d1c452060))
+* reply to and resolve rejected review threads ([68cc7c9](https://github.com/jeremymcs/patchdeck/commit/68cc7c9156e126403712ac2738af73d72156a5fc))
+* reply to and resolve rejected review threads (and prevent reply loop) ([3670496](https://github.com/jeremymcs/patchdeck/commit/3670496457530261afbaa11edcecfd3a38cd249c))
+* report issue work timeout cause ([f61be7f](https://github.com/jeremymcs/patchdeck/commit/f61be7ff9988fa94a18ac3592f2c67ff3875ac5e))
+* report issue work timeout cause ([ec56330](https://github.com/jeremymcs/patchdeck/commit/ec56330d084b5c285bf2e4adc72fbeffa7fee1db))
+* reuse settled CI status fetches for a commit SHA ([1df430f](https://github.com/jeremymcs/patchdeck/commit/1df430fccdb84ee5410f456fc5942c31ac5bda8f))
+* skip review-thread GraphQL when PR comments are unchanged ([1c423f9](https://github.com/jeremymcs/patchdeck/commit/1c423f9a7c6493851a88624a4b0b7292ea1bc916))
+* stage agent-resolved conflicts before checking unmerged files ([5fc4fbc](https://github.com/jeremymcs/patchdeck/commit/5fc4fbc6b329eb0a57c74dfe8fd98463df8b5f1a))
+* stage agent-resolved conflicts before checking unmerged files ([40d01da](https://github.com/jeremymcs/patchdeck/commit/40d01dada34d7bd0bae3468b6bb220c797819eb0))
+* stop paging closed PRs once the release since-bound is passed ([86cea61](https://github.com/jeremymcs/patchdeck/commit/86cea6120480ce137557e428083121dcfb0cb17a))
+* stop queued jobs from failing in-progress babysit runs ([b23a4fc](https://github.com/jeremymcs/patchdeck/commit/b23a4fc32a5f06725add6a250acdc51ac6bb96cd))
+* stop queued jobs from failing in-progress babysit runs ([6f71213](https://github.com/jeremymcs/patchdeck/commit/6f7121372dac2e26af83d786e67e656b1f1f40f7))
+* stop Search API polling for issue coverage ([0316a82](https://github.com/jeremymcs/patchdeck/commit/0316a8263ab1af8c556665520f9116a136563347))
+* sync tauri release versions ([f190b4f](https://github.com/jeremymcs/patchdeck/commit/f190b4ff590ed074066c054418d9a3d90d92b175))
+* sync Tauri release versions ([d143f3f](https://github.com/jeremymcs/patchdeck/commit/d143f3f430a1c5f04ffc787e248b6471a57dfac9))
+* **ui:** make issues and PRs usable on mobile ([1162b37](https://github.com/jeremymcs/patchdeck/commit/1162b375ad85994ff5e55c6d03852beaf4752323))
+* **ui:** make issues and PRs usable on mobile ([b0965e5](https://github.com/jeremymcs/patchdeck/commit/b0965e5313718115a83f802195ab4fd07274999d))
+* **ui:** stop the detail action rail from crushing the title ([c8e7369](https://github.com/jeremymcs/patchdeck/commit/c8e7369b03a3a6e9109865fdda0467c620e6ee61))
+* update release please action ([a55634a](https://github.com/jeremymcs/patchdeck/commit/a55634aac0fe4c343b8f73164b52b9909fb16c69))
+* update Release Please action ([7c520f7](https://github.com/jeremymcs/patchdeck/commit/7c520f76e4cdb74b6fa25ebef090b0a9596c1c22))
+
 ## [1.3.0](https://github.com/jeremymcs/patchdeck/compare/v1.2.0...v1.3.0) (2026-05-28)
 
 
