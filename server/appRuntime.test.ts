@@ -61,6 +61,7 @@ async function waitForCondition(
 test("runtime lists active and archived PRs separately", async () => {
   const storage = new MemStorage();
   const runtime = createAppRuntime({
+    reclaimOrphanedWorktreesFn: async () => [],
     storage,
     startBackgroundServices: false,
     startWatcher: false,
@@ -86,6 +87,7 @@ test("runtime lists active and archived PRs separately", async () => {
 test("runtime queueBabysit enqueues a babysit job using the configured agent", async () => {
   const storage = new MemStorage();
   const runtime = createAppRuntime({
+    reclaimOrphanedWorktreesFn: async () => [],
     storage,
     startBackgroundServices: false,
     startWatcher: false,
@@ -116,6 +118,7 @@ test("runtime queueBabysit enqueues a babysit job using the configured agent", a
 test("runtime queueBabysit records durable PR work intent", async () => {
   const storage = new MemStorage();
   const runtime = createAppRuntime({
+    reclaimOrphanedWorktreesFn: async () => [],
     storage,
     startBackgroundServices: false,
     startWatcher: false,
@@ -154,6 +157,7 @@ test("runtime queueBabysit records durable PR work intent", async () => {
 test("runtime activity preserves monitor follow-up labels", async () => {
   const storage = new MemStorage();
   const runtime = createAppRuntime({
+    reclaimOrphanedWorktreesFn: async () => [],
     storage,
     startBackgroundServices: false,
     startWatcher: false,
@@ -180,6 +184,7 @@ test("runtime activity preserves monitor follow-up labels", async () => {
 test("runtime queueBabysit uses repo agent override when configured", async () => {
   const storage = new MemStorage();
   const runtime = createAppRuntime({
+    reclaimOrphanedWorktreesFn: async () => [],
     storage,
     startBackgroundServices: false,
     startWatcher: false,
@@ -201,6 +206,7 @@ test("runtime queueBabysit uses repo agent override when configured", async () =
 test("runtime exposes the latest PR agent run status", async () => {
   const storage = new MemStorage();
   const runtime = createAppRuntime({
+    reclaimOrphanedWorktreesFn: async () => [],
     storage,
     startBackgroundServices: false,
     startWatcher: false,
@@ -237,6 +243,7 @@ test("runtime exposes the latest PR agent run status", async () => {
 test("runtime setWatchEnabled updates the PR and emits a change event", async () => {
   const storage = new MemStorage();
   const runtime = createAppRuntime({
+    reclaimOrphanedWorktreesFn: async () => [],
     storage,
     startBackgroundServices: false,
     startWatcher: false,
@@ -263,6 +270,7 @@ test("runtime setWatchEnabled updates the PR and emits a change event", async ()
 test("runtime setDrainMode logs enable and disable transitions", async () => {
   const storage = new MemStorage();
   const runtime = createAppRuntime({
+    reclaimOrphanedWorktreesFn: async () => [],
     storage,
     startBackgroundServices: false,
     startWatcher: false,
@@ -305,6 +313,7 @@ test("runtime clears stale CLI-missing drain mode once the agent command is avai
 
     const storage = new MemStorage();
     const runtime = createAppRuntime({
+      reclaimOrphanedWorktreesFn: async () => [],
       storage,
       startBackgroundServices: false,
       startWatcher: false,
@@ -329,6 +338,7 @@ test("runtime clears stale CLI-missing drain mode once the agent command is avai
 test("runtime askQuestion persists the question and enqueues a durable job", async () => {
   const storage = new MemStorage();
   const runtime = createAppRuntime({
+    reclaimOrphanedWorktreesFn: async () => [],
     storage,
     startBackgroundServices: false,
     startWatcher: false,
@@ -357,6 +367,7 @@ test("runtime askQuestion persists the question and enqueues a durable job", asy
 test("runtime updateConfig persists updates and exposes them through getConfig", async () => {
   const storage = new MemStorage();
   const runtime = createAppRuntime({
+    reclaimOrphanedWorktreesFn: async () => [],
     storage,
     startBackgroundServices: false,
     startWatcher: false,
@@ -387,6 +398,7 @@ test("runtime updateConfig persists updates and exposes them through getConfig",
 test("manual sync runs immediately even when global manual mode is on", async () => {
   const storage = new MemStorage();
   const runtime = createAppRuntime({
+    reclaimOrphanedWorktreesFn: async () => [],
     storage,
     startBackgroundServices: false,
     startWatcher: false,
@@ -420,6 +432,7 @@ test("manual sync can target only PRs or only issues", async () => {
     },
   };
   const runtime = createAppRuntime({
+    reclaimOrphanedWorktreesFn: async () => [],
     storage,
     startBackgroundServices: false,
     startWatcher: false,
@@ -464,6 +477,7 @@ test("automatic watcher does not sync issues when issue automation is off", asyn
     },
   };
   const runtime = createAppRuntime({
+    reclaimOrphanedWorktreesFn: async () => [],
     storage,
     startBackgroundServices: false,
     startWatcher: false,
@@ -500,6 +514,7 @@ test("automatic watcher runs issue sync without PR sync when PR automation is of
     },
   };
   const runtime = createAppRuntime({
+    reclaimOrphanedWorktreesFn: async () => [],
     storage,
     startBackgroundServices: false,
     startWatcher: false,
@@ -537,6 +552,7 @@ test("automatic watcher does nothing when PR and issue automation are both off",
     },
   };
   const runtime = createAppRuntime({
+    reclaimOrphanedWorktreesFn: async () => [],
     storage,
     startBackgroundServices: false,
     startWatcher: false,
@@ -575,6 +591,7 @@ test("automatic watcher can run PR and issue automation together", async () => {
     },
   };
   const runtime = createAppRuntime({
+    reclaimOrphanedWorktreesFn: async () => [],
     storage,
     startBackgroundServices: false,
     startWatcher: false,
@@ -1012,6 +1029,7 @@ test("syncRepos skips the issue sweep for a repo whose issue list responds 304",
   };
 
   const runtime = createAppRuntime({
+    reclaimOrphanedWorktreesFn: async () => [],
     storage,
     startBackgroundServices: false,
     startWatcher: false,
@@ -1050,6 +1068,7 @@ test("listIssueCoverage reads persisted counts and does not call GitHub", async 
   });
 
   const runtime = createAppRuntime({
+    reclaimOrphanedWorktreesFn: async () => [],
     storage,
     startBackgroundServices: false,
     startWatcher: false,
@@ -1089,6 +1108,7 @@ test("syncRepos 304 probe does not fetch a GitHub open-issue count", async () =>
   };
 
   const runtime = createAppRuntime({
+    reclaimOrphanedWorktreesFn: async () => [],
     storage,
     startBackgroundServices: false,
     startWatcher: false,
@@ -1138,6 +1158,7 @@ test("syncRepos syncs issues and persists the new etag when the issue list chang
   };
 
   const runtime = createAppRuntime({
+    reclaimOrphanedWorktreesFn: async () => [],
     storage,
     startBackgroundServices: false,
     startWatcher: false,
@@ -1181,6 +1202,7 @@ test("listIssues stays cached-only when issue automation is off", async () => {
 
   let buildOctokitCalls = 0;
   const runtime = createAppRuntime({
+    reclaimOrphanedWorktreesFn: async () => [],
     storage,
     startBackgroundServices: false,
     startWatcher: false,
@@ -1234,6 +1256,7 @@ test("listIssues excludes closed worked issues from the default open issue count
   ], "2026-05-03T19:00:00.000Z");
 
   const runtime = createAppRuntime({
+    reclaimOrphanedWorktreesFn: async () => [],
     storage,
     startBackgroundServices: false,
     startWatcher: false,
@@ -1266,6 +1289,7 @@ test("getIssue stays cached-only when issue automation is off", async () => {
 
   let buildOctokitCalls = 0;
   const runtime = createAppRuntime({
+    reclaimOrphanedWorktreesFn: async () => [],
     storage,
     startBackgroundServices: false,
     startWatcher: false,
@@ -1338,6 +1362,7 @@ test("syncIssue refreshes worked issue metadata from GitHub", async () => {
   };
 
   const runtime = createAppRuntime({
+    reclaimOrphanedWorktreesFn: async () => [],
     storage,
     startBackgroundServices: false,
     startWatcher: false,
@@ -1393,6 +1418,7 @@ test("runtime exposes queued issue work as current run status", async () => {
   };
 
   const runtime = createAppRuntime({
+    reclaimOrphanedWorktreesFn: async () => [],
     storage,
     startBackgroundServices: false,
     startWatcher: false,
@@ -1419,6 +1445,7 @@ test("pickWatcherColdStartDelayMs stays within the 15-45s cold-start window", ()
 test("start() defers the first watcher tick instead of firing it during start", async () => {
   let watcherRuns = 0;
   const runtime = createAppRuntime({
+    reclaimOrphanedWorktreesFn: async () => [],
     storage: new MemStorage(),
     startBackgroundServices: false,
     startWatcher: true,
@@ -1447,6 +1474,7 @@ test("syncRepos persists an issue-sweep backoff when the probe fails", async () 
   };
 
   const runtime = createAppRuntime({
+    reclaimOrphanedWorktreesFn: async () => [],
     storage,
     startBackgroundServices: false,
     startWatcher: false,
@@ -1482,6 +1510,7 @@ test("syncRepos skips an issue sweep for a repo whose persisted backoff is activ
   };
 
   const runtime = createAppRuntime({
+    reclaimOrphanedWorktreesFn: async () => [],
     storage,
     startBackgroundServices: false,
     startWatcher: false,
@@ -1510,6 +1539,7 @@ test("syncRepos defers the next sweep for a repo whose issue list is unchanged",
   };
 
   const runtime = createAppRuntime({
+    reclaimOrphanedWorktreesFn: async () => [],
     storage,
     startBackgroundServices: false,
     startWatcher: false,

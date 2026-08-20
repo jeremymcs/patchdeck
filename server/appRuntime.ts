@@ -32,8 +32,9 @@ import type { IStorage } from "./storage";
 import { getDefaultStorage } from "./storage";
 import { PRBabysitter } from "./babysitter";
 import { resolveRepoAgentRuntimeSettings, resolveRepoCodingAgent } from "./agentSettings";
-import { commandExists, detectAgentUnavailability, type AgentUnavailabilityKind, type CodingAgent } from "./agentRunner";
+import { commandExists, detectAgentUnavailability, runCommand, type AgentUnavailabilityKind, type CodingAgent } from "./agentRunner";
 import { planFailedJobRecovery } from "./failureRecovery";
+import { reclaimOrphanedWorktrees } from "./repoWorkspace";
 import { applyEvaluationDecision, applyFlagDecision } from "./feedbackLifecycle";
 import { applyManualFeedbackDecision } from "./manualFeedback";
 import { childLogger } from "./logger";
@@ -112,6 +113,7 @@ export type AppRuntimeDependencies = {
   babysitter?: PRBabysitter;
   watcherScheduler?: WatcherScheduler;
   buildOctokitFn?: typeof buildOctokit;
+  reclaimOrphanedWorktreesFn?: typeof reclaimOrphanedWorktrees;
   startBackgroundServices?: boolean;
   startWatcher?: boolean;
 };
@@ -940,6 +942,7 @@ export function mapMergedPullsToReleaseSummaries(pulls: MergedPRSummary[]): Rele
 export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): AppRuntime {
   const storage = dependencies.storage ?? getDefaultStorage();
   const buildOctokitImpl = dependencies.buildOctokitFn ?? buildOctokit;
+  const reclaimOrphanedWorktreesImpl = dependencies.reclaimOrphanedWorktreesFn ?? reclaimOrphanedWorktrees;
   const events = new EventEmitter();
   const socialPostJobs = new Map<string, ReleaseSocialPost>();
   const backgroundJobQueue = dependencies.backgroundJobQueue ?? new BackgroundJobQueue(storage);
@@ -1054,6 +1057,34 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
   });
 
   /**
+   * Sweep worktrees stranded by runs that died without unwinding their cleanup.
+   *
+   * `includeActive` is only safe at startup, where the single-instance lock means
+   * nothing can legitimately hold a worktree. On the watcher tick we reclaim only
+   * what this process is not actively using.
+   */
+  const sweepOrphanedWorktrees = async (options: { includeActive?: boolean } = {}) => {
+    try {
+      const reclaimed = await reclaimOrphanedWorktreesImpl({
+        runCommand,
+        includeActive: options.includeActive,
+      });
+
+      for (const entry of reclaimed) {
+        log.info(
+          { repoCacheDir: entry.repoCacheDir, reclaimed: entry.reclaimed },
+          "Reclaimed orphaned git worktrees left by an interrupted run",
+        );
+      }
+    } catch (error) {
+      log.warn(
+        { err: error instanceof Error ? error.message : String(error) },
+        "Orphaned worktree sweep failed",
+      );
+    }
+  };
+
+  /**
    * Revive parked background jobs whose park interval has elapsed, and un-park
    * PRs whose work is actually still in flight. Without this, a job that ran out
    * of retries stays failed forever and its PR or issue is excluded from every
@@ -1132,6 +1163,7 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       // automation running unattended: whatever blocked a job may well have been
       // fixed since, and nothing else tells us that it was.
       await recoverParkedWork();
+      await sweepOrphanedWorktrees();
 
       const rateLimit = getRateLimitState("core");
       if (rateLimit.limited && rateLimit.resetAt) {
@@ -2313,6 +2345,9 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
       }
 
       if (startWatcher) {
+        // Runs interrupted by the last shutdown cannot have cleaned up after
+        // themselves, so clear their worktrees before anything claims a new one.
+        await sweepOrphanedWorktrees({ includeActive: true });
         await refreshWatcherSchedule();
         void babysitter.resumeInterruptedRuns();
         watcherColdStartTimer = setTimeout(() => {

@@ -995,3 +995,103 @@ test("process_release_run handler retries before parking the run as errored", as
     dispatcher.stop();
   }
 });
+
+test("work_issue handler keeps one status comment per issue instead of posting every attempt", async () => {
+  // Goal: a permanently failing issue used to collect a fresh "started" and "failed"
+  // comment on every attempt — dozens of identical notices on a single issue. The
+  // status comment is now edited in place.
+  const storage = new MemStorage();
+  await storage.updateConfig({
+    watchedRepos: ["acme/widgets"],
+    codingAgent: "claude",
+    postGitHubProgressReplies: true,
+    maxAgentRetryAttempts: 1,
+  });
+  const queue = new BackgroundJobQueue(storage);
+
+  const comments: Array<{ id: number; body: string }> = [];
+  let nextCommentId = 1;
+  let createCalls = 0;
+  let updateCalls = 0;
+
+  const octokit = {
+    issues: {
+      get: async () => ({
+        data: {
+          number: 21,
+          title: "Broken widget",
+          body: "It broke",
+          html_url: "https://github.com/acme/widgets/issues/21",
+          user: { login: "alice" },
+          labels: [{ name: "bug" }],
+          assignees: [],
+          comments: 0,
+          created_at: "2026-08-03T17:00:00.000Z",
+          updated_at: "2026-08-03T18:00:00.000Z",
+        },
+      }),
+      listComments: async () => ({ data: comments.map((c) => ({ id: c.id, body: c.body })) }),
+      createComment: async (params: { body: string }) => {
+        createCalls += 1;
+        const entry = { id: nextCommentId++, body: params.body };
+        comments.push(entry);
+        return { data: { id: entry.id } };
+      },
+      updateComment: async (params: { comment_id: number; body: string }) => {
+        updateCalls += 1;
+        const target = comments.find((c) => c.id === params.comment_id);
+        if (target) {
+          target.body = params.body;
+        }
+        return { data: { id: params.comment_id } };
+      },
+    },
+  };
+
+  const runJob = async () => {
+    const job = await queue.enqueue("work_issue", "acme/widgets#21", `work_issue:acme/widgets#21:${nextCommentId}`, {
+      repo: "acme/widgets",
+      issueNumber: 21,
+      issueTitle: "Broken widget",
+      issueUrl: "https://github.com/acme/widgets/issues/21",
+      baseBranch: "main",
+    });
+
+    const dispatcher = new BackgroundJobDispatcher({
+      storage,
+      queue,
+      workerId: "dispatcher-1",
+      pollIntervalMs: 5,
+      leaseMs: 30_000,
+      heartbeatIntervalMs: 10,
+      retryBackoffMs: 0,
+      handlers: createBackgroundJobHandlers({
+        storage,
+        deps: {
+          buildOctokitFn: async () => octokit as never,
+          resolveGitHubAuthTokenFn: async () => "gho_token",
+          runIssueWorkRepairFn: async () => {
+            throw new Error("Refusing to reclone repo cache while 22 registered worktree(s) still exist");
+          },
+        },
+      }),
+    });
+
+    try {
+      await dispatcher.start();
+      await waitForCondition(async () => (await storage.getBackgroundJob(job.id))?.status === "failed", 1_000);
+    } finally {
+      dispatcher.stop();
+    }
+  };
+
+  await runJob();
+  await runJob();
+  await runJob();
+
+  assert.equal(createCalls, 1, "three failing runs must not produce three new comments");
+  assert.ok(updateCalls > 0, "later status changes edit the existing comment");
+  assert.equal(comments.length, 1);
+  assert.match(comments[0]?.body ?? "", /Issue work failed/);
+  assert.match(comments[0]?.body ?? "", /registered worktree/);
+});
