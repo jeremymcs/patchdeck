@@ -759,7 +759,7 @@ function IssuesPage() {
   const isGitHubThrottled = githubRateLimit?.limited === true;
   const { data: issueCoverage = [] } = useQuery<IssueCoverageRow[]>({
     queryKey: ["/api/issues/coverage"],
-    enabled: config !== undefined && !globalDrainMode && !isGitHubThrottled,
+    enabled: config !== undefined && !globalDrainMode,
     refetchInterval: uiPollIntervalMs,
   });
   const queueStatusById = useMemo(() => buildQueueStatusIndex(activities), [activities]);

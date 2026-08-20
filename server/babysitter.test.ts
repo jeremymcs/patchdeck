@@ -620,6 +620,84 @@ test("syncAndBabysitTrackedRepos reuses the cached PR list on a conditional 304"
   assert.equal(fullFetchCalls, 0, "a 304 with a warm cache must not trigger a full PR-list fetch");
 });
 
+test("syncAndBabysitTrackedRepos reuses a persisted PR list after a process restart", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig({ watchedRepos: ["octo/example"] });
+
+  const samplePull = {
+    number: 1,
+    title: "Tracked PR",
+    body: null,
+    bodyHtml: null,
+    branch: "feature/x",
+    author: "octocat",
+    url: "https://github.com/octo/example/pull/1",
+    repoFullName: "octo/example",
+    repoCloneUrl: "https://github.com/octo/example.git",
+    headSha: "head1",
+    headRef: "feature/x",
+    headRepoFullName: "octo/example",
+    headRepoCloneUrl: "https://github.com/octo/example.git",
+    baseRef: "main",
+    baseSha: "base1",
+    mergeable: null,
+    mergeableState: null,
+    merged: false,
+    mergedAt: null,
+    closedAt: null,
+    mergeCommitSha: null,
+  };
+
+  const runtime = {
+    resolveAgent: async () => "codex" as const,
+    ciPollIntervalMs: 0,
+    evaluateFixNecessityWithAgent: async () => ({ needsFix: false, reason: "unused" }),
+    applyFixesWithAgent: async () => ({ code: 0, stdout: "", stderr: "" }),
+    runCommand: async () => ({ code: 0, stdout: "", stderr: "" }),
+  };
+
+  const first = new PRBabysitter(
+    storage,
+    makeWatcherGitHubService({
+      listOpenPullsForRepoConditional: async () => ({
+        notModified: false as const,
+        etag: 'W/"pulls-v1"',
+        pulls: [samplePull],
+      }),
+    }),
+    runtime,
+  );
+  await first.syncAndBabysitTrackedRepos();
+
+  let fullFetchCalls = 0;
+  let sentEtag: string | null | undefined;
+  const restarted = new PRBabysitter(
+    storage,
+    makeWatcherGitHubService({
+      listOpenPullsForRepo: async () => {
+        fullFetchCalls += 1;
+        return [];
+      },
+      listOpenPullsForRepoConditional: async (
+        _octokit: unknown,
+        _repo: unknown,
+        cachedEtag: string | null,
+      ) => {
+        sentEtag = cachedEtag;
+        return { notModified: true as const };
+      },
+    }),
+    runtime,
+  );
+  await restarted.syncAndBabysitTrackedRepos();
+
+  assert.equal(sentEtag, 'W/"pulls-v1"');
+  assert.equal(fullFetchCalls, 0, "a 304 after restart must reuse the persisted list, not paginate again");
+  const stored = await storage.getGithubEtagRecord("prs:open:octo/example");
+  assert.equal(stored?.etag, 'W/"pulls-v1"');
+  assert.ok(stored?.payload?.includes('"number":1'));
+});
+
 test("syncAndBabysitTrackedRepos persists a backoff when listing open PRs fails", async () => {
   const storage = new MemStorage();
   await storage.updateConfig({ watchedRepos: ["octo/example"] });

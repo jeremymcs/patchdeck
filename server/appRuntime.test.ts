@@ -1026,6 +1026,83 @@ test("syncRepos skips the issue sweep for a repo whose issue list responds 304",
   assert.equal(synced.items.length, 0, "a 304 must not sync any issues");
 });
 
+test("listIssueCoverage reads persisted counts and does not call GitHub", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig({ watchedRepos: ["owner/repo"] });
+  await storage.upsertSyncedIssues("owner/repo", [{
+    number: 7,
+    title: "Issue 7",
+    body: null,
+    bodyHtml: null,
+    url: "https://github.com/owner/repo/issues/7",
+    repoFullName: "owner/repo",
+    repoCloneUrl: "https://github.com/owner/repo.git",
+    author: "alice",
+    labels: [],
+    assignees: [],
+    comments: 0,
+    createdAt: "2026-05-03T17:00:00.000Z",
+    updatedAt: "2026-05-03T18:00:00.000Z",
+  }], "2026-05-03T18:00:00.000Z");
+  await storage.upsertRepoSyncState("owner/repo", "issues", {
+    lastSyncedAt: "2026-05-03T18:00:00.000Z",
+    githubOpenCount: 12,
+  });
+
+  const runtime = createAppRuntime({
+    storage,
+    startBackgroundServices: false,
+    startWatcher: false,
+    babysitter: { syncAndBabysitTrackedRepos: async () => {} } as never,
+    buildOctokitFn: async () => {
+      throw new Error("listIssueCoverage must not build an Octokit client");
+    },
+  });
+
+  const coverage = await runtime.listIssueCoverage();
+  assert.deepEqual(coverage, [{
+    repo: "owner/repo",
+    syncedOpenCount: 1,
+    githubOpenCount: 12,
+    lastSyncedAt: "2026-05-03T18:00:00.000Z",
+  }]);
+});
+
+test("syncRepos 304 probe does not fetch a GitHub open-issue count", async () => {
+  const storage = new MemStorage();
+  await storage.updateConfig({ watchedRepos: ["owner/repo"] });
+  await storage.upsertRepoSyncState("owner/repo", "issues", { githubOpenCount: 9 });
+
+  let graphqlCalls = 0;
+  const fakeOctokit = {
+    issues: {
+      listForRepo: async () => {
+        const error = new Error("Not modified") as Error & { status: number };
+        error.status = 304;
+        throw error;
+      },
+    },
+    graphql: async () => {
+      graphqlCalls += 1;
+      return { repository: { issues: { totalCount: 99 } } };
+    },
+  };
+
+  const runtime = createAppRuntime({
+    storage,
+    startBackgroundServices: false,
+    startWatcher: false,
+    babysitter: { syncAndBabysitTrackedRepos: async () => {} } as never,
+    buildOctokitFn: async () => fakeOctokit as never,
+  });
+
+  await runtime.syncRepos();
+
+  assert.equal(graphqlCalls, 0, "a 304 must not spend GraphQL on a count we already have");
+  const state = (await storage.getRepoSyncStates("issues"))[0];
+  assert.equal(state?.githubOpenCount, 9);
+});
+
 test("syncRepos syncs issues and persists the new etag when the issue list changed", async () => {
   const storage = new MemStorage();
   await storage.updateConfig({ watchedRepos: ["owner/repo"] });
@@ -1042,12 +1119,21 @@ test("syncRepos syncs issues and persists the new etag when the issue list chang
     created_at: "2026-05-03T17:00:00.000Z",
     updated_at: "2026-05-03T18:00:00.000Z",
   };
+  let graphqlCalls = 0;
+  let listForRepoCalls = 0;
   const fakeOctokit = {
     issues: {
-      listForRepo: async () => ({
-        data: [issuePayload],
-        headers: { etag: 'W/"issues-v1"' },
-      }),
+      listForRepo: async () => {
+        listForRepoCalls += 1;
+        return {
+          data: [issuePayload],
+          headers: { etag: 'W/"issues-v1"' },
+        };
+      },
+    },
+    graphql: async () => {
+      graphqlCalls += 1;
+      return { repository: { issues: { totalCount: 4 } } };
     },
   };
 
@@ -1069,6 +1155,9 @@ test("syncRepos syncs issues and persists the new etag when the issue list chang
     'W/"issues-v1"',
     "a successful sweep should persist the fresh etag for next tick",
   );
+  assert.equal(graphqlCalls, 1);
+  assert.equal(listForRepoCalls, 1, "a changed issue list must reuse the probe page instead of fetching page 1 twice");
+  assert.equal((await storage.getRepoSyncStates("issues"))[0]?.githubOpenCount, 4);
 });
 
 test("listIssues stays cached-only when issue automation is off", async () => {

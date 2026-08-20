@@ -204,7 +204,7 @@ const REVIEW_THREADS_QUERY = `
           nodes {
             id
             isResolved
-            comments(first: 100) {
+            comments(first: 20) {
               nodes {
                 databaseId
               }
@@ -258,6 +258,15 @@ const RESOLVE_REVIEW_THREAD_MUTATION = `
       thread {
         id
         isResolved
+      }
+    }
+  }
+`;
+const OPEN_ISSUE_COUNT_QUERY = `
+  query CodeFactoryOpenIssueCount($owner: String!, $repo: String!) {
+    repository(owner: $owner, name: $repo) {
+      issues(states: OPEN) {
+        totalCount
       }
     }
   }
@@ -602,13 +611,33 @@ async function enrichCheckRunsWithGitHubActionsSteps(
   return enrichedRuns;
 }
 
-export async function fetchCheckSnapshotsForRef(
+type LoadedCommitChecks = {
+  statuses: GitHubCommitStatusResponse[];
+  checkRuns: GitHubCheckRunResponse[];
+  settled: boolean;
+  failures: GitHubStatusFailure[];
+};
+
+const commitCheckCache = new WeakMap<object, Map<string, LoadedCommitChecks>>();
+
+function commitCheckCacheKey(repo: ParsedRepoSlug, sha: string): string {
+  return `${repo.owner}/${repo.repo}@${sha}`;
+}
+
+function invalidateCommitCheckCache(octokit: object, repo: ParsedRepoSlug, sha: string): void {
+  commitCheckCache.get(octokit)?.delete(commitCheckCacheKey(repo, sha));
+}
+
+async function loadCommitCheckState(
   octokit: Octokit,
   repo: ParsedRepoSlug,
-  prId: string,
   headSha: string,
-): Promise<CheckSnapshot[]> {
-  if (!headSha) return [];
+): Promise<LoadedCommitChecks> {
+  const key = commitCheckCacheKey(repo, headSha);
+  const cached = commitCheckCache.get(octokit)?.get(key);
+  if (cached?.settled) {
+    return cached;
+  }
 
   const [statusResponse, checkRunsResponse] = await Promise.all([
     withGitHubErrorHandling("commit statuses", repo, () => octokit.repos.getCombinedStatusForRef({
@@ -623,16 +652,61 @@ export async function fetchCheckSnapshotsForRef(
     })),
   ]);
 
+  const statuses = (statusResponse.data.statuses ?? []) as GitHubCommitStatusResponse[];
+  const checkRuns = (checkRunsResponse.data.check_runs ?? []) as GitHubCheckRunResponse[];
+  const failures: GitHubStatusFailure[] = [
+    ...statuses
+      .filter((status) => status.state === "failure" || status.state === "error")
+      .map((status) => ({
+        context: status.context || "status-check",
+        description: status.description || "Failed status check",
+        targetUrl: status.target_url || null,
+      })),
+    ...checkRuns
+      .filter((run) => run.conclusion === "failure" || run.conclusion === "timed_out" || run.conclusion === "cancelled")
+      .map((run) => ({
+        context: run.name || "check-run",
+        description: run.output?.summary || run.output?.title || `Check run ${run.conclusion}`,
+        targetUrl: run.html_url || null,
+      })),
+  ];
+  const hasAnyChecks = statuses.length > 0 || checkRuns.length > 0;
+  const hasPending = statuses.some((status) => status.state === "pending")
+    || checkRuns.some((run) => run.status !== "completed");
+  const loaded: LoadedCommitChecks = {
+    statuses,
+    checkRuns,
+    settled: hasAnyChecks && !hasPending,
+    failures,
+  };
+  let bucket = commitCheckCache.get(octokit);
+  if (!bucket) {
+    bucket = new Map();
+    commitCheckCache.set(octokit, bucket);
+  }
+  bucket.set(key, loaded);
+  return loaded;
+}
+
+export async function fetchCheckSnapshotsForRef(
+  octokit: Octokit,
+  repo: ParsedRepoSlug,
+  prId: string,
+  headSha: string,
+): Promise<CheckSnapshot[]> {
+  if (!headSha) return [];
+
+  const loaded = await loadCommitCheckState(octokit, repo, headSha);
   const checkRuns = await enrichCheckRunsWithGitHubActionsSteps(
     octokit,
     repo,
-    (checkRunsResponse.data.check_runs ?? []) as GitHubCheckRunResponse[],
+    loaded.checkRuns,
   );
 
   return normalizeCheckSnapshotsFromRef({
     prId,
     sha: headSha,
-    statuses: (statusResponse.data.statuses ?? []) as GitHubCommitStatusResponse[],
+    statuses: loaded.statuses,
     checkRuns,
   });
 }
@@ -686,6 +760,10 @@ export async function rerunFailedGitHubActionsRunsForSnapshots(
   }
 
   const reruns = Array.from(byRunId.values());
+  const shas = Array.from(new Set(snapshots.map((snapshot) => snapshot.sha).filter((sha) => Boolean(sha))));
+  for (const sha of shas) {
+    invalidateCommitCheckCache(octokit, repo, sha);
+  }
   for (const rerun of reruns) {
     await withGitHubErrorHandling("rerun failed workflow jobs", repo, () =>
       octokit.rest.actions.reRunWorkflowFailedJobs({
@@ -2162,6 +2240,96 @@ export async function postFollowUpForFeedbackItem(
   await replyToIssueComment(octokit, parsed, body);
 }
 
+export type FeedbackListEtags = {
+  reviewComments: string | null;
+  reviews: string | null;
+  issueComments: string | null;
+};
+
+async function probeListEtag(
+  context: string,
+  parsed: ParsedPRUrl,
+  cachedEtag: string | null,
+  request: (headers: Record<string, string>) => Promise<{ headers?: { etag?: string } }>,
+): Promise<{ notModified: true } | { notModified: false; etag: string | null }> {
+  return withGitHubErrorHandling(context, parsed, async () => {
+    try {
+      const response = await request(cachedEtag ? { "if-none-match": cachedEtag } : {});
+      const etag = typeof response.headers?.etag === "string" ? response.headers.etag : null;
+      return { notModified: false, etag };
+    } catch (error) {
+      if ((error as { status?: number } | undefined)?.status === 304) {
+        return { notModified: true };
+      }
+      throw error;
+    }
+  });
+}
+
+export async function fetchFeedbackItemsForPRIfChanged(
+  octokit: Octokit,
+  parsed: ParsedPRUrl,
+  config: Config,
+  etags: FeedbackListEtags,
+): Promise<{ notModified: true } | { notModified: false; items: FeedbackItem[]; etags: FeedbackListEtags }> {
+  const canProbe = typeof octokit.pulls?.listReviewComments === "function"
+    && typeof octokit.pulls?.listReviews === "function"
+    && typeof octokit.issues?.listComments === "function";
+
+  if (canProbe) {
+    const [reviewComments, reviews, issueComments] = await Promise.all([
+      probeListEtag("review comments", parsed, etags.reviewComments, (headers) =>
+        octokit.pulls.listReviewComments({
+          owner: parsed.owner,
+          repo: parsed.repo,
+          pull_number: parsed.number,
+          per_page: 100,
+          page: 1,
+          headers,
+        }),
+      ),
+      probeListEtag("reviews", parsed, etags.reviews, (headers) =>
+        octokit.pulls.listReviews({
+          owner: parsed.owner,
+          repo: parsed.repo,
+          pull_number: parsed.number,
+          per_page: 100,
+          page: 1,
+          headers,
+        }),
+      ),
+      probeListEtag("issue comments", parsed, etags.issueComments, (headers) =>
+        octokit.issues.listComments({
+          owner: parsed.owner,
+          repo: parsed.repo,
+          issue_number: parsed.number,
+          per_page: 100,
+          page: 1,
+          headers,
+        }),
+      ),
+    ]);
+
+    if (reviewComments.notModified && reviews.notModified && issueComments.notModified) {
+      return { notModified: true };
+    }
+
+    const items = await fetchFeedbackItemsForPR(octokit, parsed, config);
+    return {
+      notModified: false,
+      items,
+      etags: {
+        reviewComments: reviewComments.notModified ? etags.reviewComments : reviewComments.etag,
+        reviews: reviews.notModified ? etags.reviews : reviews.etag,
+        issueComments: issueComments.notModified ? etags.issueComments : issueComments.etag,
+      },
+    };
+  }
+
+  const items = await fetchFeedbackItemsForPR(octokit, parsed, config);
+  return { notModified: false, items, etags };
+}
+
 export async function fetchFeedbackItemsForPR(
   octokit: Octokit,
   parsed: ParsedPRUrl,
@@ -2394,6 +2562,26 @@ export async function listOpenPullsForRepoConditional(
   });
 }
 
+export async function fetchOpenIssueCount(
+  octokit: Octokit,
+  repo: ParsedRepoSlug,
+): Promise<number | null> {
+  const response = await withGitHubErrorHandling("open issue count", repo, () =>
+    octokit.graphql<{
+      repository?: {
+        issues?: {
+          totalCount?: number | null;
+        } | null;
+      } | null;
+    }>(OPEN_ISSUE_COUNT_QUERY, {
+      owner: repo.owner,
+      repo: repo.repo,
+    }),
+  );
+  const count = response.repository?.issues?.totalCount;
+  return typeof count === "number" && Number.isFinite(count) ? count : null;
+}
+
 export async function listOpenIssuesForRepo(
   octokit: Octokit,
   repo: ParsedRepoSlug,
@@ -2498,6 +2686,105 @@ export async function listOpenIssuesForRepo(
 export type RepoIssuesProbeResult =
   | { notModified: true }
   | { notModified: false; etag: string | null };
+
+export type ConditionalIssueList =
+  | { notModified: true }
+  | { notModified: false; etag: string | null; items: GitHubIssueSummary[]; hasMore: boolean };
+
+type GitHubIssueListItem = Awaited<ReturnType<Octokit["issues"]["listForRepo"]>>["data"][number];
+
+function mapIssueListItem(issue: GitHubIssueListItem, repo: ParsedRepoSlug): GitHubIssueSummary | null {
+  if (issue.pull_request) return null;
+  return {
+    number: issue.number,
+    title: issue.title || `Issue #${issue.number}`,
+    body: typeof issue.body === "string" ? issue.body : null,
+    bodyHtml: typeof issue.body === "string" ? renderGitHubMarkdown(issue.body) : null,
+    url: issue.html_url || `https://github.com/${repo.owner}/${repo.repo}/issues/${issue.number}`,
+    repoFullName: `${repo.owner}/${repo.repo}`,
+    repoCloneUrl: `https://github.com/${repo.owner}/${repo.repo}.git`,
+    author: issue.user?.login || "",
+    labels: Array.isArray(issue.labels)
+      ? issue.labels
+          .map((label) => (typeof label === "string" ? label : label?.name ?? ""))
+          .filter((label): label is string => Boolean(label))
+      : [],
+    assignees: Array.isArray(issue.assignees)
+      ? issue.assignees
+          .map((assignee) => assignee?.login || "")
+          .filter((assignee): assignee is string => Boolean(assignee))
+      : [],
+    comments: typeof issue.comments === "number" ? issue.comments : 0,
+    createdAt: issue.created_at || new Date().toISOString(),
+    updatedAt: issue.updated_at || issue.created_at || new Date().toISOString(),
+  };
+}
+
+/**
+ * Conditional GET of a repo's open issues. Page 1 carries `If-None-Match`; a
+ * 304 means the list is unchanged and costs no primary rate-limit budget. A
+ * 200 reuses that page instead of fetching page 1 twice.
+ */
+export async function listOpenIssuesForRepoConditional(
+  octokit: Octokit,
+  repo: ParsedRepoSlug,
+  cachedEtag: string | null,
+  options: { offset: number; limit: number } = { offset: 0, limit: 100 },
+): Promise<ConditionalIssueList> {
+  if (typeof octokit.issues?.listForRepo !== "function" || options.offset > 0) {
+    const page = await listOpenIssuesForRepo(octokit, repo, options);
+    return { notModified: false, etag: null, ...page };
+  }
+
+  return withGitHubErrorHandling("open issues", repo, async () => {
+    const perPage = 100;
+    const desired = options.limit + 1;
+    const collected: GitHubIssueSummary[] = [];
+    let firstPageEtag: string | null = null;
+
+    for (let page = 1; ; page += 1) {
+      let response;
+      try {
+        response = await octokit.issues.listForRepo({
+          owner: repo.owner,
+          repo: repo.repo,
+          state: "open",
+          sort: "updated",
+          direction: "desc",
+          per_page: perPage,
+          page,
+          ...(page === 1 && cachedEtag ? { headers: { "if-none-match": cachedEtag } } : {}),
+        });
+      } catch (error) {
+        if (page === 1 && (error as { status?: number } | undefined)?.status === 304) {
+          return { notModified: true };
+        }
+        throw error;
+      }
+
+      if (page === 1) {
+        const etag = response.headers?.etag;
+        firstPageEtag = typeof etag === "string" ? etag : null;
+      }
+
+      for (const issue of response.data) {
+        const mapped = mapIssueListItem(issue, repo);
+        if (mapped) collected.push(mapped);
+      }
+
+      if (response.data.length < perPage || collected.length >= desired) {
+        break;
+      }
+    }
+
+    return {
+      notModified: false,
+      etag: firstPageEtag,
+      items: collected.slice(0, options.limit),
+      hasMore: collected.length > options.limit,
+    };
+  });
+}
 
 /**
  * Conditional GET of a repo's open-issue list (page 1, sorted by `updated`).
@@ -2731,40 +3018,8 @@ export async function listFailingStatuses(
   headSha: string,
 ): Promise<GitHubStatusFailure[]> {
   if (!headSha) return [];
-
-  // Fetch both commit statuses AND check runs in parallel.
-  // GitHub Actions CI/CD reports results as check runs (Checks API),
-  // while some integrations use the older commit status API.
-  const [statusResponse, checkRunsResponse] = await Promise.all([
-    withGitHubErrorHandling("commit statuses", repo, () => octokit.repos.getCombinedStatusForRef({
-      owner: repo.owner,
-      repo: repo.repo,
-      ref: headSha,
-    })),
-    withGitHubErrorHandling("check runs", repo, () => octokit.checks.listForRef({
-      owner: repo.owner,
-      repo: repo.repo,
-      ref: headSha,
-    })),
-  ]);
-
-  const fromStatuses: GitHubStatusFailure[] = statusResponse.data.statuses
-    .filter((status) => status.state === "failure" || status.state === "error")
-    .map((status) => ({
-      context: status.context || "status-check",
-      description: status.description || "Failed status check",
-      targetUrl: status.target_url || null,
-    }));
-
-  const fromCheckRuns: GitHubStatusFailure[] = checkRunsResponse.data.check_runs
-    .filter((run) => run.conclusion === "failure" || run.conclusion === "timed_out" || run.conclusion === "cancelled")
-    .map((run) => ({
-      context: run.name,
-      description: run.output?.summary || run.output?.title || `Check run ${run.conclusion}`,
-      targetUrl: run.html_url || null,
-    }));
-
-  return [...fromStatuses, ...fromCheckRuns];
+  const loaded = await loadCommitCheckState(octokit, repo, headSha);
+  return loaded.failures;
 }
 
 /**
@@ -2778,26 +3033,9 @@ export async function checkCISettled(
   headSha: string,
 ): Promise<boolean> {
   if (!headSha) return false;
-
   try {
-    const [statusResp, checkResp] = await Promise.all([
-      withGitHubErrorHandling("commit statuses (settled check)", repo, () => octokit.repos.getCombinedStatusForRef({
-        owner: repo.owner,
-        repo: repo.repo,
-        ref: headSha,
-      })),
-      withGitHubErrorHandling("check runs (settled check)", repo, () => octokit.checks.listForRef({
-        owner: repo.owner,
-        repo: repo.repo,
-        ref: headSha,
-      })),
-    ]);
-
-    const hasPendingStatus = statusResp.data.statuses.some((s) => s.state === "pending");
-    const hasPendingCheck = checkResp.data.check_runs.some((r) => r.status !== "completed");
-    const hasAnyChecks = statusResp.data.statuses.length > 0 || checkResp.data.check_runs.length > 0;
-
-    return hasAnyChecks && !hasPendingStatus && !hasPendingCheck;
+    const loaded = await loadCommitCheckState(octokit, repo, headSha);
+    return loaded.settled;
   } catch {
     return false;
   }
@@ -2820,45 +3058,8 @@ export async function fetchCiPollResult(
   headSha: string,
 ): Promise<CiPollResult> {
   if (!headSha) return { settled: false, failures: [] };
-
-  const [statusResponse, checkRunsResponse] = await Promise.all([
-    withGitHubErrorHandling("commit statuses", repo, () => octokit.repos.getCombinedStatusForRef({
-      owner: repo.owner,
-      repo: repo.repo,
-      ref: headSha,
-    })),
-    withGitHubErrorHandling("check runs", repo, () => octokit.checks.listForRef({
-      owner: repo.owner,
-      repo: repo.repo,
-      ref: headSha,
-    })),
-  ]);
-
-  const statuses = statusResponse.data.statuses;
-  const checkRuns = checkRunsResponse.data.check_runs;
-
-  const failures: GitHubStatusFailure[] = [
-    ...statuses
-      .filter((status) => status.state === "failure" || status.state === "error")
-      .map((status) => ({
-        context: status.context || "status-check",
-        description: status.description || "Failed status check",
-        targetUrl: status.target_url || null,
-      })),
-    ...checkRuns
-      .filter((run) => run.conclusion === "failure" || run.conclusion === "timed_out" || run.conclusion === "cancelled")
-      .map((run) => ({
-        context: run.name,
-        description: run.output?.summary || run.output?.title || `Check run ${run.conclusion}`,
-        targetUrl: run.html_url || null,
-      })),
-  ];
-
-  const hasAnyChecks = statuses.length > 0 || checkRuns.length > 0;
-  const hasPending = statuses.some((s) => s.state === "pending")
-    || checkRuns.some((r) => r.status !== "completed");
-
-  return { settled: hasAnyChecks && !hasPending, failures };
+  const loaded = await loadCommitCheckState(octokit, repo, headSha);
+  return { settled: loaded.settled, failures: loaded.failures };
 }
 
 export type MergedPRSummary = {
@@ -2908,35 +3109,80 @@ export async function listMergedPullsSince(
   const sinceMergedAtMs = parseDateMs(options?.sinceMergedAt);
   const sinceMergeCommitSha = options?.sinceMergeCommitSha?.trim() || null;
 
-  const pulls = await withGitHubErrorHandling("merged pull requests", repo, () =>
-    octokit.paginate(octokit.pulls.list, {
-      owner: repo.owner,
-      repo: repo.repo,
-      state: "closed",
-      base: baseRef,
-      sort: "updated",
-      direction: "desc",
-      per_page: 100,
-    }),
-  );
+  if (typeof octokit.pulls?.list !== "function") {
+    const pulls = await withGitHubErrorHandling("merged pull requests", repo, () =>
+      octokit.paginate(octokit.pulls.list, {
+        owner: repo.owner,
+        repo: repo.repo,
+        state: "closed",
+        base: baseRef,
+        sort: "updated",
+        direction: "desc",
+        per_page: 100,
+      }),
+    );
 
-  const merged = pulls
-    .map((pull) => normalizeMergedPullSummary(pull, repo))
-    .filter((pull): pull is MergedPRSummary => Boolean(pull))
-    .filter((pull) => {
-      if (sinceMergedAtMs === null) return true;
-      return Date.parse(pull.mergedAt) > sinceMergedAtMs;
-    });
+    const merged = pulls
+      .map((pull) => normalizeMergedPullSummary(pull, repo))
+      .filter((pull): pull is MergedPRSummary => Boolean(pull))
+      .filter((pull) => {
+        if (sinceMergedAtMs === null) return true;
+        return Date.parse(pull.mergedAt) > sinceMergedAtMs;
+      });
 
-  let boundedBySha = merged;
-  if (sinceMergeCommitSha) {
-    const boundaryIndex = merged.findIndex((pull) => pull.mergeCommitSha === sinceMergeCommitSha);
-    if (boundaryIndex >= 0) {
-      boundedBySha = merged.slice(0, boundaryIndex);
+    let boundedBySha = merged;
+    if (sinceMergeCommitSha) {
+      const boundaryIndex = merged.findIndex((pull) => pull.mergeCommitSha === sinceMergeCommitSha);
+      if (boundaryIndex >= 0) {
+        boundedBySha = merged.slice(0, boundaryIndex);
+      }
     }
+
+    return boundedBySha.sort((a, b) => Date.parse(a.mergedAt) - Date.parse(b.mergedAt));
   }
 
-  return boundedBySha.sort((a, b) => Date.parse(a.mergedAt) - Date.parse(b.mergedAt));
+  return withGitHubErrorHandling("merged pull requests", repo, async () => {
+    const perPage = 100;
+    const collected: MergedPRSummary[] = [];
+
+    for (let page = 1; ; page += 1) {
+      const response = await octokit.pulls.list({
+        owner: repo.owner,
+        repo: repo.repo,
+        state: "closed",
+        base: baseRef,
+        sort: "updated",
+        direction: "desc",
+        per_page: perPage,
+        page,
+      });
+      const pageItems = response.data;
+      let foundShaBoundary = false;
+      let pageAllOlderThanSince = sinceMergedAtMs !== null && pageItems.length > 0;
+
+      for (const pull of pageItems) {
+        const updatedMs = Date.parse(pull.updated_at || pull.merged_at || "");
+        if (sinceMergedAtMs === null || !Number.isFinite(updatedMs) || updatedMs > sinceMergedAtMs) {
+          pageAllOlderThanSince = false;
+        }
+        if (foundShaBoundary) continue;
+        if (sinceMergeCommitSha && pull.merge_commit_sha === sinceMergeCommitSha) {
+          foundShaBoundary = true;
+          continue;
+        }
+        const summary = normalizeMergedPullSummary(pull, repo);
+        if (!summary) continue;
+        if (sinceMergedAtMs !== null && Date.parse(summary.mergedAt) <= sinceMergedAtMs) continue;
+        collected.push(summary);
+      }
+
+      if (foundShaBoundary || pageItems.length < perPage || pageAllOlderThanSince) {
+        break;
+      }
+    }
+
+    return collected.sort((a, b) => Date.parse(a.mergedAt) - Date.parse(b.mergedAt));
+  });
 }
 
 export async function listUnreleasedMergedPulls(

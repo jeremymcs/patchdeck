@@ -10,8 +10,10 @@ import {
   buildFeedbackAuditToken,
   checkOnboardingStatus,
   fetchCheckSnapshotsForRef,
+  fetchCiPollResult,
   createGitHubRelease,
   fetchFeedbackItemsForPR,
+  fetchFeedbackItemsForPRIfChanged,
   fetchIssueSummary,
   fetchPullCloseState,
   fetchPullSummary,
@@ -23,6 +25,8 @@ import {
   listOpenPullsForRepo,
   listOpenPullsForRepoConditional,
   probeRepoIssuesChanged,
+  listOpenIssuesForRepoConditional,
+  fetchOpenIssueCount,
   listMergedPullsSince,
   listReleasesForRepo,
   listTagsForRepo,
@@ -825,6 +829,75 @@ test("fetchCheckSnapshotsForRef bounds parallel GitHub Actions job detail reques
   );
 });
 
+test("settled commit checks are fetched once per SHA and reused across helpers", async () => {
+  let statusCalls = 0;
+  let checkCalls = 0;
+  const octokit = {
+    repos: {
+      getCombinedStatusForRef: async () => {
+        statusCalls += 1;
+        return {
+          data: {
+            statuses: [{
+              state: "success",
+              context: "ci",
+              description: "ok",
+              target_url: null,
+            }],
+          },
+        };
+      },
+    },
+    checks: {
+      listForRef: async () => {
+        checkCalls += 1;
+        return { data: { check_runs: [] } };
+      },
+    },
+  };
+
+  const repo = { owner: "owner", repo: "cache-repo" };
+  const first = await fetchCiPollResult(octokit as never, repo, "sha-settled");
+  const second = await fetchCiPollResult(octokit as never, repo, "sha-settled");
+  await fetchCheckSnapshotsForRef(octokit as never, repo, "pr-1", "sha-settled");
+
+  assert.equal(first.settled, true);
+  assert.equal(second.settled, true);
+  assert.equal(statusCalls, 1);
+  assert.equal(checkCalls, 1);
+});
+
+test("unsettled commit checks are refetched on the next call", async () => {
+  let statusCalls = 0;
+  const octokit = {
+    repos: {
+      getCombinedStatusForRef: async () => {
+        statusCalls += 1;
+        return {
+          data: {
+            statuses: [{
+              state: statusCalls === 1 ? "pending" : "success",
+              context: "ci",
+              description: "ok",
+              target_url: null,
+            }],
+          },
+        };
+      },
+    },
+    checks: {
+      listForRef: async () => ({ data: { check_runs: [] } }),
+    },
+  };
+
+  const repo = { owner: "owner", repo: "pending-repo" };
+  const first = await fetchCiPollResult(octokit as never, repo, "sha-pending");
+  const second = await fetchCiPollResult(octokit as never, repo, "sha-pending");
+  assert.equal(first.settled, false);
+  assert.equal(second.settled, true);
+  assert.equal(statusCalls, 2);
+});
+
 test("listOpenPullsForRepo retries transient GitHub connection resets", async () => {
   let attempts = 0;
   const octokit = {
@@ -1069,6 +1142,69 @@ test("probeRepoIssuesChanged returns the response etag on a 200", async () => {
   }
 });
 
+test("listOpenIssuesForRepoConditional returns mapped issues and the page-1 etag on a 200", async () => {
+  let listCalls = 0;
+  const octokit = {
+    issues: {
+      listForRepo: async (params: { page: number; headers?: Record<string, string> }) => {
+        listCalls += 1;
+        assert.equal(params.page, 1);
+        assert.equal(params.headers?.["if-none-match"], 'W/"cached"');
+        return {
+          data: [{
+            number: 7,
+            title: "Issue 7",
+            body: "body",
+            html_url: "https://github.com/owner/repo/issues/7",
+            user: { login: "alice" },
+            labels: [],
+            assignees: [],
+            comments: 0,
+            created_at: "2026-05-03T17:00:00.000Z",
+            updated_at: "2026-05-03T18:00:00.000Z",
+          }],
+          headers: { etag: 'W/"issues-v1"' },
+        };
+      },
+    },
+  };
+
+  const result = await listOpenIssuesForRepoConditional(
+    octokit as never,
+    { owner: "owner", repo: "repo" },
+    'W/"cached"',
+    { offset: 0, limit: 100 },
+  );
+
+  assert.equal(result.notModified, false);
+  if (!result.notModified) {
+    assert.equal(result.etag, 'W/"issues-v1"');
+    assert.equal(result.items.length, 1);
+    assert.equal(result.items[0]?.number, 7);
+    assert.equal(result.hasMore, false);
+  }
+  assert.equal(listCalls, 1);
+});
+
+test("listOpenIssuesForRepoConditional reports notModified on a 304", async () => {
+  const octokit = {
+    issues: {
+      listForRepo: async () => {
+        const error = new Error("Not modified") as Error & { status: number };
+        error.status = 304;
+        throw error;
+      },
+    },
+  };
+
+  const result = await listOpenIssuesForRepoConditional(
+    octokit as never,
+    { owner: "owner", repo: "repo" },
+    'W/"cached"',
+  );
+  assert.equal(result.notModified, true);
+});
+
 test("probeRepoIssuesChanged reports notModified on a 304 and forwards If-None-Match", async () => {
   let sentIfNoneMatch: string | undefined;
   const octokit = {
@@ -1090,6 +1226,29 @@ test("probeRepoIssuesChanged reports notModified on a 304 and forwards If-None-M
 
   assert.equal(result.notModified, true);
   assert.equal(sentIfNoneMatch, 'W/"cached"');
+});
+
+test("fetchOpenIssueCount reads repository.issues.totalCount from GraphQL", async () => {
+  let received: { query: string; owner?: string; repo?: string } | null = null;
+  const octokit = {
+    graphql: async (query: string, params: { owner: string; repo: string }) => {
+      received = { query, ...params };
+      return { repository: { issues: { totalCount: 17 } } };
+    },
+  };
+
+  const count = await fetchOpenIssueCount(octokit as never, { owner: "owner", repo: "repo" });
+  assert.equal(count, 17);
+  assert.equal(received?.owner, "owner");
+  assert.equal(received?.repo, "repo");
+  assert.match(received?.query || "", /issues\(states: OPEN\)/);
+});
+
+test("fetchOpenIssueCount returns null when GraphQL omits totalCount", async () => {
+  const octokit = {
+    graphql: async () => ({ repository: { issues: {} } }),
+  };
+  assert.equal(await fetchOpenIssueCount(octokit as never, { owner: "owner", repo: "repo" }), null);
 });
 
 test("probeRepoIssuesChanged rethrows non-304 errors instead of skipping the sweep", async () => {
@@ -1562,12 +1721,12 @@ test("fetchFeedbackItemsForPR paginates review thread comments beyond the first 
                     id: "THREAD_node_999",
                     isResolved: true,
                     comments: {
-                      nodes: Array.from({ length: 100 }, (_unused, index) => ({
+                      nodes: Array.from({ length: 20 }, (_unused, index) => ({
                         databaseId: index + 1,
                       })),
                       pageInfo: {
                         hasNextPage: true,
-                        endCursor: "cursor-100",
+                        endCursor: "cursor-20",
                       },
                     },
                   },
@@ -1583,7 +1742,7 @@ test("fetchFeedbackItemsForPR paginates review thread comments beyond the first 
       }
 
       assert.equal(params.threadId, "THREAD_node_999");
-      assert.equal(params.cursor, "cursor-100");
+      assert.equal(params.cursor, "cursor-20");
 
       return {
         node: {
@@ -1630,11 +1789,86 @@ test("fetchFeedbackItemsForPR paginates review thread comments beyond the first 
     },
     {
       threadId: "THREAD_node_999",
-      cursor: "cursor-100",
+      cursor: "cursor-20",
     },
   ]);
   assert.match(graphqlCalls[0]?.query || "", /CodeFactoryReviewThreads/);
+  assert.match(graphqlCalls[0]?.query || "", /comments\(first: 20\)/);
   assert.match(graphqlCalls[1]?.query || "", /CodeFactoryReviewThreadComments/);
+});
+
+test("fetchFeedbackItemsForPRIfChanged skips GraphQL when all comment lists return 304", async () => {
+  let graphqlCalls = 0;
+  const notModified = () => {
+    const error = new Error("Not modified") as Error & { status: number };
+    error.status = 304;
+    throw error;
+  };
+  const octokit = {
+    graphql: async () => {
+      graphqlCalls += 1;
+      return {};
+    },
+    paginate: async () => {
+      throw new Error("paginate should not run on an all-304 probe");
+    },
+    pulls: {
+      listReviewComments: async () => notModified(),
+      listReviews: async () => notModified(),
+    },
+    issues: {
+      listComments: async () => notModified(),
+    },
+  };
+
+  const result = await fetchFeedbackItemsForPRIfChanged(
+    octokit as never,
+    { owner: "owner", repo: "repo", number: 1 },
+    config,
+    { reviewComments: 'W/"c"', reviews: 'W/"r"', issueComments: 'W/"i"' },
+  );
+
+  assert.equal(result.notModified, true);
+  assert.equal(graphqlCalls, 0);
+});
+
+test("fetchFeedbackItemsForPRIfChanged fetches feedback when any list changed", async () => {
+  let graphqlCalls = 0;
+  const notModified = () => {
+    const error = new Error("Not modified") as Error & { status: number };
+    error.status = 304;
+    throw error;
+  };
+  const octokit = {
+    graphql: async () => {
+      graphqlCalls += 1;
+      return { repository: { pullRequest: { reviewThreads: { nodes: [], pageInfo: {} } } } };
+    },
+    paginate: async () => [],
+    pulls: {
+      listReviewComments: async () => ({ data: [], headers: { etag: 'W/"c2"' } }),
+      listReviews: async () => notModified(),
+    },
+    issues: {
+      listComments: async () => notModified(),
+    },
+  };
+
+  const result = await fetchFeedbackItemsForPRIfChanged(
+    octokit as never,
+    { owner: "owner", repo: "repo", number: 1 },
+    config,
+    { reviewComments: 'W/"c"', reviews: 'W/"r"', issueComments: 'W/"i"' },
+  );
+
+  assert.equal(result.notModified, false);
+  if (!result.notModified) {
+    assert.deepEqual(result.items, []);
+    assert.equal(result.etags.reviewComments, 'W/"c2"');
+    assert.equal(result.etags.reviews, 'W/"r"');
+    assert.equal(result.etags.issueComments, 'W/"i"');
+  }
+  assert.equal(graphqlCalls, 1);
 });
 
 test("postFollowUpForFeedbackItem replies to review threads and resolveReviewThread resolves them", async () => {
@@ -2371,6 +2605,52 @@ test("listMergedPullsSince applies timestamp and merge-sha boundaries", async ()
   assert.equal(merged.length, 1);
   assert.equal(merged[0]?.number, 30);
   assert.equal(merged[0]?.mergeCommitSha, "sha-30");
+});
+
+test("listMergedPullsSince stops paging once updated_at is older than the since bound", async () => {
+  const pages: number[] = [];
+  const octokit = {
+    pulls: {
+      list: async (params: { page: number; per_page: number }) => {
+        pages.push(params.page);
+        if (params.page === 1) {
+          return {
+            data: Array.from({ length: params.per_page }, (_unused, index) => ({
+              number: 200 - index,
+              title: `new ${index}`,
+              html_url: `https://github.com/octo/example/pull/${200 - index}`,
+              user: { login: "a" },
+              merged_at: "2026-03-28T12:00:00Z",
+              updated_at: "2026-03-28T12:00:00Z",
+              merge_commit_sha: `sha-${200 - index}`,
+            })),
+          };
+        }
+        return {
+          data: [{
+            number: 1,
+            title: "ancient",
+            html_url: "https://github.com/octo/example/pull/1",
+            user: { login: "b" },
+            merged_at: "2026-01-01T00:00:00Z",
+            updated_at: "2026-01-01T00:00:00Z",
+            merge_commit_sha: "sha-1",
+          }],
+        };
+      },
+    },
+  };
+
+  const merged = await listMergedPullsSince(
+    octokit as never,
+    { owner: "octo", repo: "example" },
+    { baseRef: "main", sinceMergedAt: "2026-03-01T00:00:00Z" },
+  );
+
+  assert.deepEqual(pages, [1, 2]);
+  assert.equal(merged.length, 100);
+  assert.equal(merged.some((pull) => pull.number === 1), false);
+  assert.equal(merged.some((pull) => pull.number === 200), true);
 });
 
 test("listMergedPullsSince uses the repository default branch when none is provided", async () => {

@@ -443,7 +443,7 @@ test("issues page keeps the QA-tested issue monitor and work surface wired", asy
   assertHasExpression(sourceFile, "stale issue helper", /\bisStaleIssue\b/);
   assertHasExpression(sourceFile, "issue detail refresh", /\bselectedIssueDetail\b/);
   assertHasExpression(sourceFile, "issue UI polling uses tuning interval", /\bgetUiPollIntervalMs\(config\)/);
-  assertHasExpression(sourceFile, "issue coverage pauses during GitHub throttling", /enabled: config !== undefined && !globalDrainMode && !isGitHubThrottled/);
+  assertHasExpression(sourceFile, "issue coverage stays available during GitHub throttling", /queryKey: \["\/api\/issues\/coverage"\][\s\S]*?enabled: config !== undefined && !globalDrainMode,/);
   assertHasExpression(sourceFile, "issue PR mergeability", /\bworkPrMergeable\b/);
   assertHasExpression(sourceFile, "issue queue helper", /\bbuildQueueStatusIndex\b/);
   assertHasExpression(sourceFile, "issue queue badge", /\bQueueStatusBadge\b/);

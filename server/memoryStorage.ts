@@ -80,7 +80,7 @@ export class MemStorage implements IStorage {
   private issueEvaluations: Map<string, IssueEvaluation> = new Map();
   private issueSubtaskSets: Map<string, IssueSubtaskSet> = new Map();
   private syncedIssues: Map<string, StoredIssueRecord> = new Map();
-  private githubEtags: Map<string, string> = new Map();
+  private githubEtags: Map<string, { etag: string; payload: string | null }> = new Map();
   private repoSyncStates: Map<string, RepoSyncState> = new Map();
 
   private cloneConfig(config: Config): Config {
@@ -400,11 +400,20 @@ export class MemStorage implements IStorage {
   }
 
   async getGithubEtag(url: string): Promise<string | undefined> {
-    return this.githubEtags.get(url);
+    return this.githubEtags.get(url)?.etag;
   }
 
-  async setGithubEtag(url: string, etag: string): Promise<void> {
-    this.githubEtags.set(url, etag);
+  async getGithubEtagRecord(url: string): Promise<{ etag: string; payload: string | null } | undefined> {
+    const record = this.githubEtags.get(url);
+    return record ? { ...record } : undefined;
+  }
+
+  async setGithubEtag(url: string, etag: string, payload?: string | null): Promise<void> {
+    const existing = this.githubEtags.get(url);
+    this.githubEtags.set(url, {
+      etag,
+      payload: payload === undefined ? existing?.payload ?? null : payload,
+    });
   }
 
   async clearGithubEtag(url: string): Promise<void> {
@@ -420,7 +429,11 @@ export class MemStorage implements IStorage {
   async upsertRepoSyncState(
     repo: string,
     kind: RepoSyncKind,
-    updates: { lastSyncedAt?: string | null; nextEligibleAt?: string | null },
+    updates: {
+      lastSyncedAt?: string | null;
+      nextEligibleAt?: string | null;
+      githubOpenCount?: number | null;
+    },
   ): Promise<void> {
     const key = `${repo}#${kind}`;
     const existing = this.repoSyncStates.get(key);
@@ -433,6 +446,9 @@ export class MemStorage implements IStorage {
       nextEligibleAt: "nextEligibleAt" in updates
         ? updates.nextEligibleAt ?? null
         : existing?.nextEligibleAt ?? null,
+      githubOpenCount: "githubOpenCount" in updates
+        ? updates.githubOpenCount ?? null
+        : existing?.githubOpenCount ?? null,
     });
   }
 

@@ -26,6 +26,7 @@ import {
   fetchCheckSnapshotsForRef,
   fetchCiPollResult,
   fetchFeedbackItemsForPR,
+  fetchFeedbackItemsForPRIfChanged,
   fetchPullCloseState,
   fetchPullSummary,
   formatRepoSlug,
@@ -44,6 +45,7 @@ import {
   APP_STATUS_COMMENT_PATTERN,
   type CiPollResult,
   type GitHubActionsRerun,
+  type FeedbackListEtags,
   type GitHubPullSummary,
   type GitHubStatusFailure,
   type ParsedPRUrl,
@@ -115,6 +117,32 @@ const APP_REPOSITORY_URL = "https://github.com/jeremymcs/patchdeck";
 export const APP_COMMENT_FOOTER = formatAppCommentFooter(APP_NAME, true);
 const AUDIT_TOKEN_PATTERN = /\bcodefactory-feedback:[^\s<>()[\]{}"']+/g;
 
+function feedbackEtagKeys(parsed: ParsedPRUrl): {
+  reviewComments: string;
+  reviews: string;
+  issueComments: string;
+} {
+  const prefix = `pr:${parsed.owner}/${parsed.repo}#${parsed.number}`;
+  return {
+    reviewComments: `${prefix}:review-comments`,
+    reviews: `${prefix}:reviews`,
+    issueComments: `${prefix}:issue-comments`,
+  };
+}
+
+function parseStoredPullList(
+  record: { etag: string; payload: string | null } | undefined,
+): { etag: string | null; pulls: GitHubPullSummary[] } | null {
+  if (!record?.payload) return null;
+  try {
+    const parsed = JSON.parse(record.payload) as unknown;
+    if (!Array.isArray(parsed)) return null;
+    return { etag: record.etag, pulls: parsed as GitHubPullSummary[] };
+  } catch {
+    return null;
+  }
+}
+
 export class TerminalBabysitterError extends Error {
   constructor(message: string) {
     super(message);
@@ -127,6 +155,7 @@ type GitHubService = {
   buildOctokit: typeof buildOctokit;
   checkCISettled: typeof checkCISettled;
   fetchFeedbackItemsForPR: typeof fetchFeedbackItemsForPR;
+  fetchFeedbackItemsForPRIfChanged?: typeof fetchFeedbackItemsForPRIfChanged;
   fetchPullCloseState?: typeof fetchPullCloseState;
   fetchPullSummary: typeof fetchPullSummary;
   fetchCheckSnapshotsForRef?: typeof fetchCheckSnapshotsForRef;
@@ -208,6 +237,7 @@ const defaultGitHubService: GitHubService = {
   fetchCheckSnapshotsForRef,
   fetchCiPollResult,
   fetchFeedbackItemsForPR,
+  fetchFeedbackItemsForPRIfChanged,
   fetchPullCloseState,
   fetchPullSummary,
   getAuthenticatedLogin: async (octokit) => {
@@ -2411,7 +2441,32 @@ export class PRBabysitter {
       });
     }
 
-    const incomingFeedback = await this.github.fetchFeedbackItemsForPR(octokit, parsed, config);
+    const etagKeys = feedbackEtagKeys(parsed);
+    const previousEtags: FeedbackListEtags = {
+      reviewComments: (await this.storage.getGithubEtag(etagKeys.reviewComments)) ?? null,
+      reviews: (await this.storage.getGithubEtag(etagKeys.reviews)) ?? null,
+      issueComments: (await this.storage.getGithubEtag(etagKeys.issueComments)) ?? null,
+    };
+    const feedbackResult = this.github.fetchFeedbackItemsForPRIfChanged
+      ? await this.github.fetchFeedbackItemsForPRIfChanged(octokit, parsed, config, previousEtags)
+      : {
+        notModified: false as const,
+        items: await this.github.fetchFeedbackItemsForPR(octokit, parsed, config),
+        etags: previousEtags,
+      };
+    if (feedbackResult.notModified) {
+      return pr;
+    }
+    const incomingFeedback = feedbackResult.items;
+    if (feedbackResult.etags.reviewComments) {
+      await this.storage.setGithubEtag(etagKeys.reviewComments, feedbackResult.etags.reviewComments);
+    }
+    if (feedbackResult.etags.reviews) {
+      await this.storage.setGithubEtag(etagKeys.reviews, feedbackResult.etags.reviews);
+    }
+    if (feedbackResult.etags.issueComments) {
+      await this.storage.setGithubEtag(etagKeys.issueComments, feedbackResult.etags.issueComments);
+    }
     const { merged, newCount } = mergeFeedbackItems(pr.feedbackItems, incomingFeedback);
     const counters = countDecisions(merged);
 
@@ -2599,7 +2654,9 @@ export class PRBabysitter {
         // last sweep, so the cached list is reused and the fetch costs no
         // primary rate-limit budget. The etag and list are cached together in
         // memory so they cannot drift out of sync across a restart.
-        const cachedPrList = this.prListCache.get(repoSlug);
+        const etagKey = `prs:open:${repoSlug}`;
+        const storedPrList = parseStoredPullList(await this.storage.getGithubEtagRecord(etagKey));
+        const cachedPrList = this.prListCache.get(repoSlug) ?? storedPrList;
         const conditional = await this.github.listOpenPullsForRepoConditional(
           octokit,
           repo,
@@ -2609,13 +2666,27 @@ export class PRBabysitter {
         if (conditional.notModified && cachedPrList) {
           openPulls = cachedPrList.pulls;
           prListUnchanged = true;
+          this.prListCache.set(repoSlug, cachedPrList);
         } else if (conditional.notModified) {
-          // Etag hit without a cached list (should not happen, since both are
-          // stored together) — fall back to a full fetch.
-          openPulls = await this.github.listOpenPullsForRepo(octokit, repo);
+          // 304 without a stored list (upgrade path): refetch without
+          // If-None-Match once, then persist so the next restart is free.
+          const fresh = await this.github.listOpenPullsForRepoConditional(octokit, repo, null);
+          openPulls = fresh.notModified ? [] : fresh.pulls;
+          const freshEtag = fresh.notModified ? null : fresh.etag;
+          this.prListCache.set(repoSlug, { etag: freshEtag, pulls: openPulls });
+          if (freshEtag) {
+            await this.storage.setGithubEtag(etagKey, freshEtag, JSON.stringify(openPulls));
+          }
         } else {
           openPulls = conditional.pulls;
           this.prListCache.set(repoSlug, { etag: conditional.etag, pulls: conditional.pulls });
+          if (conditional.etag) {
+            await this.storage.setGithubEtag(
+              etagKey,
+              conditional.etag,
+              JSON.stringify(conditional.pulls),
+            );
+          }
         }
         // When the PR list is unchanged, defer the next sweep — a quiet repo
         // does not need an every-tick slot. Any change returns it to every-tick.

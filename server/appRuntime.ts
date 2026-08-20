@@ -66,14 +66,15 @@ import {
   getLatestSemverTagForRepo,
   GitHubIntegrationError,
   installCodeReviewWorkflow,
+  fetchOpenIssueCount,
   listOpenIssuesForRepo,
+  listOpenIssuesForRepoConditional,
   listOpenLinkedPullRequestsForIssue,
   listReleasesForRepo,
   listUnreleasedMergedPulls,
   type MergedPRSummary,
   parsePRUrl,
   parseRepoSlug,
-  probeRepoIssuesChanged,
   addLabelsToIssue,
   removeLabelsFromIssue,
   resolveNextSemverTag,
@@ -1564,10 +1565,16 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
         // unchanged repo we skip the whole sweep instead of paginating it.
         const etagKey = `issues:open:${repoSlug}`;
         let pendingEtag: string | null = null;
+        let didWork = false;
         if (nextOffset === 0) {
           const cachedEtag = (await storage.getGithubEtag(etagKey)) ?? null;
-          const probe = await probeRepoIssuesChanged(octokit, parsed, cachedEtag);
-          if (probe.notModified) {
+          const conditional = await listOpenIssuesForRepoConditional(
+            octokit,
+            parsed,
+            cachedEtag,
+            { limit, offset: 0 },
+          );
+          if (conditional.notModified) {
             // A 304 confirms the repo's issue list is current. Record the
             // freshness check and defer the next sweep — a quiet repo does not
             // need an every-tick slot.
@@ -1579,26 +1586,47 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
             issueRepoCursor = index === -1 ? issueRepoCursor : (index + 1) % repoCount;
             continue;
           }
-          pendingEtag = probe.etag;
-        }
-
-        let didWork = false;
-        for (let i = 0; i < loops; i += 1) {
-          const page = await listOpenIssuesForRepo(octokit, parsed, { limit, offset: nextOffset });
+          pendingEtag = conditional.etag;
           const seenAt = new Date().toISOString();
-          if (nextOffset === 0) {
-            await storage.markRepoIssuesStale(repoSlug);
-          }
-          await storage.upsertSyncedIssues(repoSlug, page.items, seenAt);
-          nextOffset = page.hasMore ? nextOffset + limit : 0;
+          await storage.markRepoIssuesStale(repoSlug);
+          await storage.upsertSyncedIssues(repoSlug, conditional.items, seenAt);
+          nextOffset = conditional.hasMore ? limit : 0;
           issueRepoSyncOffsets.set(repoSlug, nextOffset);
           didWork = true;
-          if (!page.hasMore || !options?.fullSweep) break;
+          if (conditional.hasMore && options?.fullSweep) {
+            for (let i = 1; i < loops; i += 1) {
+              const page = await listOpenIssuesForRepo(octokit, parsed, { limit, offset: nextOffset });
+              await storage.upsertSyncedIssues(repoSlug, page.items, new Date().toISOString());
+              nextOffset = page.hasMore ? nextOffset + limit : 0;
+              issueRepoSyncOffsets.set(repoSlug, nextOffset);
+              if (!page.hasMore) break;
+            }
+          }
+        } else {
+          for (let i = 0; i < loops; i += 1) {
+            const page = await listOpenIssuesForRepo(octokit, parsed, { limit, offset: nextOffset });
+            const seenAt = new Date().toISOString();
+            await storage.upsertSyncedIssues(repoSlug, page.items, seenAt);
+            nextOffset = page.hasMore ? nextOffset + limit : 0;
+            issueRepoSyncOffsets.set(repoSlug, nextOffset);
+            didWork = true;
+            if (!page.hasMore || !options?.fullSweep) break;
+          }
         }
         if (didWork) {
+          let githubOpenCount: number | null | undefined;
+          try {
+            githubOpenCount = await fetchOpenIssueCount(octokit, parsed);
+          } catch (error) {
+            log.warn(
+              { err: error instanceof Error ? error.message : String(error), repo: repoSlug },
+              "Open issue count lookup failed; keeping last known coverage count",
+            );
+          }
           await storage.upsertRepoSyncState(repoSlug, "issues", {
             lastSyncedAt: new Date().toISOString(),
             nextEligibleAt: null,
+            ...(typeof githubOpenCount === "number" ? { githubOpenCount } : {}),
           });
           // Persist the etag only after a successful sync so a failure mid-sweep
           // re-probes and re-syncs next tick instead of 304-skipping stale data.
@@ -2509,26 +2537,16 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
         storage.getRepoSyncStates("issues"),
       ]);
       const syncByRepo = new Map(syncStates.map((state) => [state.repo, state]));
-      const octokit = await buildOctokit(config);
-      const coverage = await Promise.all(config.watchedRepos.map(async (repo): Promise<IssueCoverage> => {
+      return config.watchedRepos.map((repo): IssueCoverage => {
         const localCount = counts.repoTotals[repo] ?? 0;
         const syncState = syncByRepo.get(repo);
-        const parsed = parseRepoSlug(repo);
-        if (!parsed) {
-          return { repo, syncedOpenCount: localCount, githubOpenCount: null, lastSyncedAt: syncState?.lastSyncedAt ?? null };
-        }
-        try {
-          const result = await octokit.request("GET /search/issues", {
-            q: `repo:${repo} is:issue is:open`,
-            per_page: 1,
-          });
-          const githubOpenCount = typeof result.data?.total_count === "number" ? result.data.total_count : null;
-          return { repo, syncedOpenCount: localCount, githubOpenCount, lastSyncedAt: syncState?.lastSyncedAt ?? null };
-        } catch {
-          return { repo, syncedOpenCount: localCount, githubOpenCount: null, lastSyncedAt: syncState?.lastSyncedAt ?? null };
-        }
-      }));
-      return coverage;
+        return {
+          repo,
+          syncedOpenCount: localCount,
+          githubOpenCount: syncState?.githubOpenCount ?? null,
+          lastSyncedAt: syncState?.lastSyncedAt ?? null,
+        };
+      });
     },
 
     async createManualRelease(repoInput) {
