@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp } from "fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "fs/promises";
 import os from "os";
 import path from "path";
 import test from "node:test";
-import { ensureRepoCache, preparePrWorktree, removePrWorktree } from "./repoWorkspace";
+import { ensureRepoCache, preparePrWorktree, reclaimOrphanedWorktrees, removePrWorktree } from "./repoWorkspace";
 
 test("preparePrWorktree reuses the watched-repo cache and fetches fork heads on demand", async () => {
   const rootDir = await mkdtemp(path.join(os.tmpdir(), "codefactory-workspace-"));
@@ -292,4 +292,139 @@ test("ensureRepoCache refuses to reclone when registered worktrees still exist o
   );
 
   assert.equal(cloneCount, 0);
+});
+
+/**
+ * Build a repo cache whose `.git/worktrees` holds a registration left behind by a
+ * run that died before its cleanup could run, plus the worktree directory itself.
+ * `git worktree prune` cannot clear this: the directory still exists.
+ */
+async function seedOrphanedWorktree(rootDir: string, name: string): Promise<{
+  repoCacheDir: string;
+  registrationDir: string;
+  worktreePath: string;
+}> {
+  const repoCacheDir = path.join(rootDir, "repos", "acme__widgets");
+  const registrationDir = path.join(repoCacheDir, ".git", "worktrees", name);
+  const worktreePath = path.join(rootDir, "worktrees", "acme__widgets", name);
+
+  await mkdir(registrationDir, { recursive: true });
+  await mkdir(worktreePath, { recursive: true });
+  await writeFile(path.join(registrationDir, "gitdir"), `${path.join(worktreePath, ".git")}\n`, "utf8");
+
+  return { repoCacheDir, registrationDir, worktreePath };
+}
+
+/** A git stand-in that mirrors the one side effect the reclaim path depends on. */
+function makeReclaimingGit(counters: { clones: number; removals: string[] }) {
+  return async (command: string, args: string[]) => {
+    if (command !== "git") {
+      return { code: 1, stdout: "", stderr: `unexpected command: ${command}` };
+    }
+
+    if (args[0] === "clone") {
+      counters.clones += 1;
+      return { code: 0, stdout: "cloned\n", stderr: "" };
+    }
+
+    if (args[2] === "worktree" && args[3] === "remove") {
+      const worktreePath = args[args.length - 1];
+      counters.removals.push(worktreePath);
+      // Real git drops the registration as part of `worktree remove`.
+      const name = path.basename(worktreePath);
+      await rm(path.join(args[1], ".git", "worktrees", name), { recursive: true, force: true });
+      return { code: 0, stdout: "", stderr: "" };
+    }
+
+    return { code: 0, stdout: "", stderr: "" };
+  };
+}
+
+test("ensureRepoCache reclaims worktrees stranded by a dead run instead of refusing forever", async () => {
+  // Goal: cleanup only runs in a `finally` inside each run, so a crash strands the
+  // worktree. Those registrations used to block every future reclone permanently —
+  // `git worktree prune` cannot clear them while the directory still exists — which
+  // killed the repo's automation until a human intervened.
+  const rootDir = await mkdtemp(path.join(os.tmpdir(), "codefactory-workspace-orphan-"));
+  const { worktreePath } = await seedOrphanedWorktree(rootDir, "pr-18-run-dead");
+  const counters = { clones: 0, removals: [] as string[] };
+
+  const result = await ensureRepoCache({
+    rootDir,
+    repoFullName: "acme/widgets",
+    repoCloneUrl: "https://github.com/acme/widgets.git",
+    forceReclone: true,
+    runCommand: makeReclaimingGit(counters) as never,
+  });
+
+  assert.equal(result.healed, true);
+  assert.equal(counters.clones, 1, "the reclone must proceed once the orphan is cleared");
+  assert.deepEqual(counters.removals, [worktreePath]);
+});
+
+test("reclaimOrphanedWorktrees sweeps caches and reports what it cleared", async () => {
+  const rootDir = await mkdtemp(path.join(os.tmpdir(), "codefactory-workspace-sweep-"));
+  const { repoCacheDir, worktreePath } = await seedOrphanedWorktree(rootDir, "pr-7-run-dead");
+  const counters = { clones: 0, removals: [] as string[] };
+
+  const swept = await reclaimOrphanedWorktrees({
+    rootDir,
+    runCommand: makeReclaimingGit(counters) as never,
+  });
+
+  assert.deepEqual(swept, [{ repoCacheDir, reclaimed: 1 }]);
+  assert.deepEqual(counters.removals, [worktreePath]);
+
+  // A second sweep has nothing left to do.
+  const again = await reclaimOrphanedWorktrees({
+    rootDir,
+    runCommand: makeReclaimingGit(counters) as never,
+  });
+  assert.deepEqual(again, []);
+});
+
+test("reclaimOrphanedWorktrees leaves a worktree the current process is still using", async () => {
+  // The startup sweep may clear everything because the instance lock proves nothing
+  // is live, but the periodic sweep must never pull a worktree out from under a
+  // running agent.
+  const rootDir = await mkdtemp(path.join(os.tmpdir(), "codefactory-workspace-active-"));
+  const counters = { clones: 0, removals: [] as string[] };
+
+  const prepared = await preparePrWorktree({
+    rootDir,
+    repoFullName: "acme/widgets",
+    repoCloneUrl: "https://github.com/acme/widgets.git",
+    headRepoFullName: "acme/widgets",
+    headRepoCloneUrl: "https://github.com/acme/widgets.git",
+    headRef: "feature",
+    prNumber: 99,
+    runId: "live-run",
+    runCommand: (async (command: string, args: string[]) => {
+      if (command !== "git") {
+        return { code: 1, stdout: "", stderr: `unexpected command: ${command}` };
+      }
+      if (args[0] === "clone") {
+        counters.clones += 1;
+        return { code: 0, stdout: "cloned\n", stderr: "" };
+      }
+      return { code: 0, stdout: "", stderr: "" };
+    }) as never,
+  });
+
+  // Register it the way git would, so the sweep can see it at all.
+  const registrationDir = path.join(prepared.repoCacheDir, ".git", "worktrees", "pr-99-live-run");
+  await mkdir(registrationDir, { recursive: true });
+  await writeFile(
+    path.join(registrationDir, "gitdir"),
+    `${path.join(prepared.worktreePath, ".git")}\n`,
+    "utf8",
+  );
+
+  const swept = await reclaimOrphanedWorktrees({
+    rootDir,
+    runCommand: makeReclaimingGit(counters) as never,
+  });
+
+  assert.deepEqual(swept, [], "an in-flight worktree is not an orphan");
+  assert.deepEqual(counters.removals, []);
 });

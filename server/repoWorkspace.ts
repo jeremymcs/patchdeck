@@ -1,4 +1,4 @@
-import { mkdir, readdir, rm } from "fs/promises";
+import { mkdir, readdir, readFile, rm } from "fs/promises";
 import path from "path";
 import { type CommandResult, runCommand } from "./agentRunner";
 import { getCodeFactoryPaths } from "./paths";
@@ -33,6 +33,13 @@ type RemovePrWorktreeParams = {
 
 const repoMutationLocks = new Map<string, Promise<void>>();
 const activeRepoWorkspaceCounts = new Map<string, number>();
+/**
+ * Worktrees this process is actively using. Anything registered in a repo cache
+ * but absent from here is an orphan: the run that owned it died without
+ * unwinding its cleanup. A single instance lock (see `instanceLock.ts`) means no
+ * other PatchDeck can own one, so the set is authoritative.
+ */
+const activeWorktreePaths = new Set<string>();
 
 function summarizeCommandFailure(result: CommandResult): string {
   return result.stderr.trim() || result.stdout.trim() || "no output";
@@ -127,6 +134,76 @@ async function pruneRegisteredWorktrees(repoCacheDir: string, run: GitRunner): P
   }
 }
 
+/**
+ * Paths of every worktree registered in the cache. Each `.git/worktrees/<name>`
+ * holds a `gitdir` file pointing at the worktree's own `.git`, so the worktree
+ * itself is that file's parent directory.
+ */
+async function listRegisteredWorktreePaths(repoCacheDir: string): Promise<string[]> {
+  const worktreesDir = path.join(repoCacheDir, ".git", "worktrees");
+  let entries;
+  try {
+    entries = await readdir(worktreesDir, { withFileTypes: true });
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+      return [];
+    }
+    throw error;
+  }
+
+  const paths: string[] = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+
+    try {
+      const gitdir = await readFile(path.join(worktreesDir, entry.name, "gitdir"), "utf8");
+      const trimmed = gitdir.trim();
+      if (trimmed) {
+        paths.push(path.dirname(trimmed));
+      }
+    } catch {
+      // A registration without a readable gitdir pointer is already broken;
+      // `git worktree prune` is the right tool for it.
+    }
+  }
+
+  return paths;
+}
+
+/**
+ * Remove worktrees registered in this cache that no live run owns, so a crashed
+ * run cannot strand the cache forever. Callers must already hold the repo
+ * mutation lock.
+ */
+async function reclaimOrphanedWorktreesUnlocked(
+  repoCacheDir: string,
+  run: GitRunner,
+  options: { includeActive?: boolean } = {},
+): Promise<number> {
+  await pruneRegisteredWorktrees(repoCacheDir, run);
+
+  const registered = await listRegisteredWorktreePaths(repoCacheDir);
+  const orphans = options.includeActive === true
+    ? registered
+    : registered.filter((worktreePath) => !activeWorktreePaths.has(worktreePath));
+
+  let reclaimed = 0;
+  for (const worktreePath of orphans) {
+    await runGit(run, ["-C", repoCacheDir, "worktree", "remove", "--force", worktreePath], 30000);
+    await rm(worktreePath, { recursive: true, force: true });
+    activeWorktreePaths.delete(worktreePath);
+    reclaimed += 1;
+  }
+
+  if (reclaimed > 0) {
+    await pruneRegisteredWorktrees(repoCacheDir, run);
+  }
+
+  return reclaimed;
+}
+
 async function countRegisteredWorktrees(repoCacheDir: string): Promise<number> {
   try {
     const worktreeEntries = await readdir(path.join(repoCacheDir, ".git", "worktrees"), { withFileTypes: true });
@@ -149,6 +226,14 @@ async function assertRepoCacheCanBeRecloned(repoCacheDir: string, run: GitRunner
   }
 
   await pruneRegisteredWorktrees(repoCacheDir, run);
+
+  if (await countRegisteredWorktrees(repoCacheDir) > 0) {
+    // Registrations left by dead runs used to block the reclone permanently:
+    // `git worktree prune` only clears entries whose directory is already gone,
+    // so worktrees still on disk kept the count above zero forever and the repo
+    // could never recover without a human.
+    await reclaimOrphanedWorktreesUnlocked(repoCacheDir, run);
+  }
 
   const registeredWorktreeCount = await countRegisteredWorktrees(repoCacheDir);
   if (registeredWorktreeCount > 0) {
@@ -347,6 +432,7 @@ export async function preparePrWorktree(params: PreparePrWorktreeParams): Promis
 
         await addWorktree(cache.repoCacheDir, worktreePath, run);
         adjustActiveRepoWorkspaceCount(cache.repoCacheDir, 1);
+        activeWorktreePaths.add(worktreePath);
         return {
           repoCacheDir: cache.repoCacheDir,
           worktreePath,
@@ -370,6 +456,56 @@ export async function removePrWorktree(params: RemovePrWorktreeParams): Promise<
       await rm(worktreePath, { recursive: true, force: true });
     } finally {
       adjustActiveRepoWorkspaceCount(repoCacheDir, -1);
+      activeWorktreePaths.delete(worktreePath);
     }
   });
+}
+
+/**
+ * Reclaim worktrees left behind by runs that never unwound their cleanup.
+ *
+ * Cleanup normally happens in a `finally` inside each run, which covers both the
+ * success and the throw path but not the process dying — a crash, a kill, or a
+ * machine restart mid-run strands the worktree. Nothing else sweeps them, so they
+ * accumulated until `assertRepoCacheCanBeRecloned` refused to heal the cache and
+ * the repo's automation stopped for good.
+ *
+ * `includeActive` is for startup, where the single-instance lock guarantees no
+ * worktree can legitimately be in use, so every registration is an orphan.
+ */
+export async function reclaimOrphanedWorktrees(params: {
+  rootDir?: string;
+  runCommand: GitRunner;
+  includeActive?: boolean;
+}): Promise<{ repoCacheDir: string; reclaimed: number }[]> {
+  const paths = getCodeFactoryPaths(params.rootDir);
+
+  let repoDirs;
+  try {
+    repoDirs = await readdir(paths.repoRootDir, { withFileTypes: true });
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+      return [];
+    }
+    throw error;
+  }
+
+  const results: { repoCacheDir: string; reclaimed: number }[] = [];
+  for (const entry of repoDirs) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+
+    const repoCacheDir = path.join(paths.repoRootDir, entry.name);
+    const reclaimed = await withRepoMutationLock(repoCacheDir, async () =>
+      reclaimOrphanedWorktreesUnlocked(repoCacheDir, params.runCommand, {
+        includeActive: params.includeActive,
+      }));
+
+    if (reclaimed > 0) {
+      results.push({ repoCacheDir, reclaimed });
+    }
+  }
+
+  return results;
 }

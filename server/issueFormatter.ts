@@ -72,6 +72,8 @@ type IssueWorkStatusCommentInput = {
   issueUrl: string;
   stage: IssueWorkStatusStage;
   detail?: string | null;
+  /** Optional "attempt 3, last tried ..." line so a repeatedly edited comment shows progress. */
+  attemptSummary?: string | null;
 };
 
 export function buildIssueReplyBody(input: IssueReplyBodyInput): string {
@@ -164,32 +166,49 @@ export function buildIssueVerifyComment(input: IssueVerifyCommentInput): string 
   ].join("\n");
 }
 
+/**
+ * Hidden anchor identifying the single status comment PatchDeck maintains for an
+ * issue. Status is edited in place rather than appended, so a repeatedly failing
+ * issue keeps one current comment instead of a wall of identical notices.
+ */
+export function buildIssueWorkStatusMarker(repoFullName: string, issueNumber: number): string {
+  return `<!-- patchdeck:issue-work-status:${repoFullName}#${issueNumber} -->`;
+}
+
 export function buildIssueWorkStatusComment(input: IssueWorkStatusCommentInput): string {
   const issueLine = `[#${input.issueNumber} ${input.issueTitle}](${input.issueUrl})`;
   const detailLine = input.detail?.trim();
   const safeDetailLine = detailLine ? redactLocalPaths(detailLine) : null;
+  const marker = buildIssueWorkStatusMarker(input.repoFullName, input.issueNumber);
+  const attemptLine = input.attemptSummary ? [`- ${input.attemptSummary}`] : [];
 
   switch (input.stage) {
     case "started":
       return [
+        marker,
         `⏳ **Issue work started** — beginning work on ${issueLine}.`,
         "",
         `- Repo: \`${input.repoFullName}\``,
         `- Issue: ${issueLine}`,
+        ...attemptLine,
       ].join("\n");
     case "verifying":
       return [
+        marker,
         `✅ **Issue work verified** — code changes are ready for PR creation on ${issueLine}.`,
         "",
         `- Repo: \`${input.repoFullName}\``,
         safeDetailLine ? `- ${safeDetailLine}` : "- Verification finished in the worktree.",
+        ...attemptLine,
       ].join("\n");
     case "failed":
       return [
+        marker,
         `❌ **Issue work failed** — ${issueLine}.`,
         "",
         `- Repo: \`${input.repoFullName}\``,
         `- Reason: ${safeDetailLine || "No failure details provided."}`,
+        ...attemptLine,
       ].join("\n");
   }
 }

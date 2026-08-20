@@ -22,7 +22,7 @@ import {
   resolveGitHubAuthToken,
 } from "./github";
 import { buildIssueEvaluationComment, evaluateIssueForAutomation } from "./issueEvaluator";
-import { buildIssueReplyBody, buildIssueVerifyComment, buildIssueWorkStatusComment, buildPullRequestBody } from "./issueFormatter";
+import { buildIssueReplyBody, buildIssueVerifyComment, buildIssueWorkStatusComment, buildIssueWorkStatusMarker, buildPullRequestBody } from "./issueFormatter";
 import { decomposeIssueBody, hashIssueBody } from "./issueDecompose";
 import { verifySubtasksAgainstPr } from "./issueVerify";
 import { runIssueWorkRepair } from "./issueWorkAgent";
@@ -172,6 +172,13 @@ export function createBackgroundJobHandlers(params: {
     }
   }
 
+  /**
+   * Maintain a single status comment per issue instead of appending a new one for
+   * every attempt. A permanently failing issue used to collect one "started" and
+   * one "failed" notice per recovery cycle, which turned into dozens of identical
+   * comments; editing the existing comment keeps the thread readable and still
+   * shows the current state.
+   */
   async function postIssueWorkStatusComment(
     octokit: {
       issues: {
@@ -181,6 +188,18 @@ export function createBackgroundJobHandlers(params: {
           issue_number: number;
           body: string;
         }) => Promise<unknown>;
+        updateComment?: (params: {
+          owner: string;
+          repo: string;
+          comment_id: number;
+          body: string;
+        }) => Promise<unknown>;
+        listComments?: (params: {
+          owner: string;
+          repo: string;
+          issue_number: number;
+          per_page?: number;
+        }) => Promise<{ data: Array<{ id: number; body?: string | null }> }>;
       };
     },
     parsedRepo: { owner: string; repo: string },
@@ -190,6 +209,23 @@ export function createBackgroundJobHandlers(params: {
     stage: string,
   ): Promise<void> {
     try {
+      const existingId = await findIssueWorkStatusCommentId(
+        octokit,
+        parsedRepo,
+        issueNumber,
+        `${parsedRepo.owner}/${parsedRepo.repo}`,
+      );
+
+      if (existingId !== null && octokit.issues.updateComment) {
+        await octokit.issues.updateComment({
+          owner: parsedRepo.owner,
+          repo: parsedRepo.repo,
+          comment_id: existingId,
+          body,
+        });
+        return;
+      }
+
       await octokit.issues.createComment({
         owner: parsedRepo.owner,
         repo: parsedRepo.repo,
@@ -201,6 +237,50 @@ export function createBackgroundJobHandlers(params: {
         metadata: { stage },
       });
     }
+  }
+
+  /**
+   * The status comment is edited in place, so without this line a reader cannot
+   * tell whether automation tried once or twenty times.
+   */
+  function describeIssueWorkAttempts(attemptCount: number): string | null {
+    if (attemptCount <= 1) {
+      return null;
+    }
+
+    return `Attempts: ${attemptCount}`;
+  }
+
+  /** Locate the status comment PatchDeck already owns on this issue, if any. */
+  async function findIssueWorkStatusCommentId(
+    octokit: {
+      issues: {
+        listComments?: (params: {
+          owner: string;
+          repo: string;
+          issue_number: number;
+          per_page?: number;
+        }) => Promise<{ data: Array<{ id: number; body?: string | null }> }>;
+      };
+    },
+    parsedRepo: { owner: string; repo: string },
+    issueNumber: number,
+    repoFullName: string,
+  ): Promise<number | null> {
+    if (!octokit.issues.listComments) {
+      return null;
+    }
+
+    const marker = buildIssueWorkStatusMarker(repoFullName, issueNumber);
+    const response = await octokit.issues.listComments({
+      owner: parsedRepo.owner,
+      repo: parsedRepo.repo,
+      issue_number: issueNumber,
+      per_page: 100,
+    });
+
+    const match = response.data.filter((comment) => (comment.body ?? "").includes(marker)).pop();
+    return match ? match.id : null;
   }
 
   async function addIssueWorkStageLog(
@@ -622,6 +702,7 @@ export function createBackgroundJobHandlers(params: {
               issueUrl: issue.url,
               stage: "failed",
               detail: message,
+              attemptSummary: describeIssueWorkAttempts(job.attemptCount),
             }),
             targetId,
             "failed",
@@ -664,6 +745,7 @@ export function createBackgroundJobHandlers(params: {
               issueUrl: issue.url,
               stage: "failed",
               detail: repairResult.rejectionReason ?? "Issue work not accepted",
+              attemptSummary: describeIssueWorkAttempts(job.attemptCount),
             }),
             targetId,
             "failed",
