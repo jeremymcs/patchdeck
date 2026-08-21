@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.5.0](https://github.com/jeremymcs/patchdeck/compare/v1.4.0...v1.5.0) (2026-08-20)
+
+
+### Bug Fixes
+
+* reclaim stranded worktrees and stop repeating issue status comments ([#180](https://github.com/jeremymcs/patchdeck/issues/180)) ([2b75dd1](https://github.com/jeremymcs/patchdeck/commit/2b75dd15ea8443c0b36570112672fc055ccdd866))
+
+
+### Miscellaneous Chores
+
+* release 1.5.0 ([284c9b9](https://github.com/jeremymcs/patchdeck/commit/284c9b98379508ccd786a9a418ae62b6150bc457))
+
 ## [1.4.0](https://github.com/jeremymcs/patchdeck/compare/v1.3.0...v1.4.0) (2026-08-20)
 
 
