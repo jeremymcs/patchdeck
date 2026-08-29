@@ -3,6 +3,7 @@ import { constants as fsConstants } from "fs";
 import { homedir, tmpdir } from "os";
 import path from "path";
 import { spawn } from "child_process";
+import { getInstalledAgentSpendMeter, withAgentWork } from "./agentSpend";
 
 export type CodingAgent = "codex" | "claude";
 export type CodexReasoningEffort = "default" | "low" | "medium" | "high" | "xhigh";
@@ -129,12 +130,21 @@ export async function resolveCommandPath(command: string): Promise<string | null
   return null;
 }
 
+/**
+ * The single choke point for every paid coding-agent process spawn. When a
+ * spend meter is installed it gates, records, and times the spawn; with no
+ * meter (unit tests, the MCP server) behaviour is unchanged.
+ */
 export async function runAgentCommand(
   agent: CodingAgent,
   args: string[],
   options?: Parameters<typeof runCommand>[2],
 ): Promise<CommandResult> {
-  return runCommand((await resolveCommandPath(agent)) ?? agent, args, options);
+  const spawnAgent = async () =>
+    runCommand((await resolveCommandPath(agent)) ?? agent, args, options);
+
+  const meter = getInstalledAgentSpendMeter();
+  return meter ? meter.meter(agent, spawnAgent) : spawnAgent();
 }
 
 export async function resolveAgent(
@@ -171,28 +181,32 @@ export async function checkAgentHealth(agent: CodingAgent): Promise<AgentHealthR
   }
 
   const prompt = "Respond with exactly: ok";
-  const result = agent === "codex"
-    ? await runAgentCommand(
-        "codex",
-        [
-          "exec",
-          "--skip-git-repo-check",
-          "--sandbox",
-          "read-only",
-          prompt,
-        ],
-        { timeoutMs: 30000 },
-      )
-    : await runAgentCommand(
-        "claude",
-        [
-          "-p",
-          "--output-format",
-          "text",
-          prompt,
-        ],
-        { timeoutMs: 30000 },
-      );
+  // Health checks are a fixed one-token probe. They are recorded but never
+  // counted against the spend ceiling, so opening Settings cannot exhaust it.
+  const result = await withAgentWork({ kind: "probe" }, async () => (
+    agent === "codex"
+      ? runAgentCommand(
+          "codex",
+          [
+            "exec",
+            "--skip-git-repo-check",
+            "--sandbox",
+            "read-only",
+            prompt,
+          ],
+          { timeoutMs: 30000 },
+        )
+      : runAgentCommand(
+          "claude",
+          [
+            "-p",
+            "--output-format",
+            "text",
+            prompt,
+          ],
+          { timeoutMs: 30000 },
+        )
+  ));
 
   if (result.code !== 0) {
     const detail = summarizeHealthFailure(result);

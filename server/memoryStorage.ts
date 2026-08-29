@@ -1,6 +1,9 @@
 import type {
+  AgentInvocation,
+  AgentInvocationOutcome,
   AgentRun,
   AgentRunStatus,
+  AgentWorkKind,
   BackgroundJob,
   BackgroundJobKind,
   BackgroundJobStatus,
@@ -73,6 +76,7 @@ export class MemStorage implements IStorage {
   private failureFingerprints: Map<string, FailureFingerprint> = new Map();
   private releaseRuns: Map<string, ReleaseRun> = new Map();
   private agentRuns: Map<string, AgentRun> = new Map();
+  private agentInvocations: Map<string, AgentInvocation> = new Map();
   private socialChangelogs: Map<string, SocialChangelog> = new Map();
   private backgroundJobs: Map<string, BackgroundJob> = new Map();
   private deploymentHealingSessions: Map<string, DeploymentHealingSession> = new Map();
@@ -1014,6 +1018,82 @@ export class MemStorage implements IStorage {
     const stored = existing ? touchAgentRun(existing, run) : { ...run };
     this.agentRuns.set(run.id, stored);
     return { ...stored };
+  }
+
+  async recordAgentInvocationStart(invocation: AgentInvocation): Promise<AgentInvocation> {
+    this.agentInvocations.set(invocation.id, { ...invocation });
+    return { ...invocation };
+  }
+
+  async recordAgentInvocationEnd(id: string, end: {
+    finishedAt: string;
+    durationMs: number;
+    exitCode: number | null;
+    outcome: AgentInvocationOutcome;
+    error: string | null;
+  }): Promise<void> {
+    const existing = this.agentInvocations.get(id);
+    if (!existing) {
+      return;
+    }
+
+    this.agentInvocations.set(id, { ...existing, ...end });
+  }
+
+  async countAgentInvocationsSince(since: string, options?: {
+    excludeKinds?: AgentWorkKind[];
+  }): Promise<number> {
+    const excluded = new Set(options?.excludeKinds ?? []);
+    return Array.from(this.agentInvocations.values())
+      .filter((invocation) => invocation.startedAt >= since && !excluded.has(invocation.workKind))
+      .length;
+  }
+
+  async listAgentInvocationsSince(since: string, options?: {
+    targetId?: string;
+    limit?: number;
+  }): Promise<AgentInvocation[]> {
+    const limit = Math.max(1, Math.floor(options?.limit ?? 500));
+    return Array.from(this.agentInvocations.values())
+      .filter((invocation) => {
+        if (invocation.startedAt < since) return false;
+        if (options?.targetId && invocation.targetId !== options.targetId) return false;
+        return true;
+      })
+      .sort((a, b) => (a.startedAt < b.startedAt ? 1 : a.startedAt > b.startedAt ? -1 : 0))
+      .slice(0, limit)
+      .map((invocation) => ({ ...invocation }));
+  }
+
+  async closeOrphanedAgentInvocations(finishedAt: string): Promise<number> {
+    let closed = 0;
+    for (const [id, invocation] of Array.from(this.agentInvocations.entries())) {
+      if (invocation.outcome !== "running") {
+        continue;
+      }
+
+      this.agentInvocations.set(id, {
+        ...invocation,
+        outcome: "failed",
+        finishedAt,
+        error: invocation.error ?? "PatchDeck restarted while the agent was running",
+      });
+      closed += 1;
+    }
+
+    return closed;
+  }
+
+  async pruneAgentInvocationsBefore(cutoff: string): Promise<number> {
+    let removed = 0;
+    for (const [id, invocation] of Array.from(this.agentInvocations.entries())) {
+      if (invocation.startedAt < cutoff) {
+        this.agentInvocations.delete(id);
+        removed += 1;
+      }
+    }
+
+    return removed;
   }
 
   async getSocialChangelogs(): Promise<SocialChangelog[]> {

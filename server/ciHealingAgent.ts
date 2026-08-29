@@ -1,6 +1,7 @@
 import { createHash } from "crypto";
 import type { CodingAgent, CommandResult } from "./agentRunner";
 import { applyFixesWithAgent, runCommand, summarizeCommandResult } from "./agentRunner";
+import { withAgentWork } from "./agentSpend";
 import type { ClassifiedCIFailure } from "./ciFailureClassifier";
 import { preparePrWorktree, removePrWorktree } from "./repoWorkspace";
 
@@ -329,12 +330,16 @@ export async function runCIHealingRepairAttempt(input: CIHealingWorktreeInput & 
   });
 
   try {
-    const agentResult = await deps.applyFixesWithAgent({
+    const agentResult = await withAgentWork({
+      kind: "heal_ci",
+      repo: input.repoFullName,
+      targetId: `${input.repoFullName}#${input.prNumber}`,
+    }, () => deps.applyFixesWithAgent({
       agent: input.agent,
       cwd: worktree.worktreePath,
       prompt,
       env: input.env,
-    });
+    }));
 
     if (agentResult.code === 0) {
       await commitWorktreeChanges(deps, worktree.worktreePath, input.prNumber);

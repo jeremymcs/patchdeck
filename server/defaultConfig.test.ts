@@ -48,6 +48,8 @@ describe("DEFAULT_CONFIG", () => {
       "deploymentCheckPollIntervalMs",
       "maxConcurrentIssueEvaluations",
       "maxConcurrentIssueWork",
+      "maxAgentRetryAttempts",
+      "maxAgentInvocationsPerHour",
       "watchedRepos",
       "trustedReviewers",
       "priorityIssueAuthors",
@@ -122,6 +124,11 @@ describe("DEFAULT_CONFIG", () => {
     // Evaluations default to 2 (low, GitHub-API friendly), work default to 1 (matches healing-run cap).
     assert.equal(DEFAULT_CONFIG.maxConcurrentIssueEvaluations, 2);
     assert.equal(DEFAULT_CONFIG.maxConcurrentIssueWork, 1);
+  });
+
+  it("leaves the hourly agent-run ceiling unlimited by default", () => {
+    // 0 means unlimited: upgrading must not start refusing work that used to run.
+    assert.equal(DEFAULT_CONFIG.maxAgentInvocationsPerHour, 0);
   });
 
   it("uses rate-limit-safe install timer defaults", () => {

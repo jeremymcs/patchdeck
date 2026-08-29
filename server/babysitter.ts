@@ -52,6 +52,7 @@ import {
   type ParsedRepoSlug,
   type StatusReplyRef,
 } from "./github";
+import { resolveAgentModel, withAgentWork } from "./agentSpend";
 import { CIHealingManager, isTerminalHealingState } from "./ciHealingManager";
 import { classifyCIFailures, type ClassifiedCIFailure } from "./ciFailureClassifier";
 import { isFailingCheckSnapshot } from "./ciCheckIngestor";
@@ -3213,7 +3214,28 @@ export class PRBabysitter {
     return { status: "timeout", failures: [] };
   }
 
+  /**
+   * Public entry point. Establishes the agent-spend work context so every
+   * coding-agent spawn inside the run — evaluate, apply, code-owner fallback,
+   * conflict repair, CI healing — is attributed and metered. Nested contexts
+   * win, so CI healing bills as `heal_ci` rather than `babysit_pr`.
+   */
   async babysitPR(
+    prId: string,
+    preferredAgent: CodingAgent,
+    options?: Parameters<PRBabysitter["babysitPRInternal"]>[2],
+  ): Promise<void> {
+    const pr = await this.storage.getPR(prId);
+    return withAgentWork({
+      kind: "babysit_pr",
+      repo: pr?.repo ?? null,
+      targetId: prId,
+      agentRunId: options?.runId ?? null,
+      model: resolveAgentModel(preferredAgent, options?.agentSettings),
+    }, () => this.babysitPRInternal(prId, preferredAgent, options));
+  }
+
+  private async babysitPRInternal(
     prId: string,
     preferredAgent: CodingAgent,
     options?: {
@@ -3908,7 +3930,12 @@ export class PRBabysitter {
         cwd: string;
         prompt: string;
         phase: string;
-      }) => {
+      }) => withAgentWork({
+        kind: "evaluate_feedback",
+        repo: pr.repo,
+        targetId: pr.id,
+        agentRunId: runId,
+      }, async () => {
         try {
           return await this.runtime.evaluateFixNecessityWithAgent({
             agent,
@@ -3927,7 +3954,7 @@ export class PRBabysitter {
           }
           throw error;
         }
-      };
+      });
 
       const parsedPr: ParsedPRUrl = {
         owner: parsedRepo.owner,

@@ -40,6 +40,7 @@ const DEFAULT_SETTING_VALUES = {
   maxChangesPerRun: 20,
   maxConcurrentBabysitRuns: 3,
   maxAgentRetryAttempts: 3,
+  maxAgentInvocationsPerHour: 0,
   maxHealingAttemptsPerSession: 3,
   maxHealingAttemptsPerFingerprint: 2,
   maxConcurrentHealingRuns: 1,
@@ -1356,6 +1357,14 @@ export default function Settings() {
                 value={config?.maxAgentRetryAttempts ?? 3}
                 onChange={(v) => updateConfigMutation.mutate({ maxAgentRetryAttempts: v })}
                 defaultValue={DEFAULT_SETTING_VALUES.maxAgentRetryAttempts}
+                disabled={updateConfigMutation.isPending}
+              />
+              <SettingRow
+                label="Max agent runs per hour"
+                description="Ceiling on coding-agent runs across every path — PR work, issues, healing, releases, questions. Queued work waits and resumes as the hour rolls forward. 0 means unlimited."
+                value={config?.maxAgentInvocationsPerHour ?? 0}
+                onChange={(v) => updateConfigMutation.mutate({ maxAgentInvocationsPerHour: v })}
+                defaultValue={DEFAULT_SETTING_VALUES.maxAgentInvocationsPerHour}
                 disabled={updateConfigMutation.isPending}
               />
             </div>

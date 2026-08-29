@@ -345,6 +345,14 @@ const TOOLS: Tool[] = [
     inputSchema: { type: "object", properties: {}, required: [] },
   },
   {
+    name: "get_agent_spend",
+    description:
+      "Get coding-agent spend for the rolling hour: the ceiling, how many agent runs have been "
+      + "used, how many remain, when the next slot frees up, and a breakdown by work kind. "
+      + "A ceiling of 0 means unlimited.",
+    inputSchema: { type: "object", properties: {}, required: [] },
+  },
+  {
     name: "set_drain_mode",
     description:
       "Enable or disable drain mode. When drain mode is on, no new agent runs are started. " +
@@ -503,6 +511,8 @@ async function callTool(name: string, args: ToolArgs): Promise<unknown> {
     // Runtime
     case "get_runtime":
       return cfFetch("GET", "/api/runtime");
+    case "get_agent_spend":
+      return cfFetch("GET", "/api/agent-spend");
     case "set_drain_mode":
       return cfFetch("POST", "/api/runtime/drain", {
         enabled: args.enabled,

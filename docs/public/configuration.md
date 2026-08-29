@@ -163,6 +163,18 @@ patchdeck paces autonomous PR babysitter dispatch using a global in-flight cap f
 
 This value maps to `maxConcurrentBabysitRuns` in `GET /api/config` and `PATCH /api/config`.
 
+## Agent Spend Settings
+
+Every spawn of the `codex` or `claude` CLI is recorded in a local ledger, whichever path caused it: PR work, feedback evaluation, issue work, issue decompose and verify, CI healing, deployment healing, PR questions, release notes, and social posts. Agent health-check probes are recorded too, but never counted against the ceiling.
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `Max agent runs per hour` | `0` | Rolling-hour ceiling on coding-agent runs across every path. `0` means unlimited |
+
+The window rolls continuously rather than resetting at the top of the hour. When the ceiling is reached, the dispatcher stops claiming agent-invoking jobs and any agent run started inside an already-running job is refused. Queued work is not failed: it waits, and resumes on its own as the oldest run ages out of the window. The header shows current usage once a ceiling is set.
+
+This value maps to `maxAgentInvocationsPerHour` in `GET /api/config` and `PATCH /api/config`. `GET /api/agent-spend` reports usage, the ceiling, when the next slot frees up, and a breakdown by work kind.
+
 ## Deployment Healing Settings
 
 patchdeck can monitor merged PRs for failed Vercel or Railway deployments and open a follow-up fix PR when the deployment breaks after merge.

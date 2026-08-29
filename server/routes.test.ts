@@ -1907,3 +1907,52 @@ test("GET and POST /api/issues proxy the runtime issue monitor and work action",
     await harness.close();
   }
 });
+
+test("GET /api/agent-spend reports the rolling hour, and 0 means unlimited", async () => {
+  const storage = new MemStorage();
+  const harness = await createHarness(storage);
+
+  try {
+    const unlimited = await fetch(`${harness.baseUrl}/api/agent-spend`);
+    assert.equal(unlimited.status, 200);
+    const unlimitedBody = await unlimited.json();
+    assert.equal(unlimitedBody.max, 0);
+    assert.equal(unlimitedBody.used, 0);
+    assert.equal(unlimitedBody.remaining, null);
+    assert.equal(unlimitedBody.exhausted, false);
+
+    const config = await storage.getConfig();
+    await storage.updateConfig({ ...config, maxAgentInvocationsPerHour: 2 });
+
+    const startedAt = new Date().toISOString();
+    for (const [id, workKind] of [["inv-1", "babysit_pr"], ["inv-2", "heal_ci"], ["inv-3", "probe"]] as const) {
+      await storage.recordAgentInvocationStart({
+        id,
+        workKind,
+        agent: "claude",
+        model: "opus",
+        repo: "acme/widgets",
+        targetId: "pr-1",
+        agentRunId: null,
+        startedAt,
+        finishedAt: startedAt,
+        durationMs: 1000,
+        exitCode: 0,
+        outcome: "completed",
+        error: null,
+      });
+    }
+
+    const limited = await fetch(`${harness.baseUrl}/api/agent-spend`);
+    const body = await limited.json();
+    assert.equal(body.max, 2);
+    // The probe is reported in the breakdown but never counted as spend.
+    assert.equal(body.used, 2);
+    assert.equal(body.remaining, 0);
+    assert.equal(body.exhausted, true);
+    assert.equal(body.byKind.find((entry: { workKind: string }) => entry.workKind === "probe")?.count, 1);
+    assert.ok(new Date(body.resetsAt).getTime() > Date.now());
+  } finally {
+    await harness.close();
+  }
+});

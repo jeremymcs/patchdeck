@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { Link } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
-import type { ActivitySnapshot, Config, RuntimeState } from "@shared/schema";
+import type { ActivitySnapshot, AgentSpendSummary, Config, RuntimeState } from "@shared/schema";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
 import { ToastAction } from "@/components/ui/toast";
@@ -371,6 +371,52 @@ function GitHubRateLimitNotice() {
   );
 }
 
+function AgentSpendNotice() {
+  const { data: config } = useQuery<Config>({
+    queryKey: ["/api/config"],
+  });
+  const uiPollIntervalMs = getUiPollIntervalMs(config);
+  const { data: spend } = useQuery<AgentSpendSummary>({
+    queryKey: ["/api/agent-spend"],
+    refetchInterval: uiPollIntervalMs,
+  });
+
+  // No ceiling configured means unlimited, and an unlimited budget has nothing
+  // worth taking up header space.
+  if (!spend || spend.max === 0) {
+    return null;
+  }
+
+  const resetTime = new Date(spend.resetsAt).toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  const nearingCeiling = spend.used >= Math.ceil(spend.max * 0.8);
+
+  const label = spend.exhausted
+    ? `Agent runs paused until ${resetTime}`
+    : `${spend.used}/${spend.max} agent runs`;
+
+  const tooltip = spend.exhausted
+    ? `The hourly ceiling of ${spend.max} agent runs is reached. Queued work resumes on its own around ${resetTime}.`
+    : `${spend.used} of ${spend.max} agent runs used in the last hour, across PR work, issues, healing, releases, and questions.`;
+
+  const toneClass = spend.exhausted || nearingCeiling
+    ? "border-warning-border bg-warning-muted text-warning-foreground hover:border-warning hover:bg-warning-muted/80"
+    : "border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground";
+
+  return (
+    <Link
+      href="/settings"
+      title={tooltip}
+      data-testid="agent-spend-notice"
+      className={`inline-flex max-w-[320px] items-center truncate whitespace-nowrap rounded-md border px-2.5 py-1 text-label uppercase tracking-wider transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background ${toneClass}`}
+    >
+      {label}
+    </Link>
+  );
+}
+
 export function AppHeader({
   active,
   status,
@@ -407,8 +453,9 @@ export function AppHeader({
           })}
         </nav>
       </div>
-      <div className="flex min-w-0 items-center justify-center max-lg:empty:hidden">
+      <div className="flex min-w-0 items-center justify-center gap-2 max-lg:empty:hidden">
         <GitHubRateLimitNotice />
+        <AgentSpendNotice />
       </div>
       <div className="-mx-1 flex min-w-0 items-center gap-2 overflow-x-auto px-1 pb-0.5 lg:mx-0 lg:flex-wrap lg:overflow-visible lg:px-0 lg:pb-0 lg:justify-self-end lg:justify-end [&>*]:shrink-0 lg:[&>*]:shrink">
         {status ? (

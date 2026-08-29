@@ -180,6 +180,7 @@ Most configuration is editable in Settings:
 - GitHub progress replies
 - CI healing
 - Agent retry attempts for failed work
+- Hourly ceiling on agent runs
 - Theme
 
 Key defaults:
@@ -195,6 +196,11 @@ Key defaults:
   needs a person — expired agent credentials, a missing CLI — is parked and shown under
   **Needs attention**, and is retried again roughly hourly so it resumes on its own once fixed.
 - Drain mode pauses new agent work without deleting tracked state.
+- **Max agent runs per hour** (default 0, meaning unlimited) caps coding-agent runs
+  across every path — PR work, issues, CI and deployment healing, releases, and
+  questions. When the ceiling is reached, queued work waits instead of failing and
+  resumes on its own as the rolling hour moves forward. The header shows usage once
+  a ceiling is set, and `GET /api/agent-spend` reports the full breakdown.
 
 ## Authentication
 

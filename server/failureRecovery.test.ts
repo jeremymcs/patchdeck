@@ -3,6 +3,7 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
+import { AgentBudgetExhaustedError } from "./agentSpend";
 import {
   AGENT_INVOKING_JOB_KINDS,
   classifyFailure,
@@ -185,4 +186,26 @@ test("planFailedJobRecovery ignores jobs that are not parked", () => {
   );
 
   assert.deepEqual(revivable, []);
+});
+
+test("an exhausted agent budget is transient, not a spent retry attempt", () => {
+  const refusal = new AgentBudgetExhaustedError({
+    used: 30,
+    max: 30,
+    resetsAt: "2026-08-29T13:00:00.000Z",
+  });
+
+  // The agent never ran, so this must not consume the paid retry budget.
+  assert.equal(classifyFailure(refusal), "transient");
+  assert.notEqual(
+    resolveMaxAttempts({
+      kind: "babysit_pr",
+      failureClass: "transient",
+      maxAgentRetryAttempts: 3,
+    }),
+    3,
+  );
+
+  // The message survives a serialization boundary that loses the class.
+  assert.equal(classifyFailure(new Error(refusal.message)), "transient");
 });

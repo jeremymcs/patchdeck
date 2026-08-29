@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import type { AgentRuntimeSettings, CodingAgent, CommandResult } from "./agentRunner";
 import { applyFixesWithAgent, runCommand, summarizeAgentCommandFailure } from "./agentRunner";
+import { resolveAgentModel, withAgentWork } from "./agentSpend";
 import { preparePrWorktree, removePrWorktree } from "./repoWorkspace";
 import type { IssueSubtask, IssueSubtaskStatus } from "@shared/schema";
 import path from "node:path";
@@ -479,13 +480,18 @@ export async function runIssueWorkRepair(
 
     await ensureGitIdentity(worktreePath, deps.runCommand);
 
-    const agentResult = await deps.applyFixesWithAgent({
+    const agentResult = await withAgentWork({
+      kind: "work_issue",
+      repo: input.repo,
+      targetId: `${input.repo}#${input.issueNumber}`,
+      model: resolveAgentModel(input.agent, input.agentSettings),
+    }, () => deps.applyFixesWithAgent({
       agent: input.agent,
       settings: input.agentSettings,
       cwd: worktreePath,
       prompt: repoPrompt,
       env: input.env,
-    });
+    }));
 
     if (agentResult.code !== 0) {
       return {

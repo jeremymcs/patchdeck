@@ -262,6 +262,10 @@ export async function registerRoutes(
     runtime.stop();
   });
 
+  app.get("/api/agent-spend", async (_req, res) => {
+    res.json(await runtime.getAgentSpend());
+  });
+
   app.get("/api/runtime", async (_req, res) => {
     res.json(await runtime.getRuntimeSnapshot());
   });

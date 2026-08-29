@@ -1,6 +1,7 @@
 import type { IStorage } from "./storage";
 import type { AgentRuntimeSettings, CodingAgent } from "./agentRunner";
 import { buildAgentCommandArgs, resolveAgent, runAgentCommand, summarizeCommandResult } from "./agentRunner";
+import { resolveAgentModel, withAgentWork } from "./agentSpend";
 
 /**
  * Answers a user question about a PR by gathering context (PR state, feedback,
@@ -24,13 +25,17 @@ export async function answerPRQuestion(params: {
     const agent = await resolveAgent(preferredAgent);
     const prompt = buildPrompt(context, question);
 
-    const result = await runAgentCommand(
+    const result = await withAgentWork({
+      kind: "answer_pr_question",
+      targetId: prId,
+      model: resolveAgentModel(agent, agentSettings),
+    }, () => runAgentCommand(
       agent,
       agent === "claude"
         ? buildAgentCommandArgs("claude", ["-p", "--output-format", "text", prompt], agentSettings)
         : buildAgentCommandArgs("codex", ["exec", "--skip-git-repo-check", "--sandbox", "read-only", prompt], agentSettings),
       { timeoutMs: 180_000 },
-    );
+    ));
 
     if (result.code !== 0) {
       const errorMsg = summarizeCommandResult(result, `Agent exited with code ${result.code}`);

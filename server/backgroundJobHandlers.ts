@@ -27,6 +27,7 @@ import { decomposeIssueBody, hashIssueBody } from "./issueDecompose";
 import { verifySubtasksAgainstPr } from "./issueVerify";
 import { runIssueWorkRepair } from "./issueWorkAgent";
 import { answerPRQuestion, type PRQuestionRepositoryContext } from "./prQuestionAgent";
+import { withAgentWork } from "./agentSpend";
 import { getRateLimitState } from "./rateLimitState";
 import type { ReleaseManager } from "./releaseManager";
 import { runWithRequestPriority } from "./requestPriority";
@@ -493,11 +494,15 @@ export function createBackgroundJobHandlers(params: {
       const agent = resolveRepoCodingAgent(config, repoSettings);
       const agentSettings = resolveRepoAgentRuntimeSettings(config, repoSettings);
 
-      const freshDecomposed = await decomposeIssueBody({
+      const freshDecomposed = await withAgentWork({
+        kind: "decompose_issue",
+        repo: issue.repoFullName,
+        targetId,
+      }, () => decomposeIssueBody({
         body: issue.body,
         agent,
         settings: agentSettings,
-      });
+      }));
       const existingSet = await storage.getIssueSubtasks(targetId);
       const subtasks = freshDecomposed.length >= 2
         ? freshDecomposed
@@ -510,14 +515,18 @@ export function createBackgroundJobHandlers(params: {
             status: "pending" as const,
           }];
 
-      const result = await verifySubtasksAgainstPr({
+      const result = await withAgentWork({
+        kind: "verify_issue",
+        repo: issue.repoFullName,
+        targetId,
+      }, () => verifySubtasksAgainstPr({
         issueTitle: issue.title,
         issueBody: issue.body,
         subtasks,
         prDiff: diff,
         agent,
         settings: agentSettings,
-      });
+      }));
 
       await storage.upsertIssueSubtasks({
         targetId,
@@ -632,11 +641,15 @@ export function createBackgroundJobHandlers(params: {
         const existingSubtasks = await storage.getIssueSubtasks(targetId);
         let subtasks = existingSubtasks?.subtasks ?? [];
         if (!existingSubtasks || existingSubtasks.analyzedBodyHash !== bodyHash) {
-          subtasks = await decomposeIssueBody({
+          subtasks = await withAgentWork({
+            kind: "decompose_issue",
+            repo: issue.repoFullName,
+            targetId,
+          }, () => decomposeIssueBody({
             body: issue.body,
             agent,
             settings: agentSettings,
-          });
+          }));
           await storage.upsertIssueSubtasks({
             targetId,
             repo: issue.repoFullName,

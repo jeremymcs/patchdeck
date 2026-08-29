@@ -32,6 +32,7 @@ export const DEFAULT_CONFIG: Config = {
   deploymentCheckTimeoutMs: 900000,
   deploymentCheckPollIntervalMs: 60000,
   maxAgentRetryAttempts: 3,
+  maxAgentInvocationsPerHour: 0,
   maxConcurrentIssueEvaluations: 2,
   maxConcurrentIssueWork: 1,
   maxConcurrentBabysitRuns: 3,
