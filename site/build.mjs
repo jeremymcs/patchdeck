@@ -47,10 +47,26 @@ fs.rmSync(DIST, { recursive: true, force: true });
 copyStatic();
 
 if (watch) {
+  // Build the stylesheet once up front. dist/ was just cleared, and the watcher
+  // below may take a moment (or fail) to produce it — without this the page
+  // serves with a 404 on styles.css.
+  const initial = spawnSync(tailwindBin, cssArgs, { stdio: "inherit" });
+  if (initial.status !== 0) process.exit(initial.status ?? 1);
+
   fs.watch(path.join(ROOT, "index.html"), () => copyStatic());
   fs.watch(PUBLIC, { recursive: true }, () => copyStatic());
-  spawn(tailwindBin, [...cssArgs, "--watch"], { stdio: "inherit" });
-  console.log("watching — dist/ is live");
+
+  // stdin must be an open pipe we never write to or close. The Tailwind CLI
+  // watcher shuts down the moment stdin reaches EOF, which is what both
+  // "inherit" (when detached) and "ignore" (/dev/null) hand it immediately.
+  const watcher = spawn(tailwindBin, [...cssArgs, "--watch"], {
+    stdio: ["pipe", "inherit", "inherit"],
+  });
+  watcher.on("exit", (code) => {
+    console.error(`tailwind --watch exited (${code}); css is no longer rebuilding`);
+  });
+
+  console.log("watching — dist/ is live on the files it has built");
 } else {
   const result = spawnSync(tailwindBin, [...cssArgs, "--minify"], { stdio: "inherit" });
   if (result.status !== 0) process.exit(result.status ?? 1);

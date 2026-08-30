@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://patchdeck.vercel.app/sitemap.xml
+Sitemap: https://patchdeck-eta.vercel.app/sitemap.xml
