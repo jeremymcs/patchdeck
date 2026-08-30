@@ -61,8 +61,15 @@ project from the `jeremymcs/patchdeck` repository and set:
 
 ### One thing to change after the domain is set
 
-The canonical URL currently points at `https://patchdeck.vercel.app/`. Once the
-real domain is attached, update it in three places:
+The canonical URL points at `https://patchdeck-eta.vercel.app/`, the alias Vercel
+assigned this project.
+
+> Do not "correct" this to `patchdeck.vercel.app`. That hostname is taken by an
+> unrelated project ("PatchDeck — Visual Network Designer") and is not ours;
+> pointing the canonical, OG image or sitemap at it would hand our SEO and link
+> previews to a stranger's site.
+
+Once a real domain is attached, update it in three places:
 
 - `index.html` — `<link rel="canonical">`, the `og:url` / `og:image` /
   `twitter:image` meta tags, and the `url` field in the JSON-LD block
