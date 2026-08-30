@@ -1,0 +1,17 @@
+{
+  "name": "patchdeck-site",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Marketing website for PatchDeck",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "dev": "node build.mjs --watch",
+    "serve": "node build.mjs && node --run serve:only",
+    "serve:only": "npx --yes serve dist -l 4321"
+  },
+  "devDependencies": {
+    "tailwindcss": "^3.4.17"
+  }
+}

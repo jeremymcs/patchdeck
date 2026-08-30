@@ -1,0 +1,804 @@
+<!doctype html>
+<!--
+  PatchDeck Website — marketing landing page
+  Copyright (c) 2026 Jeremy McSpadden <jeremy@fluxlabs.net>
+-->
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PatchDeck — Keep your pull requests moving</title>
+<meta name="description" content="PatchDeck is a local-first workbench for GitHub pull requests and issues. It watches your repos, triages review feedback and failing checks, then runs your local coding agent in an isolated worktree to fix what needs fixing." />
+<link rel="canonical" href="https://patchdeck.vercel.app/" />
+<meta name="theme-color" content="#08090C" />
+
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="PatchDeck" />
+<meta property="og:title" content="PatchDeck — Keep your pull requests moving" />
+<meta property="og:description" content="A local-first workbench that watches your GitHub repos, triages review feedback and failing checks, then dispatches your local coding agent to fix them." />
+<meta property="og:url" content="https://patchdeck.vercel.app/" />
+<meta property="og:image" content="https://patchdeck.vercel.app/assets/og.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:image:alt" content="The PatchDeck dashboard showing watched repositories, open pull requests, and live agent activity." />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="PatchDeck — Keep your pull requests moving" />
+<meta name="twitter:description" content="A local-first workbench that watches your GitHub repos, triages review feedback and failing checks, then dispatches your local coding agent to fix them." />
+<meta name="twitter:image" content="https://patchdeck.vercel.app/assets/og.png" />
+
+<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&display=swap" />
+<link rel="stylesheet" href="/styles.css" />
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "PatchDeck",
+  "applicationCategory": "DeveloperApplication",
+  "operatingSystem": "macOS, Linux, Windows",
+  "softwareVersion": "1.6.0",
+  "description": "A local-first workbench for keeping GitHub pull requests and issues moving. Watches repositories, syncs review feedback and failed checks into one dashboard, then runs a local coding agent in an isolated worktree.",
+  "url": "https://patchdeck.vercel.app/",
+  "codeRepository": "https://github.com/jeremymcs/patchdeck",
+  "license": "https://opensource.org/licenses/MIT",
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+}
+</script>
+</head>
+
+<body>
+<a href="#main" class="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-run-500 focus:px-4 focus:py-2 focus:font-mono focus:text-sm focus:font-semibold focus:text-ink-950">Skip to content</a>
+
+<!-- ============================ NAV ============================ -->
+<header class="sticky top-0 z-40 border-b backdrop-blur-xl hairline" style="background: rgba(8,9,12,.82)">
+  <div class="shell flex h-16 items-center justify-between gap-4">
+    <a href="#" class="flex items-center gap-2.5 text-white" aria-label="PatchDeck home">
+      <svg class="h-6 w-6 text-run-500" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <rect x="3" y="3" width="7.5" height="7.5" rx="1.6" fill="currentColor" opacity=".95"/>
+        <rect x="13.5" y="3" width="7.5" height="7.5" rx="1.6" fill="currentColor" opacity=".45"/>
+        <rect x="3" y="13.5" width="7.5" height="7.5" rx="1.6" fill="currentColor" opacity=".45"/>
+        <rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.6" fill="currentColor" opacity=".95"/>
+      </svg>
+      <span class="font-mono text-[17px] font-semibold tracking-tight">PatchDeck</span>
+    </a>
+
+    <nav class="hidden items-center gap-7 font-mono text-[13px] text-slate-400 md:flex" aria-label="Primary">
+      <a href="#how" class="transition-colors hover:text-white">How it works</a>
+      <a href="#features" class="transition-colors hover:text-white">Features</a>
+      <a href="#safety" class="transition-colors hover:text-white">Safety</a>
+      <a href="#install" class="transition-colors hover:text-white">Install</a>
+      <a href="https://jeremymcs.github.io/patchdeck/" class="transition-colors hover:text-white">Docs</a>
+    </nav>
+
+    <div class="flex items-center gap-3">
+      <a href="https://github.com/jeremymcs/patchdeck" class="hidden items-center gap-2 font-mono text-[13px] text-slate-400 transition-colors hover:text-white sm:flex">
+        <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0 0 22 12.017C22 6.484 17.522 2 12 2z"/></svg>
+        <span>GitHub</span>
+      </a>
+      <a href="#install" class="btn-primary !px-4 !py-2 text-[13px]">Install</a>
+      <button type="button" id="navToggle" class="md:hidden rounded-lg border p-2 text-slate-300 hairline" aria-expanded="false" aria-controls="mobileNav" aria-label="Open menu">
+        <svg class="h-5 w-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" d="M4 7h16M4 12h16M4 17h16"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <nav id="mobileNav" hidden class="border-t hairline bg-ink-950 md:hidden" aria-label="Mobile">
+    <div class="shell flex flex-col py-3 font-mono text-sm">
+      <a href="#how" class="py-2.5 text-slate-300">How it works</a>
+      <a href="#features" class="py-2.5 text-slate-300">Features</a>
+      <a href="#safety" class="py-2.5 text-slate-300">Safety</a>
+      <a href="#install" class="py-2.5 text-slate-300">Install</a>
+      <a href="https://jeremymcs.github.io/patchdeck/" class="py-2.5 text-slate-300">Docs</a>
+      <a href="https://github.com/jeremymcs/patchdeck" class="py-2.5 text-slate-300">GitHub</a>
+    </div>
+  </nav>
+</header>
+
+<main id="main">
+
+<!-- ============================ HERO ============================ -->
+<section class="relative overflow-hidden">
+  <!-- CSS reproduction of the old 1.5 MB hero gradient PNG -->
+  <div class="pointer-events-none absolute inset-0 -z-10" aria-hidden="true"
+       style="background:
+         radial-gradient(60% 55% at 52% 38%, rgba(30,64,175,.30) 0%, rgba(30,64,175,.10) 45%, transparent 72%),
+         radial-gradient(40% 40% at 78% 12%, rgba(34,197,94,.10) 0%, transparent 70%);"></div>
+  <div class="pointer-events-none absolute inset-0 -z-10 opacity-[0.28]" aria-hidden="true"
+       style="background-image:linear-gradient(rgba(148,163,184,.07) 1px,transparent 1px),linear-gradient(90deg,rgba(148,163,184,.07) 1px,transparent 1px);background-size:64px 64px;mask-image:radial-gradient(ellipse 75% 55% at 50% 0%,#000 40%,transparent 100%);-webkit-mask-image:radial-gradient(ellipse 75% 55% at 50% 0%,#000 40%,transparent 100%)"></div>
+
+  <div class="shell pb-16 pt-16 sm:pt-24">
+    <div class="mx-auto max-w-3xl text-center">
+      <div class="mb-6 inline-flex items-center gap-2.5 rounded-full border px-3.5 py-1.5 hairline bg-ink-900/70">
+        <span class="h-1.5 w-1.5 rounded-full bg-run-500 animate-pulse-dot"></span>
+        <span class="font-mono text-[11px] uppercase tracking-[0.16em] text-slate-400">Local-first &middot; MIT &middot; v1.6.0</span>
+      </div>
+
+      <h1 class="text-[2.1rem] leading-[1.12] sm:text-5xl lg:text-[3.4rem]">
+        Stop babysitting<br class="hidden sm:block" /> your pull requests.
+      </h1>
+
+      <p class="mx-auto mt-6 max-w-2xl text-[1.05rem] leading-relaxed text-slate-400 sm:text-lg">
+        PatchDeck watches the repositories you choose, pulls review comments and failing
+        checks into one dashboard, then runs <em class="not-italic text-slate-200">your own</em> coding
+        agent in an isolated worktree to fix what needs fixing.
+      </p>
+
+      <!-- Install command -->
+      <div class="mx-auto mt-9 max-w-xl">
+        <div class="panel flex items-center gap-3 px-4 py-3 text-left">
+          <span class="select-none font-mono text-sm text-run-500" aria-hidden="true">$</span>
+          <code id="installCmd" class="flex-1 overflow-x-auto whitespace-nowrap font-mono text-[13px] text-slate-200 sm:text-sm">npm install -g @jeremymcs/patchdeck</code>
+          <button type="button" data-copy="npm install -g @jeremymcs/patchdeck"
+                  class="shrink-0 rounded-md border px-2.5 py-1.5 font-mono text-[11px] uppercase tracking-wider text-slate-400 transition-colors hairline hover:bg-ink-800 hover:text-white"
+                  aria-label="Copy install command">Copy</button>
+        </div>
+        <p class="mt-3 font-mono text-xs text-slate-500">then run <code class="text-slate-300">patchdeck</code> &rarr; dashboard on <span class="text-slate-300">localhost:5001</span></p>
+      </div>
+
+      <div class="mt-8 flex flex-wrap items-center justify-center gap-3">
+        <a href="#how" class="btn-primary">See how it works</a>
+        <a href="https://github.com/jeremymcs/patchdeck" class="btn-secondary">
+          <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0 0 22 12.017C22 6.484 17.522 2 12 2z"/></svg>
+          Star on GitHub
+        </a>
+      </div>
+
+      <p class="mt-5 font-mono text-[11px] uppercase tracking-[0.14em] text-slate-600">
+        Node 22+ &nbsp;·&nbsp; Git &nbsp;·&nbsp; Claude Code or Codex
+      </p>
+    </div>
+
+    <!-- Hero screenshot -->
+    <figure class="relative mt-14 sm:mt-16">
+      <div class="pointer-events-none absolute -inset-x-8 -top-6 bottom-1/2 -z-10 rounded-[40px] blur-3xl" aria-hidden="true"
+           style="background:radial-gradient(closest-side,rgba(59,130,246,.16),transparent)"></div>
+      <div class="frame">
+        <div class="frame-bar">
+          <span class="frame-dot bg-state-failed/70"></span>
+          <span class="frame-dot bg-state-progress/70"></span>
+          <span class="frame-dot bg-state-resolved/70"></span>
+          <span class="ml-3 font-mono text-[11px] text-slate-500">localhost:5001</span>
+        </div>
+        <img src="/assets/patchdeck-dashboard.webp" width="1920" height="1080" fetchpriority="high" decoding="async"
+             alt="The PatchDeck dashboard: counters for watched repos, open PRs, open issues, processing and failed jobs, a list of watched repositories, and a live activity feed of pull requests being monitored." />
+      </div>
+    </figure>
+  </div>
+</section>
+
+<!-- ============================ PROBLEM ============================ -->
+<section class="shell py-20 sm:py-28">
+  <div class="mx-auto max-w-2xl text-center">
+    <p class="eyebrow">The problem</p>
+    <h2 class="mt-3 text-3xl sm:text-4xl">Writing the code was never the slow part</h2>
+    <p class="mt-5 text-slate-400">
+      A pull request goes up in minutes. Then it sits — waiting on a review comment
+      nobody actioned, a check that failed for a boring reason, a thread left unresolved.
+      The work isn't hard. It's just scattered across tabs, and it's easy to forget.
+    </p>
+  </div>
+
+  <div class="mt-14 grid gap-4 sm:grid-cols-3">
+    <div class="panel p-6">
+      <div class="flex h-9 w-9 items-center justify-center rounded-lg border hairline bg-ink-850 text-state-progress">
+        <svg class="h-4.5 w-4.5" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></svg>
+      </div>
+      <h3 class="mt-4 text-base">Feedback goes stale</h3>
+      <p class="mt-2 text-sm leading-relaxed text-slate-400">
+        Review comments pile up across PRs. Some need real thought. Most need a
+        two-line change that nobody has gotten around to.
+      </p>
+    </div>
+    <div class="panel p-6">
+      <div class="flex h-9 w-9 items-center justify-center rounded-lg border hairline bg-ink-850 text-state-failed">
+        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v4m0 4h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/></svg>
+      </div>
+      <h3 class="mt-4 text-base">Checks fail quietly</h3>
+      <p class="mt-2 text-sm leading-relaxed text-slate-400">
+        A lint rule, a flaky job, a snapshot that needed updating. You find out when
+        you next open the tab — which might be tomorrow.
+      </p>
+    </div>
+    <div class="panel p-6">
+      <div class="flex h-9 w-9 items-center justify-center rounded-lg border hairline bg-ink-850 text-state-processing">
+        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3.6 3.6h16.8v4.2L14.4 13.8v6l-4.8-2.4v-3.6L3.6 7.8V3.6Z"/></svg>
+      </div>
+      <h3 class="mt-4 text-base">Context lives in tabs</h3>
+      <p class="mt-2 text-sm leading-relaxed text-slate-400">
+        Figuring out what still needs action means opening every PR, one at a time,
+        and reconstructing where each one got stuck.
+      </p>
+    </div>
+  </div>
+</section>
+
+<div class="shell"><div class="rule"></div></div>
+
+<!-- ============================ HOW IT WORKS ============================ -->
+<section id="how" class="shell py-20 sm:py-28">
+  <div class="mx-auto max-w-2xl text-center">
+    <p class="eyebrow">How it works</p>
+    <h2 class="mt-3 text-3xl sm:text-4xl">Watch. Sync. Triage. Dispatch.</h2>
+    <p class="mt-5 text-slate-400">
+      PatchDeck runs on your machine, polls the repos you point it at, and turns every
+      piece of open feedback into a tracked item with a visible state.
+    </p>
+  </div>
+
+  <ol class="mt-14 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    <li class="panel p-6">
+      <span class="eyebrow text-run-500">Step 01</span>
+      <h3 class="mt-3 text-base">Watch</h3>
+      <p class="mt-2 text-sm leading-relaxed text-slate-400">
+        Add a repository or paste a single PR URL. New repos default to
+        <strong class="font-medium text-slate-300">My PRs only</strong> so you don't
+        accidentally monitor the whole team on day one.
+      </p>
+    </li>
+    <li class="panel p-6">
+      <span class="eyebrow text-run-500">Step 02</span>
+      <h3 class="mt-3 text-base">Sync</h3>
+      <p class="mt-2 text-sm leading-relaxed text-slate-400">
+        Review comments, review threads, PR status, mergeability, CI state and
+        activity logs land in one local database.
+      </p>
+    </li>
+    <li class="panel p-6">
+      <span class="eyebrow text-run-500">Step 03</span>
+      <h3 class="mt-3 text-base">Triage</h3>
+      <p class="mt-2 text-sm leading-relaxed text-slate-400">
+        Each item is sorted into work to accept, feedback to reject as a no-op, or
+        something flagged for a human to look at.
+      </p>
+    </li>
+    <li class="panel p-6">
+      <span class="eyebrow text-run-500">Step 04</span>
+      <h3 class="mt-3 text-base">Dispatch</h3>
+      <p class="mt-2 text-sm leading-relaxed text-slate-400">
+        Accepted work runs in a clean git worktree. Verified fixes get committed and
+        pushed, threads get replies, conversations get resolved.
+      </p>
+    </li>
+  </ol>
+
+  <!-- Lifecycle -->
+  <div class="panel mt-6 overflow-hidden">
+    <div class="border-b px-6 py-4 hairline">
+      <p class="eyebrow">Every feedback item has a visible state</p>
+    </div>
+    <div class="overflow-x-auto px-6 py-9">
+      <svg viewBox="0 0 900 190" class="mx-auto block h-auto w-full min-w-[680px] max-w-[820px]" role="img"
+           aria-label="Lifecycle diagram: an item moves from pending to queued to in progress to resolved. From pending it can also branch to rejected, flagged, or failed.">
+        <defs>
+          <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0 0 10 5 0 10z" fill="#475569"/>
+          </marker>
+        </defs>
+        <g font-family="Fira Code, ui-monospace, monospace" font-size="13" text-anchor="middle">
+          <!-- happy path -->
+          <g>
+            <rect x="8"   y="22" width="150" height="42" rx="8" fill="#141720" stroke="rgba(148,163,184,.22)"/>
+            <text x="83"  y="48" fill="#cbd5e1">pending</text>
+            <rect x="218" y="22" width="150" height="42" rx="8" fill="#141720" stroke="rgba(148,163,184,.22)"/>
+            <text x="293" y="48" fill="#cbd5e1">queued</text>
+            <rect x="428" y="22" width="170" height="42" rx="8" fill="rgba(245,158,11,.10)" stroke="rgba(245,158,11,.45)"/>
+            <text x="513" y="48" fill="#fcd34d">in_progress</text>
+            <rect x="658" y="22" width="160" height="42" rx="8" fill="rgba(34,197,94,.10)" stroke="rgba(34,197,94,.45)"/>
+            <text x="738" y="48" fill="#86efac">resolved</text>
+          </g>
+          <g stroke="#475569" stroke-width="1.5" marker-end="url(#ar)" fill="none">
+            <path d="M162 43 H212"/>
+            <path d="M372 43 H422"/>
+            <path d="M602 43 H652"/>
+          </g>
+
+          <!-- branches off pending -->
+          <g stroke="#475569" stroke-width="1.5" marker-end="url(#ar)" fill="none" stroke-dasharray="4 4">
+            <path d="M83 68 V96 H286"/>
+            <path d="M83 68 V130 H286"/>
+            <path d="M83 68 V164 H286"/>
+          </g>
+          <g text-anchor="start">
+            <rect x="292" y="80"  width="132" height="32" rx="7" fill="#141720" stroke="rgba(148,163,184,.18)"/>
+            <text x="358" y="101" fill="#94a3b8" text-anchor="middle">rejected</text>
+            <rect x="292" y="114" width="132" height="32" rx="7" fill="rgba(96,165,250,.08)" stroke="rgba(96,165,250,.35)"/>
+            <text x="358" y="135" fill="#93c5fd" text-anchor="middle">flagged</text>
+            <rect x="292" y="148" width="132" height="32" rx="7" fill="rgba(239,68,68,.08)" stroke="rgba(239,68,68,.35)"/>
+            <text x="358" y="169" fill="#fca5a5" text-anchor="middle">failed</text>
+          </g>
+          <g font-size="11" fill="#64748b" text-anchor="start">
+            <text x="440" y="101">no action needed</text>
+            <text x="440" y="135">needs a human decision</text>
+            <text x="440" y="169">retried with backoff</text>
+          </g>
+        </g>
+      </svg>
+    </div>
+  </div>
+</section>
+
+<div class="shell"><div class="rule"></div></div>
+
+<!-- ============================ FEATURES ============================ -->
+<section id="features" class="shell py-20 sm:py-28">
+  <div class="mx-auto max-w-2xl text-center">
+    <p class="eyebrow">What's inside</p>
+    <h2 class="mt-3 text-3xl sm:text-4xl">One deck for everything around the code</h2>
+  </div>
+
+  <div class="mt-16 space-y-20 sm:space-y-28">
+
+    <!-- PRs -->
+    <div class="grid items-center gap-10 lg:grid-cols-2 lg:gap-14">
+      <div>
+        <p class="eyebrow text-state-processing">Pull requests</p>
+        <h3 class="mt-3 text-2xl sm:text-[1.75rem]">See every open thread in one place</h3>
+        <p class="mt-4 leading-relaxed text-slate-400">
+          PatchDeck stores each PR's comments, review threads, failing checks, mergeability,
+          docs-assessment state and local activity log. When work is accepted it prepares a
+          clean worktree, runs your agent with the PR context, and handles the follow-up —
+          pushing commits, replying on GitHub, resolving threads, polling CI.
+        </p>
+        <ul class="mt-6 space-y-2.5 text-sm text-slate-400">
+          <li class="flex gap-3"><span class="mt-2 h-1 w-1 shrink-0 rounded-full bg-run-500"></span><span>Pause automation on a single PR without losing its state</span></li>
+          <li class="flex gap-3"><span class="mt-2 h-1 w-1 shrink-0 rounded-full bg-run-500"></span><span>Trusted reviewers and ignored bots, configurable per install</span></li>
+          <li class="flex gap-3"><span class="mt-2 h-1 w-1 shrink-0 rounded-full bg-run-500"></span><span>Direct PR URLs stay tracked regardless of repo scope</span></li>
+        </ul>
+      </div>
+      <figure class="frame">
+        <div class="frame-bar"><span class="frame-dot bg-ink-600"></span><span class="frame-dot bg-ink-600"></span><span class="frame-dot bg-ink-600"></span><span class="ml-3 font-mono text-[11px] text-slate-500">Pull requests</span></div>
+        <img src="/assets/patchdeck-prs.webp" width="1920" height="1080" loading="lazy" decoding="async"
+             alt="The PatchDeck pull requests page listing tracked PRs with their review threads, check status and per-PR actions." />
+      </figure>
+    </div>
+
+    <!-- Issues -->
+    <div class="grid items-center gap-10 lg:grid-cols-2 lg:gap-14">
+      <div class="lg:order-2">
+        <p class="eyebrow text-state-progress">Issues</p>
+        <h3 class="mt-3 text-2xl sm:text-[1.75rem]">Turn a labelled issue into an open PR</h3>
+        <p class="mt-4 leading-relaxed text-slate-400">
+          Hit <strong class="font-medium text-slate-300">Work issue</strong> and PatchDeck creates an
+          isolated worktree, works from the issue context, pushes a branch and opens a linked
+          pull request. Automatic issue work is opt-in per repository and gated by labels.
+        </p>
+        <div class="mt-6 grid gap-3 sm:grid-cols-2">
+          <div class="rounded-lg border p-4 hairline bg-ink-900">
+            <p class="eyebrow text-run-500">Ready labels</p>
+            <p class="mt-2 font-mono text-[11px] leading-relaxed text-slate-400">ready-for-agent<br/>ready-to-work<br/>agent-ready<br/>ready</p>
+          </div>
+          <div class="rounded-lg border p-4 hairline bg-ink-900">
+            <p class="eyebrow text-state-failed">Blocking labels</p>
+            <p class="mt-2 font-mono text-[11px] leading-relaxed text-slate-400">blocked · question<br/>needs-maintainer-review<br/>needs-author-feedback<br/>needs-discussion</p>
+          </div>
+        </div>
+      </div>
+      <figure class="frame lg:order-1">
+        <div class="frame-bar"><span class="frame-dot bg-ink-600"></span><span class="frame-dot bg-ink-600"></span><span class="frame-dot bg-ink-600"></span><span class="ml-3 font-mono text-[11px] text-slate-500">Issues</span></div>
+        <img src="/assets/patchdeck-issues.webp" width="1920" height="1080" loading="lazy" decoding="async"
+             alt="The PatchDeck issues page showing issue bodies, labels, work state, failed attempts and linked pull requests." />
+      </figure>
+    </div>
+
+    <!-- Releases -->
+    <div class="grid items-center gap-10 lg:grid-cols-2 lg:gap-14">
+      <div>
+        <p class="eyebrow text-state-resolved">Releases</p>
+        <h3 class="mt-3 text-2xl sm:text-[1.75rem]">Version bump, notes, published</h3>
+        <p class="mt-4 leading-relaxed text-slate-400">
+          PatchDeck can evaluate merged PRs for release-worthiness, propose a version bump,
+          write the release notes and create the GitHub release. The Releases page shows both
+          PatchDeck runs and releases created outside the app.
+        </p>
+        <p class="mt-4 rounded-lg border-l-2 border-run-500/60 bg-ink-900 px-4 py-3 text-sm text-slate-400">
+          Automatic release creation is <strong class="font-medium text-slate-200">off by default</strong>.
+          Leave it off and use the manual <strong class="font-medium text-slate-200">Release</strong> button instead.
+        </p>
+      </div>
+      <figure class="frame">
+        <div class="frame-bar"><span class="frame-dot bg-ink-600"></span><span class="frame-dot bg-ink-600"></span><span class="frame-dot bg-ink-600"></span><span class="ml-3 font-mono text-[11px] text-slate-500">Releases</span></div>
+        <img src="/assets/patchdeck-releases.webp" width="1920" height="1080" loading="lazy" decoding="async"
+             alt="The PatchDeck releases pipeline showing release runs, proposed version bumps and published GitHub releases." />
+      </figure>
+    </div>
+
+    <!-- Healing -->
+    <div class="grid items-center gap-10 lg:grid-cols-2 lg:gap-14">
+      <div class="lg:order-2">
+        <p class="eyebrow text-state-failed">CI &amp; deployment healing</p>
+        <h3 class="mt-3 text-2xl sm:text-[1.75rem]">Bounded repairs for boring failures</h3>
+        <p class="mt-4 leading-relaxed text-slate-400">
+          When enabled, PatchDeck classifies failing checks, opens a healing session, and only
+          attempts repairs for failures it considers fixable in the PR branch. Retry limits and
+          concurrency are yours to set. Post-merge, it can watch supported deployments and open
+          a follow-up fix PR if one fails.
+        </p>
+        <p class="mt-4 text-sm text-slate-500">
+          Deployment platform detection currently covers Vercel and Railway markers, and the
+          matching CLI must be installed and authenticated on the same machine.
+        </p>
+      </div>
+      <div class="panel lg:order-1 p-6 sm:p-8">
+        <div class="space-y-3">
+          <div class="flex items-center justify-between rounded-lg border px-4 py-3 hairline bg-ink-850">
+            <div class="flex items-center gap-3">
+              <span class="h-2 w-2 rounded-full bg-state-failed"></span>
+              <span class="font-mono text-[13px] text-slate-300">build / lint</span>
+            </div>
+            <span class="font-mono text-[11px] uppercase tracking-wider text-state-failed">failed</span>
+          </div>
+          <div class="flex items-center justify-between rounded-lg border px-4 py-3" style="border-color:rgba(245,158,11,.35);background:rgba(245,158,11,.07)">
+            <div class="flex items-center gap-3">
+              <span class="h-2 w-2 rounded-full bg-state-progress animate-pulse-dot"></span>
+              <span class="font-mono text-[13px] text-slate-200">healing session</span>
+            </div>
+            <span class="tabnum font-mono text-[11px] uppercase tracking-wider text-state-progress">attempt 1/3</span>
+          </div>
+          <div class="flex items-center justify-between rounded-lg border px-4 py-3" style="border-color:rgba(34,197,94,.35);background:rgba(34,197,94,.07)">
+            <div class="flex items-center gap-3">
+              <span class="h-2 w-2 rounded-full bg-state-resolved"></span>
+              <span class="font-mono text-[13px] text-slate-200">build / lint</span>
+            </div>
+            <span class="font-mono text-[11px] uppercase tracking-wider text-state-resolved">passing</span>
+          </div>
+        </div>
+        <p class="mt-5 border-t pt-4 font-mono text-[11px] leading-relaxed text-slate-500 hairline">
+          Illustration of a healing session. CI healing is disabled until you turn it on.
+        </p>
+      </div>
+    </div>
+
+    <!-- Logs -->
+    <div class="grid items-center gap-10 lg:grid-cols-2 lg:gap-14">
+      <div>
+        <p class="eyebrow">Logs</p>
+        <h3 class="mt-3 text-2xl sm:text-[1.75rem]">Watch exactly what it did</h3>
+        <p class="mt-4 leading-relaxed text-slate-400">
+          Structured logs stream to stdout and to <code class="rounded bg-ink-800 px-1.5 py-0.5 font-mono text-[13px] text-slate-300">~/.patchdeck/log/server.log</code>.
+          The Logs page adds filtering, search and live tailing. GitHub tokens are redacted
+          before anything is written.
+        </p>
+        <p class="mt-4 leading-relaxed text-slate-400">
+          Because every agent run is recorded, you can turn automation on one switch at a time
+          and check the trail before trusting the next one.
+        </p>
+      </div>
+      <figure class="frame">
+        <div class="frame-bar"><span class="frame-dot bg-ink-600"></span><span class="frame-dot bg-ink-600"></span><span class="frame-dot bg-ink-600"></span><span class="ml-3 font-mono text-[11px] text-slate-500">Logs</span></div>
+        <img src="/assets/patchdeck-logs.webp" width="1920" height="1080" loading="lazy" decoding="async"
+             alt="The PatchDeck logs page with filtering, search and live tailing of structured server log records." />
+      </figure>
+    </div>
+
+  </div>
+</section>
+
+<div class="shell"><div class="rule"></div></div>
+
+<!-- ============================ SAFETY ============================ -->
+<section id="safety" class="shell py-20 sm:py-28">
+  <div class="grid gap-12 lg:grid-cols-2 lg:gap-16">
+    <div>
+      <p class="eyebrow text-run-500">Safety</p>
+      <h2 class="mt-3 text-3xl sm:text-4xl">Local-first, and cautious on purpose</h2>
+      <p class="mt-5 leading-relaxed text-slate-400">
+        PatchDeck drives a coding agent against real branches, so it is built to be
+        boring about it. State lives on the machine running it, git work happens in
+        app-owned worktrees, and the automatic paths ship switched off.
+      </p>
+      <p class="mt-5 rounded-lg border-l-2 border-state-progress/70 bg-ink-900 px-4 py-3.5 text-sm leading-relaxed text-slate-300">
+        PatchDeck can spend paid agent usage when automation is enabled. Start manually,
+        watch the logs, and only turn on the automatic paths you actually trust.
+      </p>
+
+      <figure class="frame mt-8">
+        <div class="frame-bar"><span class="frame-dot bg-ink-600"></span><span class="frame-dot bg-ink-600"></span><span class="frame-dot bg-ink-600"></span><span class="ml-3 font-mono text-[11px] text-slate-500">Settings</span></div>
+        <img src="/assets/patchdeck-settings.webp" width="1920" height="1080" loading="lazy" decoding="async"
+             alt="The PatchDeck settings page with toggles for automation, agent selection, retry limits and GitHub credentials." />
+      </figure>
+    </div>
+
+    <div class="grid gap-4 self-start sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
+      <div class="panel p-5">
+        <h3 class="text-[15px]">Your data stays put</h3>
+        <p class="mt-2 text-sm leading-relaxed text-slate-400">Everything lives in <code class="font-mono text-[12px] text-slate-300">~/.patchdeck/state.sqlite</code>. No PatchDeck server, no telemetry, no account.</p>
+      </div>
+      <div class="panel p-5">
+        <h3 class="text-[15px]">Isolated worktrees</h3>
+        <p class="mt-2 text-sm leading-relaxed text-slate-400">Agents never touch your working copy. Each run gets a clean git worktree under the PatchDeck home directory.</p>
+      </div>
+      <div class="panel p-5">
+        <h3 class="text-[15px]">Off by default</h3>
+        <p class="mt-2 text-sm leading-relaxed text-slate-400">Automatic releases, CI healing and deployment healing are all disabled until you explicitly enable them.</p>
+      </div>
+      <div class="panel p-5">
+        <h3 class="text-[15px]">Spend ceiling</h3>
+        <p class="mt-2 text-sm leading-relaxed text-slate-400">Cap agent runs per rolling hour across every path. At the ceiling, work waits instead of failing, then resumes on its own.</p>
+      </div>
+      <div class="panel p-5">
+        <h3 class="text-[15px]">Drain mode</h3>
+        <p class="mt-2 text-sm leading-relaxed text-slate-400">Pause all new agent work in one switch without deleting a single piece of tracked state.</p>
+      </div>
+      <div class="panel p-5">
+        <h3 class="text-[15px]">Bounded retries</h3>
+        <p class="mt-2 text-sm leading-relaxed text-slate-400">Failures retry with backoff up to your limit. Anything needing a person is parked under <strong class="font-medium text-slate-300">Needs attention</strong>.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="shell"><div class="rule"></div></div>
+
+<!-- ============================ INTERFACES ============================ -->
+<section class="shell py-20 sm:py-28">
+  <div class="mx-auto max-w-2xl text-center">
+    <p class="eyebrow">Interfaces</p>
+    <h2 class="mt-3 text-3xl sm:text-4xl">Four ways in, one local state</h2>
+  </div>
+
+  <div class="mt-14 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    <div class="panel flex flex-col p-6">
+      <h3 class="text-base">Web dashboard</h3>
+      <code class="mt-2 font-mono text-[12px] text-run-500">patchdeck</code>
+      <p class="mt-3 flex-1 text-sm leading-relaxed text-slate-400">The primary UI for PRs, issues, releases, logs and settings.</p>
+    </div>
+    <div class="panel flex flex-col p-6">
+      <h3 class="text-base">MCP server</h3>
+      <code class="mt-2 font-mono text-[12px] text-run-500">patchdeck mcp</code>
+      <p class="mt-3 flex-1 text-sm leading-relaxed text-slate-400">Tool access from any MCP-compatible host, against the same local state.</p>
+    </div>
+    <div class="panel flex flex-col p-6">
+      <h3 class="text-base">Local REST API</h3>
+      <code class="mt-2 font-mono text-[12px] text-slate-500">starts with the server</code>
+      <p class="mt-3 flex-1 text-sm leading-relaxed text-slate-400">Programmatic access for your own scripts and dashboards.</p>
+    </div>
+    <div class="panel flex flex-col p-6">
+      <h3 class="text-base">Desktop app</h3>
+      <code class="mt-2 font-mono text-[12px] text-run-500">npm run tauri:build</code>
+      <p class="mt-3 flex-1 text-sm leading-relaxed text-slate-400">A native shell that keeps PatchDeck in the macOS menu bar with live counts.</p>
+    </div>
+  </div>
+
+  <p class="mt-8 text-center text-sm text-slate-500">
+    You can also just ask it things —
+    <a href="https://jeremymcs.github.io/patchdeck/public/_site/pr-questions.html" class="border-b border-run-500/40 text-slate-300 transition-colors hover:border-run-500 hover:text-white">natural-language questions</a>
+    about tracked PR state work from the dashboard, the API and MCP.
+  </p>
+</section>
+
+<div class="shell"><div class="rule"></div></div>
+
+<!-- ============================ INSTALL ============================ -->
+<section id="install" class="shell py-20 sm:py-28">
+  <div class="mx-auto max-w-2xl text-center">
+    <p class="eyebrow">Install</p>
+    <h2 class="mt-3 text-3xl sm:text-4xl">Running in about a minute</h2>
+  </div>
+
+  <div class="mx-auto mt-14 grid max-w-5xl gap-6 lg:grid-cols-[1.05fr,1fr]">
+    <div class="panel overflow-hidden">
+      <div class="border-b px-5 py-3 hairline"><p class="eyebrow">Terminal</p></div>
+      <div class="space-y-5 p-5 sm:p-6">
+        <div>
+          <p class="mb-2 font-mono text-[11px] uppercase tracking-wider text-slate-500">1 &middot; Install</p>
+          <div class="flex items-center gap-3 rounded-lg border px-4 py-3 hairline bg-ink-950">
+            <span class="select-none font-mono text-sm text-run-500" aria-hidden="true">$</span>
+            <code class="flex-1 overflow-x-auto whitespace-nowrap font-mono text-[13px] text-slate-200">npm install -g @jeremymcs/patchdeck</code>
+            <button type="button" data-copy="npm install -g @jeremymcs/patchdeck" class="shrink-0 rounded-md border px-2.5 py-1 font-mono text-[11px] uppercase tracking-wider text-slate-400 transition-colors hairline hover:bg-ink-800 hover:text-white" aria-label="Copy install command">Copy</button>
+          </div>
+        </div>
+        <div>
+          <p class="mb-2 font-mono text-[11px] uppercase tracking-wider text-slate-500">2 &middot; Start</p>
+          <div class="flex items-center gap-3 rounded-lg border px-4 py-3 hairline bg-ink-950">
+            <span class="select-none font-mono text-sm text-run-500" aria-hidden="true">$</span>
+            <code class="flex-1 overflow-x-auto whitespace-nowrap font-mono text-[13px] text-slate-200">patchdeck</code>
+            <button type="button" data-copy="patchdeck" class="shrink-0 rounded-md border px-2.5 py-1 font-mono text-[11px] uppercase tracking-wider text-slate-400 transition-colors hairline hover:bg-ink-800 hover:text-white" aria-label="Copy start command">Copy</button>
+          </div>
+          <p class="mt-2 font-mono text-[11px] text-slate-500">Opens <span class="text-slate-300">http://localhost:5001</span> in your browser.</p>
+        </div>
+        <div class="border-t pt-5 hairline">
+          <p class="eyebrow mb-3">Prerequisites</p>
+          <ul class="space-y-2 text-sm text-slate-400">
+            <li class="flex gap-3"><span class="mt-2 h-1 w-1 shrink-0 rounded-full bg-slate-600"></span><span>Node.js 22+ and Git</span></li>
+            <li class="flex gap-3"><span class="mt-2 h-1 w-1 shrink-0 rounded-full bg-slate-600"></span><span>GitHub auth via <code class="rounded bg-ink-800 px-1 py-0.5 font-mono text-[12px] text-slate-300">gh auth login</code>, <code class="rounded bg-ink-800 px-1 py-0.5 font-mono text-[12px] text-slate-300">GITHUB_TOKEN</code>, or a token saved in Settings</span></li>
+            <li class="flex gap-3"><span class="mt-2 h-1 w-1 shrink-0 rounded-full bg-slate-600"></span><span>A local coding CLI: <code class="rounded bg-ink-800 px-1 py-0.5 font-mono text-[12px] text-slate-300">claude</code> or <code class="rounded bg-ink-800 px-1 py-0.5 font-mono text-[12px] text-slate-300">codex</code>, installed and authenticated</span></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel overflow-hidden">
+      <div class="border-b px-5 py-3 hairline"><p class="eyebrow">A cautious first run</p></div>
+      <ol class="space-y-4 p-5 sm:p-6">
+        <li class="flex gap-3.5"><span class="tabnum mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md border font-mono text-[11px] text-slate-400 hairline bg-ink-850">1</span><p class="text-sm leading-relaxed text-slate-400">Add one repository, or paste a single PR URL.</p></li>
+        <li class="flex gap-3.5"><span class="tabnum mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md border font-mono text-[11px] text-slate-400 hairline bg-ink-850">2</span><p class="text-sm leading-relaxed text-slate-400">Confirm GitHub auth in Settings if no token was picked up automatically.</p></li>
+        <li class="flex gap-3.5"><span class="tabnum mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md border font-mono text-[11px] text-slate-400 hairline bg-ink-850">3</span><p class="text-sm leading-relaxed text-slate-400">Keep repo discovery on <strong class="font-medium text-slate-300">My PRs only</strong> until you want team-wide monitoring.</p></li>
+        <li class="flex gap-3.5"><span class="tabnum mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md border font-mono text-[11px] text-slate-400 hairline bg-ink-850">4</span><p class="text-sm leading-relaxed text-slate-400">Turn off <strong class="font-medium text-slate-300">Auto PRs</strong> and <strong class="font-medium text-slate-300">Auto Issues</strong> before adding busy repos.</p></li>
+        <li class="flex gap-3.5"><span class="tabnum mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md border font-mono text-[11px] text-slate-400 hairline bg-ink-850">5</span><p class="text-sm leading-relaxed text-slate-400">Work manually until the behaviour looks right, then re-enable the automatic paths you want.</p></li>
+      </ol>
+      <div class="border-t px-5 py-4 hairline sm:px-6">
+        <a href="https://jeremymcs.github.io/patchdeck/public/_site/getting-started.html" class="font-mono text-[13px] text-run-500 transition-colors hover:text-run-400">Read the full guide &rarr;</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="shell"><div class="rule"></div></div>
+
+<!-- ============================ FAQ ============================ -->
+<section class="shell py-20 sm:py-28">
+  <div class="mx-auto max-w-3xl">
+    <div class="text-center">
+      <p class="eyebrow">FAQ</p>
+      <h2 class="mt-3 text-3xl sm:text-4xl">Reasonable questions</h2>
+    </div>
+
+    <div class="mt-12 divide-y" style="border-color:var(--hairline)">
+      <details class="group border-t py-1" style="border-color:var(--hairline)">
+        <summary class="flex cursor-pointer list-none items-center justify-between gap-4 py-4 text-[15px] font-medium text-slate-200 transition-colors hover:text-white">
+          Does PatchDeck cost anything?
+          <svg class="h-4 w-4 shrink-0 text-slate-500 transition-transform group-open:rotate-45" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" d="M12 5v14M5 12h14"/></svg>
+        </summary>
+        <p class="pb-5 text-sm leading-relaxed text-slate-400">PatchDeck itself is free and MIT-licensed. It drives <em class="not-italic text-slate-300">your</em> coding agent, though — so when automation is enabled it can spend whatever your Claude Code or Codex plan charges. That's why every automatic path ships off, and why there's an hourly ceiling on agent runs.</p>
+      </details>
+
+      <details class="group py-1">
+        <summary class="flex cursor-pointer list-none items-center justify-between gap-4 py-4 text-[15px] font-medium text-slate-200 transition-colors hover:text-white">
+          Which coding agents are supported?
+          <svg class="h-4 w-4 shrink-0 text-slate-500 transition-transform group-open:rotate-45" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" d="M12 5v14M5 12h14"/></svg>
+        </summary>
+        <p class="pb-5 text-sm leading-relaxed text-slate-400">Claude Code (<code class="font-mono text-[12px] text-slate-300">claude</code>) and OpenAI Codex (<code class="font-mono text-[12px] text-slate-300">codex</code>). Install and authenticate one on the same machine; you can also configure a fallback agent for when the primary is unavailable.</p>
+      </details>
+
+      <details class="group py-1">
+        <summary class="flex cursor-pointer list-none items-center justify-between gap-4 py-4 text-[15px] font-medium text-slate-200 transition-colors hover:text-white">
+          Where does my data go?
+          <svg class="h-4 w-4 shrink-0 text-slate-500 transition-transform group-open:rotate-45" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" d="M12 5v14M5 12h14"/></svg>
+        </summary>
+        <p class="pb-5 text-sm leading-relaxed text-slate-400">Nowhere. State is a SQLite file at <code class="font-mono text-[12px] text-slate-300">~/.patchdeck/state.sqlite</code> (override with <code class="font-mono text-[12px] text-slate-300">PATCHDECK_HOME</code>). There is no PatchDeck backend and no account to create. Traffic goes to GitHub and to your agent's provider, and nowhere else.</p>
+      </details>
+
+      <details class="group py-1">
+        <summary class="flex cursor-pointer list-none items-center justify-between gap-4 py-4 text-[15px] font-medium text-slate-200 transition-colors hover:text-white">
+          Will it push to my branches without asking?
+          <svg class="h-4 w-4 shrink-0 text-slate-500 transition-transform group-open:rotate-45" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" d="M12 5v14M5 12h14"/></svg>
+        </summary>
+        <p class="pb-5 text-sm leading-relaxed text-slate-400">Only on paths you've enabled. When work is accepted and automation is on, PatchDeck commits and pushes verified fixes to the PR branch and can reply to review threads. Turn off Auto PRs and Auto Issues to keep everything manual, use drain mode to pause new work, or pause a single PR without untracking it.</p>
+      </details>
+
+      <details class="group py-1">
+        <summary class="flex cursor-pointer list-none items-center justify-between gap-4 py-4 text-[15px] font-medium text-slate-200 transition-colors hover:text-white">
+          Can I reach the dashboard from another machine?
+          <svg class="h-4 w-4 shrink-0 text-slate-500 transition-transform group-open:rotate-45" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" d="M12 5v14M5 12h14"/></svg>
+        </summary>
+        <p class="pb-5 text-sm leading-relaxed text-slate-400">Yes, and it's opt-in. Set <code class="font-mono text-[12px] text-slate-300">PATCHDECK_WEB_USERNAME</code> and <code class="font-mono text-[12px] text-slate-300">PATCHDECK_WEB_PASSWORD</code> (or save credentials in Settings) before starting. Local browser and local API access don't need a login. Put TLS in front of it before exposing it outside a trusted network.</p>
+      </details>
+
+      <details class="group py-1">
+        <summary class="flex cursor-pointer list-none items-center justify-between gap-4 py-4 text-[15px] font-medium text-slate-200 transition-colors hover:text-white">
+          Do I have to let it run automatically?
+          <svg class="h-4 w-4 shrink-0 text-slate-500 transition-transform group-open:rotate-45" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" d="M12 5v14M5 12h14"/></svg>
+        </summary>
+        <p class="pb-5 text-sm leading-relaxed text-slate-400">No. Plenty of people run PatchDeck purely as a dashboard — one place to see which PRs have unresolved threads or failing checks — and press the buttons themselves. The automation is there when you want it.</p>
+      </details>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ CTA ============================ -->
+<section class="relative overflow-hidden border-t hairline">
+  <div class="pointer-events-none absolute inset-0 -z-10" aria-hidden="true"
+       style="background:radial-gradient(60% 120% at 50% 100%, rgba(34,197,94,.13) 0%, transparent 70%)"></div>
+  <div class="shell py-20 text-center sm:py-28">
+    <h2 class="mx-auto max-w-2xl text-3xl sm:text-4xl">Give your PRs somewhere to land</h2>
+    <p class="mx-auto mt-5 max-w-xl text-slate-400">Free, MIT-licensed, and it runs entirely on your machine.</p>
+    <div class="mx-auto mt-8 max-w-md">
+      <div class="panel flex items-center gap-3 px-4 py-3 text-left">
+        <span class="select-none font-mono text-sm text-run-500" aria-hidden="true">$</span>
+        <code class="flex-1 overflow-x-auto whitespace-nowrap font-mono text-[13px] text-slate-200">npm install -g @jeremymcs/patchdeck</code>
+        <button type="button" data-copy="npm install -g @jeremymcs/patchdeck" class="shrink-0 rounded-md border px-2.5 py-1.5 font-mono text-[11px] uppercase tracking-wider text-slate-400 transition-colors hairline hover:bg-ink-800 hover:text-white" aria-label="Copy install command">Copy</button>
+      </div>
+    </div>
+    <div class="mt-7 flex flex-wrap items-center justify-center gap-3">
+      <a href="https://github.com/jeremymcs/patchdeck" class="btn-primary">View on GitHub</a>
+      <a href="https://jeremymcs.github.io/patchdeck/" class="btn-secondary">Read the docs</a>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<!-- ============================ FOOTER ============================ -->
+<footer class="border-t hairline">
+  <div class="shell py-12">
+    <div class="flex flex-col gap-10 md:flex-row md:justify-between">
+      <div class="max-w-xs">
+        <div class="flex items-center gap-2.5 text-white">
+          <svg class="h-5 w-5 text-run-500" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <rect x="3" y="3" width="7.5" height="7.5" rx="1.6" fill="currentColor" opacity=".95"/>
+            <rect x="13.5" y="3" width="7.5" height="7.5" rx="1.6" fill="currentColor" opacity=".45"/>
+            <rect x="3" y="13.5" width="7.5" height="7.5" rx="1.6" fill="currentColor" opacity=".45"/>
+            <rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.6" fill="currentColor" opacity=".95"/>
+          </svg>
+          <span class="font-mono text-[15px] font-semibold">PatchDeck</span>
+        </div>
+        <p class="mt-4 text-sm leading-relaxed text-slate-500">A local-first workbench for keeping GitHub pull requests and issues moving.</p>
+      </div>
+
+      <div class="grid grid-cols-2 gap-10 sm:grid-cols-3">
+        <div>
+          <p class="eyebrow">Product</p>
+          <ul class="mt-4 space-y-2.5 text-sm text-slate-400">
+            <li><a href="#how" class="transition-colors hover:text-white">How it works</a></li>
+            <li><a href="#features" class="transition-colors hover:text-white">Features</a></li>
+            <li><a href="#safety" class="transition-colors hover:text-white">Safety</a></li>
+            <li><a href="#install" class="transition-colors hover:text-white">Install</a></li>
+          </ul>
+        </div>
+        <div>
+          <p class="eyebrow">Docs</p>
+          <ul class="mt-4 space-y-2.5 text-sm text-slate-400">
+            <li><a href="https://jeremymcs.github.io/patchdeck/public/_site/getting-started.html" class="transition-colors hover:text-white">Getting started</a></li>
+            <li><a href="https://jeremymcs.github.io/patchdeck/public/_site/configuration.html" class="transition-colors hover:text-white">Configuration</a></li>
+            <li><a href="https://github.com/jeremymcs/patchdeck/blob/main/LOCAL_API.md" class="transition-colors hover:text-white">API &amp; MCP</a></li>
+            <li><a href="https://jeremymcs.github.io/patchdeck/" class="transition-colors hover:text-white">All docs</a></li>
+          </ul>
+        </div>
+        <div>
+          <p class="eyebrow">Project</p>
+          <ul class="mt-4 space-y-2.5 text-sm text-slate-400">
+            <li><a href="https://github.com/jeremymcs/patchdeck" class="transition-colors hover:text-white">GitHub</a></li>
+            <li><a href="https://github.com/jeremymcs/patchdeck/releases" class="transition-colors hover:text-white">Releases</a></li>
+            <li><a href="https://github.com/jeremymcs/patchdeck/issues" class="transition-colors hover:text-white">Issues</a></li>
+            <li><a href="https://www.npmjs.com/package/@jeremymcs/patchdeck" class="transition-colors hover:text-white">npm</a></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="mt-12 flex flex-col gap-3 border-t pt-7 text-xs text-slate-600 hairline sm:flex-row sm:items-center sm:justify-between">
+      <p class="font-mono">MIT Licensed &nbsp;·&nbsp; &copy; 2026</p>
+      <p>Began as a fork of <a href="https://github.com/yungookim/oh-my-pr" class="text-slate-500 transition-colors hover:text-slate-300">yungookim/oh-my-pr</a>. The foundation is appreciated.</p>
+    </div>
+  </div>
+</footer>
+
+<script>
+  // Copy-to-clipboard for the install commands.
+  document.querySelectorAll("[data-copy]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(btn.dataset.copy);
+      } catch {
+        return;
+      }
+      const original = btn.textContent;
+      btn.textContent = "Copied";
+      btn.classList.add("text-run-500");
+      setTimeout(() => {
+        btn.textContent = original;
+        btn.classList.remove("text-run-500");
+      }, 1600);
+    });
+  });
+
+  // Mobile nav disclosure.
+  const toggle = document.getElementById("navToggle");
+  const mobileNav = document.getElementById("mobileNav");
+  toggle?.addEventListener("click", () => {
+    const open = toggle.getAttribute("aria-expanded") === "true";
+    toggle.setAttribute("aria-expanded", String(!open));
+    mobileNav.hidden = open;
+  });
+  mobileNav?.addEventListener("click", (e) => {
+    if (e.target.tagName === "A") {
+      toggle.setAttribute("aria-expanded", "false");
+      mobileNav.hidden = true;
+    }
+  });
+</script>
+</body>
+</html>
