@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.6.0](https://github.com/jeremymcs/patchdeck/compare/v1.5.0...v1.6.0) (2026-08-30)
+
+
+### Features
+
+* add detected models and second-model review ([dbcfd69](https://github.com/jeremymcs/patchdeck/commit/dbcfd69bd280baea195251e493c6dc836f2d7c42))
+* meter coding-agent spend and cap it per hour ([d75cb0d](https://github.com/jeremymcs/patchdeck/commit/d75cb0d46baadff35d52867f7bb2235dc58843fe))
+
 ## [1.5.0](https://github.com/jeremymcs/patchdeck/compare/v1.4.0...v1.5.0) (2026-08-20)
 
 
