@@ -662,3 +662,66 @@ test("BackgroundJobDispatcher does not apply the agent spend cap to api-only wor
     dispatcher.stop();
   }
 });
+
+test("agent-invoking kinds stop being claimed once the agent ceiling is reached", async () => {
+  const storage = new MemStorage();
+  const queue = new BackgroundJobQueue(storage);
+  const config = await storage.getConfig();
+  await storage.updateConfig({ ...config, maxAgentInvocationsPerHour: 1 });
+
+  const startedAt = new Date().toISOString();
+  await storage.recordAgentInvocationStart({
+    id: "inv-1",
+    workKind: "babysit_pr",
+    agent: "claude",
+    model: null,
+    repo: "acme/app",
+    targetId: "pr-1",
+    agentRunId: null,
+    startedAt,
+    finishedAt: startedAt,
+    durationMs: 0,
+    exitCode: 0,
+    outcome: "completed",
+    error: null,
+  });
+
+  await queue.enqueue("babysit_pr", "pr-1", "babysit_pr:pr-1", { prId: "pr-1" });
+  await queue.enqueue("sync_watched_repos", "all", "sync_watched_repos:all", {});
+
+  const handled: string[] = [];
+  const dispatcher = new BackgroundJobDispatcher({
+    storage,
+    queue,
+    workerId: "dispatcher-budget",
+    pollIntervalMs: 5,
+    leaseMs: 30_000,
+    heartbeatIntervalMs: 10,
+    handlers: {
+      babysit_pr: async () => {
+        handled.push("babysit_pr");
+      },
+      sync_watched_repos: async () => {
+        handled.push("sync_watched_repos");
+      },
+    },
+  });
+
+  await dispatcher.start();
+  try {
+    // Free work still flows; paid work waits without failing.
+    await waitForCondition(() => handled.includes("sync_watched_repos"));
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    assert.equal(handled.includes("babysit_pr"), false);
+
+    const parked = await storage.listBackgroundJobs({ kind: "babysit_pr" });
+    assert.equal(parked[0]?.status, "queued");
+    assert.equal(parked[0]?.attemptCount, 0);
+
+    // Raising the ceiling releases the queued job on the next poll.
+    await storage.updateConfig({ ...config, maxAgentInvocationsPerHour: 5 });
+    await waitForCondition(() => handled.includes("babysit_pr"), 1_000);
+  } finally {
+    dispatcher.stop();
+  }
+});

@@ -697,6 +697,175 @@ test("SqliteStorage upsertAgentRun preserves the original createdAt", async () =
   storage.close();
 });
 
+test("agent invocation ledger round-trips, windows, and survives PR deletion", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "codefactory-storage-"));
+  const storage = new SqliteStorage(root);
+
+  const pr = await storage.addPR({
+    number: 61,
+    title: "Ledger survives deletion",
+    repo: "jeremymcs/patchdeck",
+    branch: "claude/spend-ledger",
+    author: "claude",
+    url: "https://github.com/jeremymcs/patchdeck/pull/61",
+    status: "watching",
+    feedbackItems: [],
+    accepted: 0,
+    rejected: 0,
+    flagged: 0,
+    testsPassed: null,
+    lintPassed: null,
+    lastChecked: null,
+  });
+
+  const inWindow = "2026-08-29T11:30:00.000Z";
+  const outOfWindow = "2026-08-29T09:00:00.000Z";
+  const windowStart = "2026-08-29T11:00:00.000Z";
+
+  await storage.recordAgentInvocationStart({
+    id: "inv-1",
+    workKind: "babysit_pr",
+    agent: "claude",
+    model: "opus",
+    repo: pr.repo,
+    targetId: pr.id,
+    agentRunId: "run-1",
+    startedAt: inWindow,
+    finishedAt: null,
+    durationMs: null,
+    exitCode: null,
+    outcome: "running",
+    error: null,
+  });
+
+  await storage.recordAgentInvocationStart({
+    id: "inv-2",
+    workKind: "probe",
+    agent: "claude",
+    model: null,
+    repo: null,
+    targetId: null,
+    agentRunId: null,
+    startedAt: inWindow,
+    finishedAt: null,
+    durationMs: null,
+    exitCode: null,
+    outcome: "running",
+    error: null,
+  });
+
+  await storage.recordAgentInvocationStart({
+    id: "inv-3",
+    workKind: "work_issue",
+    agent: "codex",
+    model: null,
+    repo: pr.repo,
+    targetId: "jeremymcs/patchdeck#12",
+    agentRunId: null,
+    startedAt: outOfWindow,
+    finishedAt: null,
+    durationMs: null,
+    exitCode: null,
+    outcome: "running",
+    error: null,
+  });
+
+  await storage.recordAgentInvocationEnd("inv-1", {
+    finishedAt: "2026-08-29T11:31:00.000Z",
+    durationMs: 60_000,
+    exitCode: 0,
+    outcome: "completed",
+    error: null,
+  });
+
+  const stored = await storage.listAgentInvocationsSince(windowStart);
+  assert.deepEqual(stored.map((row) => row.id).sort(), ["inv-1", "inv-2"]);
+  const completed = stored.find((row) => row.id === "inv-1");
+  assert.equal(completed?.outcome, "completed");
+  assert.equal(completed?.durationMs, 60_000);
+  assert.equal(completed?.model, "opus");
+
+  // Probes are recorded but excluded from the metered count.
+  assert.equal(await storage.countAgentInvocationsSince(windowStart), 2);
+  assert.equal(
+    await storage.countAgentInvocationsSince(windowStart, { excludeKinds: ["probe"] }),
+    1,
+  );
+
+  // Orphaned `running` rows are closed, not left counting forever.
+  assert.equal(await storage.closeOrphanedAgentInvocations("2026-08-29T12:00:00.000Z"), 2);
+  const closed = await storage.listAgentInvocationsSince(windowStart);
+  assert.equal(closed.every((row) => row.outcome !== "running"), true);
+
+  // The whole point of carrying no foreign key: spend history outlives the PR.
+  assert.equal(await storage.removePR(pr.id), true);
+  assert.equal(await storage.getPR(pr.id), undefined);
+  const afterDelete = await storage.listAgentInvocationsSince(windowStart);
+  assert.equal(afterDelete.some((row) => row.id === "inv-1"), true);
+
+  assert.equal(await storage.pruneAgentInvocationsBefore(windowStart), 1);
+  assert.equal((await storage.listAgentInvocationsSince(outOfWindow)).length, 2);
+
+  storage.close();
+});
+
+test("MemStorage agent invocation ledger matches the SQLite behaviour", async () => {
+  const storage = new MemStorage();
+  const windowStart = "2026-08-29T11:00:00.000Z";
+
+  await storage.recordAgentInvocationStart({
+    id: "inv-1",
+    workKind: "heal_ci",
+    agent: "claude",
+    model: null,
+    repo: "acme/app",
+    targetId: "acme/app#3",
+    agentRunId: null,
+    startedAt: "2026-08-29T11:30:00.000Z",
+    finishedAt: null,
+    durationMs: null,
+    exitCode: null,
+    outcome: "running",
+    error: null,
+  });
+  await storage.recordAgentInvocationStart({
+    id: "inv-2",
+    workKind: "probe",
+    agent: "claude",
+    model: null,
+    repo: null,
+    targetId: null,
+    agentRunId: null,
+    startedAt: "2026-08-29T10:00:00.000Z",
+    finishedAt: null,
+    durationMs: null,
+    exitCode: null,
+    outcome: "running",
+    error: null,
+  });
+
+  assert.equal(await storage.countAgentInvocationsSince(windowStart), 1);
+  assert.equal(
+    await storage.countAgentInvocationsSince(windowStart, { excludeKinds: ["heal_ci"] }),
+    0,
+  );
+
+  await storage.recordAgentInvocationEnd("inv-1", {
+    finishedAt: "2026-08-29T11:35:00.000Z",
+    durationMs: 300_000,
+    exitCode: 1,
+    outcome: "failed",
+    error: "agent failed",
+  });
+  const [row] = await storage.listAgentInvocationsSince(windowStart);
+  assert.equal(row.outcome, "failed");
+  assert.equal(row.durationMs, 300_000);
+
+  assert.equal(await storage.closeOrphanedAgentInvocations("2026-08-29T12:00:00.000Z"), 1);
+  assert.equal(await storage.pruneAgentInvocationsBefore(windowStart), 1);
+  assert.equal((await storage.listAgentInvocationsSince("2026-08-29T09:00:00.000Z")).length, 1);
+});
+
 test("SqliteStorage persists background jobs and requeues expired leases", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "codefactory-storage-"));
   const first = new SqliteStorage(root);

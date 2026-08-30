@@ -1,6 +1,9 @@
 import type {
+  AgentInvocation,
+  AgentInvocationOutcome,
   AgentRun,
   AgentRunStatus,
+  AgentWorkKind,
   BackgroundJob,
   BackgroundJobKind,
   BackgroundJobStatus,
@@ -235,6 +238,25 @@ export interface IStorage {
     prId?: string;
   }): Promise<AgentRun[]>;
   upsertAgentRun(run: AgentRun): Promise<AgentRun>;
+
+  // Agent spend ledger (one row per coding-agent process spawn)
+  recordAgentInvocationStart(invocation: AgentInvocation): Promise<AgentInvocation>;
+  recordAgentInvocationEnd(id: string, end: {
+    finishedAt: string;
+    durationMs: number;
+    exitCode: number | null;
+    outcome: AgentInvocationOutcome;
+    error: string | null;
+  }): Promise<void>;
+  countAgentInvocationsSince(since: string, options?: {
+    excludeKinds?: AgentWorkKind[];
+  }): Promise<number>;
+  listAgentInvocationsSince(since: string, options?: {
+    targetId?: string;
+    limit?: number;
+  }): Promise<AgentInvocation[]>;
+  closeOrphanedAgentInvocations(finishedAt: string): Promise<number>;
+  pruneAgentInvocationsBefore(cutoff: string): Promise<number>;
 
   // Deployment healing
   getDeploymentHealingSession(id: string): Promise<DeploymentHealingSession | undefined>;

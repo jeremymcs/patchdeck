@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm } from "fs/promises";
 import { tmpdir } from "os";
 import path from "path";
 import { buildAgentCommandArgs, resolveAgent, runAgentCommand, type AgentRuntimeSettings, type CodingAgent } from "./agentRunner";
+import { resolveAgentModel, withAgentWork, type AgentWorkContext } from "./agentSpend";
 
 const DEFAULT_RELEASE_AGENT_TIMEOUT_MS = 120_000;
 
@@ -40,13 +41,19 @@ export async function evaluateReleaseWorthinessWithAgent(params: {
   const timeoutMs = params.timeoutMs ?? DEFAULT_RELEASE_AGENT_TIMEOUT_MS;
   const agent = await resolveAgent(params.preferredAgent);
   const prompt = buildReleaseDecisionPrompt(params);
+  const work: AgentWorkContext = {
+    kind: "release_notes",
+    repo: params.repo,
+    targetId: `${params.repo}#${params.triggerPr.number}`,
+    model: resolveAgentModel(agent, params.agentSettings),
+  };
 
   if (agent === "codex") {
     const tempDir = await mkdtemp(path.join(tmpdir(), "codex-release-eval-"));
     const outputFile = path.join(tempDir, "output.txt");
 
     try {
-      const result = await runAgentCommand(
+      const result = await withAgentWork(work, () => runAgentCommand(
         "codex",
         buildAgentCommandArgs("codex", [
           "exec",
@@ -58,7 +65,7 @@ export async function evaluateReleaseWorthinessWithAgent(params: {
           prompt,
         ], params.agentSettings),
         { cwd, timeoutMs },
-      );
+      ));
 
       if (result.code !== 0) {
         throw new Error(`codex release evaluation failed (${result.code}): ${result.stderr || result.stdout}`);
@@ -71,7 +78,7 @@ export async function evaluateReleaseWorthinessWithAgent(params: {
     }
   }
 
-  const result = await runAgentCommand(
+  const result = await withAgentWork(work, () => runAgentCommand(
     "claude",
     buildAgentCommandArgs("claude", [
       "-p",
@@ -80,7 +87,7 @@ export async function evaluateReleaseWorthinessWithAgent(params: {
       prompt,
     ], params.agentSettings),
     { cwd, timeoutMs },
-  );
+  ));
 
   if (result.code !== 0) {
     throw new Error(`claude release evaluation failed (${result.code}): ${result.stderr || result.stdout}`);

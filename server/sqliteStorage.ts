@@ -3,8 +3,11 @@ import { DatabaseSync } from "node:sqlite";
 import type { SQLInputValue } from "node:sqlite";
 import { backgroundJobStatusEnum, docsAssessmentSchema, feedbackStatusEnum, prStageEnum, prWorkContractSchema } from "@shared/schema";
 import type {
+  AgentInvocation,
+  AgentInvocationOutcome,
   AgentRun,
   AgentRunStatus,
+  AgentWorkKind,
   BackgroundJob,
   BackgroundJobKind,
   BackgroundJobStatus,
@@ -91,6 +94,7 @@ type ConfigRow = {
   post_github_progress_replies: number;
   auto_heal_ci: number;
   max_agent_retry_attempts: number;
+  max_agent_invocations_per_hour: number;
   max_healing_attempts_per_session: number;
   max_healing_attempts_per_fingerprint: number;
   max_concurrent_healing_runs: number;
@@ -241,6 +245,22 @@ type AgentRunRow = {
   last_error: string | null;
   created_at: string;
   updated_at: string;
+};
+
+type AgentInvocationRow = {
+  id: string;
+  work_kind: AgentWorkKind;
+  agent: Config["codingAgent"];
+  model: string | null;
+  repo: string | null;
+  target_id: string | null;
+  agent_run_id: string | null;
+  started_at: string;
+  finished_at: string | null;
+  duration_ms: number | null;
+  exit_code: number | null;
+  outcome: AgentInvocationOutcome;
+  error: string | null;
 };
 
 type QuestionRow = {
@@ -589,6 +609,7 @@ export class SqliteStorage implements IStorage {
         post_github_progress_replies INTEGER NOT NULL DEFAULT 0,
         auto_heal_ci INTEGER NOT NULL DEFAULT 0,
         max_agent_retry_attempts INTEGER NOT NULL DEFAULT 3,
+        max_agent_invocations_per_hour INTEGER NOT NULL DEFAULT 0,
         max_healing_attempts_per_session INTEGER NOT NULL DEFAULT 3,
         max_healing_attempts_per_fingerprint INTEGER NOT NULL DEFAULT 2,
         max_concurrent_healing_runs INTEGER NOT NULL DEFAULT 1,
@@ -694,6 +715,22 @@ export class SqliteStorage implements IStorage {
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         FOREIGN KEY(pr_id) REFERENCES prs(id) ON DELETE CASCADE
+      );
+
+      CREATE TABLE IF NOT EXISTS agent_invocations (
+        id TEXT PRIMARY KEY,
+        work_kind TEXT NOT NULL,
+        agent TEXT NOT NULL,
+        model TEXT,
+        repo TEXT,
+        target_id TEXT,
+        agent_run_id TEXT,
+        started_at TEXT NOT NULL,
+        finished_at TEXT,
+        duration_ms INTEGER,
+        exit_code INTEGER,
+        outcome TEXT NOT NULL,
+        error TEXT
       );
 
       CREATE TABLE IF NOT EXISTS background_jobs (
@@ -908,6 +945,9 @@ export class SqliteStorage implements IStorage {
       CREATE INDEX IF NOT EXISTS idx_feedback_items_pr_id ON feedback_items(pr_id);
       CREATE INDEX IF NOT EXISTS idx_logs_pr_id_timestamp ON logs(pr_id, timestamp);
       CREATE INDEX IF NOT EXISTS idx_agent_runs_status_updated_at ON agent_runs(status, updated_at);
+      CREATE INDEX IF NOT EXISTS idx_agent_invocations_started_at ON agent_invocations(started_at);
+      CREATE INDEX IF NOT EXISTS idx_agent_invocations_kind_started_at ON agent_invocations(work_kind, started_at);
+      CREATE INDEX IF NOT EXISTS idx_agent_invocations_target_started_at ON agent_invocations(target_id, started_at);
       CREATE INDEX IF NOT EXISTS idx_background_jobs_status_available_at ON background_jobs(status, available_at, priority, created_at);
       CREATE INDEX IF NOT EXISTS idx_background_jobs_lease_expires_at ON background_jobs(status, lease_expires_at);
       CREATE INDEX IF NOT EXISTS idx_background_jobs_kind_status ON background_jobs(kind, status);
@@ -956,6 +996,7 @@ export class SqliteStorage implements IStorage {
     this.ensureColumn("config", "post_github_progress_replies", "INTEGER NOT NULL DEFAULT 0");
     this.ensureColumn("config", "auto_heal_ci", "INTEGER NOT NULL DEFAULT 0");
     this.ensureColumn("config", "max_agent_retry_attempts", "INTEGER NOT NULL DEFAULT 3");
+    this.ensureColumn("config", "max_agent_invocations_per_hour", "INTEGER NOT NULL DEFAULT 0");
     this.ensureColumn("config", "max_healing_attempts_per_session", "INTEGER NOT NULL DEFAULT 3");
     this.ensureColumn("config", "max_healing_attempts_per_fingerprint", "INTEGER NOT NULL DEFAULT 2");
     this.ensureColumn("config", "max_concurrent_healing_runs", "INTEGER NOT NULL DEFAULT 1");
@@ -1094,6 +1135,7 @@ export class SqliteStorage implements IStorage {
       ),
       autoHealCI: Boolean(row.auto_heal_ci ?? Number(DEFAULT_CONFIG.autoHealCI)),
       maxAgentRetryAttempts: row.max_agent_retry_attempts ?? DEFAULT_CONFIG.maxAgentRetryAttempts,
+      maxAgentInvocationsPerHour: row.max_agent_invocations_per_hour ?? DEFAULT_CONFIG.maxAgentInvocationsPerHour,
       maxHealingAttemptsPerSession: row.max_healing_attempts_per_session ?? DEFAULT_CONFIG.maxHealingAttemptsPerSession,
       maxHealingAttemptsPerFingerprint: row.max_healing_attempts_per_fingerprint ?? DEFAULT_CONFIG.maxHealingAttemptsPerFingerprint,
       maxConcurrentHealingRuns: row.max_concurrent_healing_runs ?? DEFAULT_CONFIG.maxConcurrentHealingRuns,
@@ -1149,6 +1191,7 @@ export class SqliteStorage implements IStorage {
           post_github_progress_replies,
           auto_heal_ci,
           max_agent_retry_attempts,
+          max_agent_invocations_per_hour,
           max_healing_attempts_per_session,
           max_healing_attempts_per_fingerprint,
           max_concurrent_healing_runs,
@@ -1163,7 +1206,7 @@ export class SqliteStorage implements IStorage {
           trusted_reviewers_json,
           priority_issue_authors_json,
           ignored_bots_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           github_token = excluded.github_token,
           github_tokens_json = excluded.github_tokens_json,
@@ -1190,6 +1233,7 @@ export class SqliteStorage implements IStorage {
           post_github_progress_replies = excluded.post_github_progress_replies,
           auto_heal_ci = excluded.auto_heal_ci,
           max_agent_retry_attempts = excluded.max_agent_retry_attempts,
+          max_agent_invocations_per_hour = excluded.max_agent_invocations_per_hour,
           max_healing_attempts_per_session = excluded.max_healing_attempts_per_session,
           max_healing_attempts_per_fingerprint = excluded.max_healing_attempts_per_fingerprint,
           max_concurrent_healing_runs = excluded.max_concurrent_healing_runs,
@@ -1231,6 +1275,7 @@ export class SqliteStorage implements IStorage {
         Number(config.postGitHubProgressReplies),
         Number(config.autoHealCI),
         config.maxAgentRetryAttempts,
+        config.maxAgentInvocationsPerHour,
         config.maxHealingAttemptsPerSession,
         config.maxHealingAttemptsPerFingerprint,
         config.maxConcurrentHealingRuns,
@@ -1415,6 +1460,24 @@ export class SqliteStorage implements IStorage {
       lastError: row.last_error,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
+    };
+  }
+
+  private parseAgentInvocationRow(row: AgentInvocationRow): AgentInvocation {
+    return {
+      id: row.id,
+      workKind: row.work_kind,
+      agent: row.agent,
+      model: row.model,
+      repo: row.repo,
+      targetId: row.target_id,
+      agentRunId: row.agent_run_id,
+      startedAt: row.started_at,
+      finishedAt: row.finished_at,
+      durationMs: row.duration_ms,
+      exitCode: row.exit_code,
+      outcome: row.outcome,
+      error: row.error,
     };
   }
 
@@ -2045,7 +2108,7 @@ export class SqliteStorage implements IStorage {
              poll_interval_ms, max_changes_per_run, auto_resolve_merge_conflicts, auto_create_releases,
              auto_update_docs, auto_prs, auto_issues, include_repository_links_in_github_comments, github_comment_app_name,
              post_github_progress_replies,
-             auto_heal_ci, max_agent_retry_attempts, max_healing_attempts_per_session,
+             auto_heal_ci, max_agent_retry_attempts, max_agent_invocations_per_hour, max_healing_attempts_per_session,
              max_healing_attempts_per_fingerprint, max_concurrent_healing_runs, healing_cooldown_ms,
              auto_heal_deployments, deployment_check_delay_ms, deployment_check_timeout_ms,
              deployment_check_poll_interval_ms, max_concurrent_issue_evaluations, max_concurrent_issue_work,
@@ -3371,6 +3434,111 @@ export class SqliteStorage implements IStorage {
     );
 
     return stored;
+  }
+
+  // ── Agent spend ledger ──────────────────────────────────────────────────
+
+  async recordAgentInvocationStart(invocation: AgentInvocation): Promise<AgentInvocation> {
+    this.run(`
+      INSERT INTO agent_invocations (
+        id, work_kind, agent, model, repo, target_id, agent_run_id,
+        started_at, finished_at, duration_ms, exit_code, outcome, error
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `,
+      invocation.id,
+      invocation.workKind,
+      invocation.agent,
+      invocation.model,
+      invocation.repo,
+      invocation.targetId,
+      invocation.agentRunId,
+      invocation.startedAt,
+      invocation.finishedAt,
+      invocation.durationMs,
+      invocation.exitCode,
+      invocation.outcome,
+      invocation.error,
+    );
+
+    return invocation;
+  }
+
+  async recordAgentInvocationEnd(id: string, end: {
+    finishedAt: string;
+    durationMs: number;
+    exitCode: number | null;
+    outcome: AgentInvocationOutcome;
+    error: string | null;
+  }): Promise<void> {
+    this.run(`
+      UPDATE agent_invocations
+      SET finished_at = ?, duration_ms = ?, exit_code = ?, outcome = ?, error = ?
+      WHERE id = ?
+    `, end.finishedAt, end.durationMs, end.exitCode, end.outcome, end.error, id);
+  }
+
+  async countAgentInvocationsSince(since: string, options?: {
+    excludeKinds?: AgentWorkKind[];
+  }): Promise<number> {
+    const excluded = options?.excludeKinds ?? [];
+    const placeholders = excluded.map(() => "?").join(", ");
+    const exclusion = excluded.length > 0 ? `AND work_kind NOT IN (${placeholders})` : "";
+
+    const row = this.get<{ count: number }>(`
+      SELECT COUNT(*) AS count
+      FROM agent_invocations
+      WHERE started_at >= ? ${exclusion}
+    `, since, ...excluded);
+
+    return row ? Number(row.count) : 0;
+  }
+
+  async listAgentInvocationsSince(since: string, options?: {
+    targetId?: string;
+    limit?: number;
+  }): Promise<AgentInvocation[]> {
+    const values: (string | number)[] = [since];
+    let clause = "";
+
+    if (options?.targetId) {
+      clause = "AND target_id = ?";
+      values.push(options.targetId);
+    }
+
+    const limit = Math.max(1, Math.floor(options?.limit ?? 500));
+    values.push(limit);
+
+    const rows = this.all<AgentInvocationRow>(`
+      SELECT id, work_kind, agent, model, repo, target_id, agent_run_id,
+             started_at, finished_at, duration_ms, exit_code, outcome, error
+      FROM agent_invocations
+      WHERE started_at >= ? ${clause}
+      ORDER BY started_at DESC
+      LIMIT ?
+    `, ...values);
+
+    return rows.map((row) => this.parseAgentInvocationRow(row));
+  }
+
+  async closeOrphanedAgentInvocations(finishedAt: string): Promise<number> {
+    const result = this.run(`
+      UPDATE agent_invocations
+      SET outcome = 'failed',
+          finished_at = ?,
+          error = COALESCE(error, 'PatchDeck restarted while the agent was running')
+      WHERE outcome = 'running'
+    `, finishedAt);
+
+    return Number(result.changes);
+  }
+
+  async pruneAgentInvocationsBefore(cutoff: string): Promise<number> {
+    const result = this.run(`
+      DELETE FROM agent_invocations
+      WHERE started_at < ?
+    `, cutoff);
+
+    return Number(result.changes);
   }
 
   // ── Social changelogs ───────────────────────────────────────────────────

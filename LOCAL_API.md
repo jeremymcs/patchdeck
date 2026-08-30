@@ -248,6 +248,7 @@ compiled output instead:
 | `get_config` | Read current configuration |
 | `update_config` | Partially update configuration |
 | `get_runtime` | Get runtime state (drain mode, active queue handlers) |
+| `get_agent_spend` | Get coding-agent spend for the rolling hour, with the ceiling and a breakdown by work kind |
 | `set_drain_mode` | Enable/disable drain mode for new queue claims |
 | `list_changelogs` | List social-media changelogs |
 | `get_changelog` | Get one changelog by ID |
@@ -761,6 +762,44 @@ Get the current runtime state.
   "drainRequestedAt": null,
   "drainReason": null,
   "activeRuns": 2
+}
+```
+
+---
+
+#### `GET /api/agent-spend`
+
+Get coding-agent spend for the rolling hour. Every spawn of the `codex` or
+`claude` CLI is recorded, whichever path caused it — PR work, feedback
+evaluation, issue work, issue decompose/verify, CI healing, deployment healing,
+PR questions, release notes, and social posts.
+
+`max` is the `maxAgentInvocationsPerHour` setting. **`0` means unlimited**, and
+`remaining` is then `null`. `used` excludes agent health-check probes, which are
+recorded in `byKind` but never counted against the ceiling.
+
+`windowMs` is a rolling window, not a calendar hour: `resetsAt` is when the
+oldest invocation inside the window ages out and the next slot frees up.
+
+When the ceiling is reached, the dispatcher stops claiming agent-invoking job
+kinds and any agent spawn started inside an already-running job is refused.
+Queued work is not failed — it waits and resumes on its own.
+
+**Response** `200`
+```json
+{
+  "windowMs": 3600000,
+  "windowStartedAt": "2026-08-29T11:00:00.000Z",
+  "resetsAt": "2026-08-29T12:14:00.000Z",
+  "max": 30,
+  "used": 18,
+  "remaining": 12,
+  "exhausted": false,
+  "byKind": [
+    { "workKind": "babysit_pr", "count": 11, "totalDurationMs": 1830000 },
+    { "workKind": "work_issue", "count": 5, "totalDurationMs": 920000 },
+    { "workKind": "heal_ci", "count": 2, "totalDurationMs": 240000 }
+  ]
 }
 ```
 

@@ -1,5 +1,6 @@
 import type { CodingAgent } from "./agentRunner";
 import { buildAgentCommandArgs, resolveAgent, runAgentCommand, summarizeCommandResult, type AgentRuntimeSettings } from "./agentRunner";
+import { resolveAgentModel, withAgentWork } from "./agentSpend";
 
 export type ReleaseSocialPostInput = {
   repo: string;
@@ -94,13 +95,18 @@ export async function generateReleaseSocialPost(params: {
   const agent = await resolveAgent(preferredAgent);
   const prompt = buildPrompt(input);
 
-  const result = await runAgentCommand(
+  const result = await withAgentWork({
+    kind: "social_post",
+    repo: input.repo,
+    targetId: `${input.repo}@${input.tagName}`,
+    model: resolveAgentModel(agent, agentSettings),
+  }, () => runAgentCommand(
     agent,
     agent === "claude"
       ? buildAgentCommandArgs("claude", ["-p", "--output-format", "text", prompt], agentSettings)
       : buildAgentCommandArgs("codex", ["exec", "--skip-git-repo-check", "--sandbox", "read-only", prompt], agentSettings),
     { timeoutMs },
-  );
+  ));
 
   if (result.code !== 0) {
     throw new Error(summarizeCommandResult(result, `Agent exited with code ${result.code}`));

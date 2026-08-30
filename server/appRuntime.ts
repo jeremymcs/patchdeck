@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import type {
   ActivityItem,
   ActivitySnapshot,
+  AgentSpendSummary,
   BackgroundJob,
   Config,
   CurrentRunStatus,
@@ -49,6 +50,7 @@ import { BackgroundJobDispatcher } from "./backgroundJobDispatcher";
 import { BackgroundJobQueue, buildBackgroundJobDedupeKey } from "./backgroundJobQueue";
 import { buildActivityPayload, readActivityPayload } from "./activityPayload";
 import { createWatcherScheduler, type WatcherScheduler } from "./watcherScheduler";
+import { installAgentSpendMeter, readAgentSpend, uninstallAgentSpendMeter } from "./agentSpend";
 import { startLogsRetentionJob, type RetentionJobHandle } from "./logsRetention";
 import { getRateLimitState } from "./rateLimitState";
 import { runWithRequestPriority } from "./requestPriority";
@@ -143,6 +145,7 @@ export type AppRuntime = {
   stop(): void;
   subscribe(listener: () => void): () => void;
   getRuntimeSnapshot(): Promise<RuntimeSnapshot>;
+  getAgentSpend(): Promise<AgentSpendSummary>;
   getGitHubAuthStatus(): ReturnType<typeof getGitHubAuthStatus>;
   setDrainMode(input: DrainModeParams): Promise<RuntimeSnapshot & { drained?: boolean }>;
   listActivities(): Promise<ActivitySnapshot>;
@@ -2339,6 +2342,15 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
 
       started = true;
 
+      // Every coding-agent spawn in this process is now recorded and gated.
+      installAgentSpendMeter(storage);
+      // An invocation left `running` by a hard shutdown would otherwise count
+      // against the ceiling forever.
+      const orphanedInvocations = await storage.closeOrphanedAgentInvocations(new Date().toISOString());
+      if (orphanedInvocations > 0) {
+        log.warn({ orphanedInvocations }, "Closed agent invocations interrupted by the last shutdown");
+      }
+
       if (startBackgroundServices) {
         await backgroundJobDispatcher.start();
         logsRetentionJob = startLogsRetentionJob(storage);
@@ -2359,6 +2371,7 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
 
     stop() {
       started = false;
+      uninstallAgentSpendMeter();
       backgroundJobDispatcher.stop();
       if (logsRetentionJob) {
         logsRetentionJob.stop();
@@ -2382,6 +2395,7 @@ export function createAppRuntime(dependencies: AppRuntimeDependencies = {}): App
     },
 
     getRuntimeSnapshot,
+    getAgentSpend: () => readAgentSpend(storage, new Date()),
 
     async getGitHubAuthStatus() {
       const config = await storage.getConfig();

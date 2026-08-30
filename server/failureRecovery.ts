@@ -3,6 +3,7 @@
 
 import type { BackgroundJobKind } from "@shared/schema";
 import { detectAgentUnavailability } from "./agentRunner";
+import { isAgentBudgetExhaustedError } from "./agentSpend";
 
 /**
  * How a background job failure should be treated by the retry policy.
@@ -43,6 +44,7 @@ const TRANSIENT_PATTERNS: RegExp[] = [
   /\bsecondary rate limit\b/i,
   /\babuse detection\b/i,
   /\bbudget is in the reserve band\b/i,
+  /\bagent budget exhausted\b/i,
   /\bserver error\b/i,
 ];
 
@@ -82,6 +84,12 @@ function matchesAny(message: string, patterns: RegExp[]): boolean {
  * expired credential.
  */
 export function classifyFailure(error: unknown): FailureClass {
+  // The agent never ran, so this cost nothing and must not consume a paid
+  // retry attempt. Back off and try again once the spend window rolls.
+  if (isAgentBudgetExhaustedError(error)) {
+    return "transient";
+  }
+
   const message = toMessage(error).trim();
   if (message.length === 0) {
     return "retryable";

@@ -2,7 +2,8 @@ import { randomUUID } from "crypto";
 import type { BackgroundJob, BackgroundJobKind } from "@shared/schema";
 import type { IStorage } from "./storage";
 import { BackgroundJobQueue } from "./backgroundJobQueue";
-import { classifyFailure, computeRetryDelayMs, resolveMaxAttempts, type FailureClass } from "./failureRecovery";
+import { isAgentBudgetExhausted } from "./agentSpend";
+import { classifyFailure, computeRetryDelayMs, resolveMaxAttempts, AGENT_INVOKING_JOB_KINDS, type FailureClass } from "./failureRecovery";
 import { childLogger } from "./logger";
 import { DEFAULT_CONFIG } from "./defaultConfig";
 
@@ -56,6 +57,7 @@ export class BackgroundJobDispatcher {
 
   private running = false;
   private polling = false;
+  private loggedBudgetPause = false;
   private pollTimer: NodeJS.Timeout | null = null;
 
   constructor(params: {
@@ -198,21 +200,57 @@ export class BackgroundJobDispatcher {
   }
 
   private async resolveClaimableKinds(kinds: BackgroundJobKind[]): Promise<BackgroundJobKind[]> {
-    if (!kinds.includes("babysit_pr")) {
+    // Nothing here can spend an agent, so neither gate applies and the poll
+    // stays free of a config read.
+    if (!kinds.some((kind) => AGENT_INVOKING_JOB_KINDS.has(kind))) {
       return kinds;
     }
 
     const config = await this.storage.getConfig();
+    const withinBudget = await this.filterKindsWithinAgentBudget(kinds, config.maxAgentInvocationsPerHour);
+    if (!withinBudget.includes("babysit_pr")) {
+      return withinBudget;
+    }
+
     const maxConcurrentBabysitRuns = Math.max(1, config.maxConcurrentBabysitRuns);
     const activeBabysitRuns = Array.from(this.activeJobs.keys())
       .filter((jobId) => jobId.startsWith("babysit_pr:"))
       .length;
 
     if (activeBabysitRuns < maxConcurrentBabysitRuns) {
+      return withinBudget;
+    }
+
+    return withinBudget.filter((kind) => kind !== "babysit_pr");
+  }
+
+  /**
+   * Stop claiming jobs that can spend a paid agent once the rolling-hour
+   * ceiling is reached. Jobs stay `queued` and flow again as the window rolls
+   * forward, exactly as under drain mode — nothing fails and nothing is lost.
+   */
+  private async filterKindsWithinAgentBudget(
+    kinds: BackgroundJobKind[],
+    ceiling: number,
+  ): Promise<BackgroundJobKind[]> {
+    if (!(await isAgentBudgetExhausted(this.storage, this.now(), ceiling))) {
+      if (this.loggedBudgetPause) {
+        this.loggedBudgetPause = false;
+        log.info("Agent invocation ceiling cleared; resuming agent-invoking job kinds");
+      }
       return kinds;
     }
 
-    return kinds.filter((kind) => kind !== "babysit_pr");
+    const remaining = kinds.filter((kind) => !AGENT_INVOKING_JOB_KINDS.has(kind));
+    if (!this.loggedBudgetPause) {
+      this.loggedBudgetPause = true;
+      log.warn(
+        { stillClaimable: remaining },
+        "Agent invocation ceiling reached; pausing agent-invoking job kinds until the window rolls",
+      );
+    }
+
+    return remaining;
   }
 
   private runJob(job: BackgroundJob): void {

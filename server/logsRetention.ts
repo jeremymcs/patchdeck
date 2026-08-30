@@ -1,3 +1,4 @@
+import { AGENT_SPEND_RETENTION_MS } from "./agentSpend";
 import { childLogger } from "./logger";
 import type { IStorage } from "./storage";
 
@@ -33,6 +34,23 @@ export async function pruneLogsOnce(
   return { byAge, byStderrPrefix };
 }
 
+/**
+ * Drop agent-spend ledger rows past the retention horizon. Kept separate from
+ * log pruning because the ledger has its own, much longer horizon.
+ */
+export async function pruneAgentInvocationsOnce(
+  storage: IStorage,
+  options: { retentionMs?: number } = {},
+): Promise<number> {
+  const retentionMs = options.retentionMs ?? AGENT_SPEND_RETENTION_MS;
+  const cutoff = new Date(Date.now() - retentionMs).toISOString();
+  const removed = await storage.pruneAgentInvocationsBefore(cutoff);
+
+  log.info({ cutoff, removed }, "Pruned agent invocation ledger");
+
+  return removed;
+}
+
 export type RetentionJobHandle = {
   stop: () => void;
 };
@@ -54,6 +72,12 @@ export function startLogsRetentionJob(
       log.warn(
         { err: err instanceof Error ? err.message : String(err) },
         "Scheduled logs prune failed",
+      );
+    });
+    pruneAgentInvocationsOnce(storage).catch((err) => {
+      log.warn(
+        { err: err instanceof Error ? err.message : String(err) },
+        "Scheduled agent invocation prune failed",
       );
     });
   };

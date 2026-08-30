@@ -192,6 +192,76 @@ export const agentRunSchema = z.object({
 });
 export type AgentRun = z.infer<typeof agentRunSchema>;
 
+/**
+ * What a single coding-agent process spawn was doing. Distinct from
+ * `backgroundJobKind`: one job can spawn several agents (evaluate, then apply,
+ * then a fallback), and some agent work has no job of its own (CI healing runs
+ * inside `babysit_pr`).
+ */
+export const agentWorkKindEnum = z.enum([
+  "babysit_pr",
+  "evaluate_feedback",
+  "work_issue",
+  "decompose_issue",
+  "verify_issue",
+  "heal_ci",
+  "heal_deployment",
+  "answer_pr_question",
+  "release_notes",
+  "social_post",
+  "probe",
+  "unattributed",
+]);
+export type AgentWorkKind = z.infer<typeof agentWorkKindEnum>;
+
+export const agentInvocationOutcomeEnum = z.enum([
+  "running",
+  "completed",
+  "failed",
+  "timeout",
+  "refused",
+]);
+export type AgentInvocationOutcome = z.infer<typeof agentInvocationOutcomeEnum>;
+
+/**
+ * One row per coding-agent process spawn. This is the spend ledger; `agentRun`
+ * is a per-babysit-session record and is not interchangeable with it. Rows
+ * intentionally carry no foreign keys so history survives deletion of the PR or
+ * issue that caused the spend.
+ */
+export const agentInvocationSchema = z.object({
+  id: z.string(),
+  workKind: agentWorkKindEnum,
+  agent: z.enum(["codex", "claude"]),
+  model: z.string().nullable(),
+  repo: z.string().nullable(),
+  targetId: z.string().nullable(),
+  agentRunId: z.string().nullable(),
+  startedAt: z.string(),
+  finishedAt: z.string().nullable(),
+  durationMs: z.number().int().nonnegative().nullable(),
+  exitCode: z.number().int().nullable(),
+  outcome: agentInvocationOutcomeEnum,
+  error: z.string().nullable(),
+});
+export type AgentInvocation = z.infer<typeof agentInvocationSchema>;
+
+export const agentSpendSummarySchema = z.object({
+  windowMs: z.number().int().positive(),
+  windowStartedAt: z.string(),
+  resetsAt: z.string(),
+  max: z.number().int().nonnegative(),
+  used: z.number().int().nonnegative(),
+  remaining: z.number().int().nonnegative().nullable(),
+  exhausted: z.boolean(),
+  byKind: z.array(z.object({
+    workKind: agentWorkKindEnum,
+    count: z.number().int().nonnegative(),
+    totalDurationMs: z.number().int().nonnegative(),
+  })),
+});
+export type AgentSpendSummary = z.infer<typeof agentSpendSummarySchema>;
+
 export const runtimeStateSchema = z.object({
   drainMode: z.boolean(),
   drainRequestedAt: z.string().nullable(),
@@ -731,6 +801,8 @@ export const configSchema = z.object({
   deploymentCheckTimeoutMs: z.number(),
   deploymentCheckPollIntervalMs: z.number(),
   maxAgentRetryAttempts: z.number().int().nonnegative().default(3),
+  /** Rolling-hour ceiling on coding-agent process spawns. 0 means unlimited. */
+  maxAgentInvocationsPerHour: z.number().int().nonnegative().default(0),
   maxConcurrentIssueEvaluations: z.number().int().positive().default(2),
   maxConcurrentIssueWork: z.number().int().positive().default(1),
   maxConcurrentBabysitRuns: z.number().int().positive().default(3),

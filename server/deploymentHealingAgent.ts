@@ -1,5 +1,6 @@
 import type { AgentRuntimeSettings, CodingAgent, CommandResult } from "./agentRunner";
 import { applyFixesWithAgent, runCommand, summarizeCommandResult } from "./agentRunner";
+import { resolveAgentModel, withAgentWork } from "./agentSpend";
 import { ensureRepoCache } from "./repoWorkspace";
 import type { DeploymentPlatform } from "@shared/schema";
 
@@ -128,13 +129,18 @@ export async function runDeploymentHealingRepair(
   }
 
   try {
-    const agentResult = await deps.applyFixesWithAgent({
+    const agentResult = await withAgentWork({
+      kind: "heal_deployment",
+      repo: input.repo,
+      targetId: `${input.repo}@${input.mergeSha}`,
+      model: resolveAgentModel(input.agent, input.agentSettings),
+    }, () => deps.applyFixesWithAgent({
       agent: input.agent,
       settings: input.agentSettings,
       cwd: repoCacheDir,
       prompt,
       env: input.env,
-    });
+    }));
 
     if (agentResult.code !== 0) {
       return {

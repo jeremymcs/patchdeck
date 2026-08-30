@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { MemStorage } from "./storage";
-import { DEFAULT_LOG_RETENTION_DAYS, pruneLogsOnce, STDERR_LOG_MESSAGE_PREFIX, startLogsRetentionJob } from "./logsRetention";
+import { DEFAULT_LOG_RETENTION_DAYS, pruneAgentInvocationsOnce, pruneLogsOnce, STDERR_LOG_MESSAGE_PREFIX, startLogsRetentionJob } from "./logsRetention";
 
 async function seedLog(storage: MemStorage, message: string, timestampOverride?: string) {
   const entry = await storage.addLog("pr-1", "info", message);
@@ -56,4 +56,38 @@ test("startLogsRetentionJob ticks once at startup and on the interval", async ()
   } finally {
     handle.stop();
   }
+});
+
+test("pruneAgentInvocationsOnce drops ledger rows past the retention horizon", async () => {
+  const storage = new MemStorage();
+  const now = Date.now();
+
+  const rows = [
+    { id: "fresh", startedAt: new Date(now - 60_000).toISOString() },
+    { id: "stale", startedAt: new Date(now - 31 * 24 * 60 * 60 * 1000).toISOString() },
+  ];
+
+  for (const row of rows) {
+    await storage.recordAgentInvocationStart({
+      id: row.id,
+      workKind: "babysit_pr",
+      agent: "claude",
+      model: null,
+      repo: "acme/app",
+      targetId: "pr-1",
+      agentRunId: null,
+      startedAt: row.startedAt,
+      finishedAt: row.startedAt,
+      durationMs: 0,
+      exitCode: 0,
+      outcome: "completed",
+      error: null,
+    });
+  }
+
+  const removed = await pruneAgentInvocationsOnce(storage);
+  assert.equal(removed, 1);
+
+  const remaining = await storage.listAgentInvocationsSince(new Date(0).toISOString());
+  assert.deepEqual(remaining.map((row) => row.id), ["fresh"]);
 });
