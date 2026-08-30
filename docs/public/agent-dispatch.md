@@ -62,7 +62,9 @@ Every agent run is tracked in the patchdeck dashboard:
 
 ## Agent Selection
 
-The active coding agent is stored in app config as `codingAgent` and can be changed from the dashboard, REST API, or MCP `update_config` tool. Agent reasoning/model behavior follows the selected CLI runtime; patchdeck does not expose a separate model-discovery or model-selection surface today.
+The active coding agent is stored in app config as `codingAgent` and can be changed from the dashboard, REST API, or MCP `update_config` tool. The dashboard discovers the models advertised by the installed Codex and Claude CLIs, preserves saved choices, and lets you select models independently for each CLI.
+
+Second-model review is opt-in. When enabled, patchdeck runs the selected reviewer agent and model against the primary agent's uncommitted work before final commit and push. The reviewer can correct concrete issues in the same isolated worktree. If that review fails, patchdeck does not bypass the requirement through the code-owner fallback.
 
 ## Customization
 

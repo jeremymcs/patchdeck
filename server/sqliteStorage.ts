@@ -80,6 +80,9 @@ type ConfigRow = {
   codex_reasoning_effort: Config["codexReasoningEffort"];
   claude_model: string;
   claude_effort: Config["claudeEffort"];
+  second_model_review_enabled: number;
+  review_agent: Config["reviewAgent"];
+  review_model: string;
   max_turns: number;
   batch_window_ms: number;
   poll_interval_ms: number;
@@ -595,6 +598,9 @@ export class SqliteStorage implements IStorage {
         codex_reasoning_effort TEXT NOT NULL DEFAULT 'default',
         claude_model TEXT NOT NULL DEFAULT 'opus',
         claude_effort TEXT NOT NULL DEFAULT 'default',
+        second_model_review_enabled INTEGER NOT NULL DEFAULT 0,
+        review_agent TEXT NOT NULL DEFAULT 'codex',
+        review_model TEXT NOT NULL DEFAULT '',
         max_turns INTEGER NOT NULL,
         batch_window_ms INTEGER NOT NULL,
         poll_interval_ms INTEGER NOT NULL,
@@ -986,6 +992,9 @@ export class SqliteStorage implements IStorage {
     this.ensureColumn("config", "codex_reasoning_effort", "TEXT NOT NULL DEFAULT 'default'");
     this.ensureColumn("config", "claude_model", "TEXT NOT NULL DEFAULT 'opus'");
     this.ensureColumn("config", "claude_effort", "TEXT NOT NULL DEFAULT 'default'");
+    this.ensureColumn("config", "second_model_review_enabled", "INTEGER NOT NULL DEFAULT 0");
+    this.ensureColumn("config", "review_agent", "TEXT NOT NULL DEFAULT 'codex'");
+    this.ensureColumn("config", "review_model", "TEXT NOT NULL DEFAULT ''");
     this.ensureColumn("config", "auto_resolve_merge_conflicts", "INTEGER NOT NULL DEFAULT 1");
     this.ensureColumn("config", "auto_create_releases", "INTEGER NOT NULL DEFAULT 0");
     this.ensureColumn("config", "auto_update_docs", "INTEGER NOT NULL DEFAULT 1");
@@ -1117,6 +1126,11 @@ export class SqliteStorage implements IStorage {
       codexReasoningEffort: row.codex_reasoning_effort ?? DEFAULT_CONFIG.codexReasoningEffort,
       claudeModel: row.claude_model ?? DEFAULT_CONFIG.claudeModel,
       claudeEffort: row.claude_effort ?? DEFAULT_CONFIG.claudeEffort,
+      secondModelReviewEnabled: Boolean(
+        row.second_model_review_enabled ?? Number(DEFAULT_CONFIG.secondModelReviewEnabled),
+      ),
+      reviewAgent: row.review_agent ?? DEFAULT_CONFIG.reviewAgent,
+      reviewModel: row.review_model ?? DEFAULT_CONFIG.reviewModel,
       maxTurns: row.max_turns,
       batchWindowMs: row.batch_window_ms,
       pollIntervalMs: row.poll_interval_ms,
@@ -1177,6 +1191,9 @@ export class SqliteStorage implements IStorage {
           codex_reasoning_effort,
           claude_model,
           claude_effort,
+          second_model_review_enabled,
+          review_agent,
+          review_model,
           max_turns,
           batch_window_ms,
           poll_interval_ms,
@@ -1206,7 +1223,7 @@ export class SqliteStorage implements IStorage {
           trusted_reviewers_json,
           priority_issue_authors_json,
           ignored_bots_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           github_token = excluded.github_token,
           github_tokens_json = excluded.github_tokens_json,
@@ -1219,6 +1236,9 @@ export class SqliteStorage implements IStorage {
           codex_reasoning_effort = excluded.codex_reasoning_effort,
           claude_model = excluded.claude_model,
           claude_effort = excluded.claude_effort,
+          second_model_review_enabled = excluded.second_model_review_enabled,
+          review_agent = excluded.review_agent,
+          review_model = excluded.review_model,
           max_turns = excluded.max_turns,
           batch_window_ms = excluded.batch_window_ms,
           poll_interval_ms = excluded.poll_interval_ms,
@@ -1261,6 +1281,9 @@ export class SqliteStorage implements IStorage {
         config.codexReasoningEffort,
         config.claudeModel,
         config.claudeEffort,
+        Number(config.secondModelReviewEnabled),
+        config.reviewAgent,
+        config.reviewModel,
         config.maxTurns,
         config.batchWindowMs,
         config.pollIntervalMs,
@@ -2104,7 +2127,8 @@ export class SqliteStorage implements IStorage {
   async getConfig(): Promise<Config> {
     const row = this.get<ConfigRow>(`
       SELECT github_token, github_tokens_json, web_username, web_password, coding_agent, fallback_to_next_coding_agent, model,
-             codex_model, codex_reasoning_effort, claude_model, claude_effort, max_turns, batch_window_ms,
+             codex_model, codex_reasoning_effort, claude_model, claude_effort,
+             second_model_review_enabled, review_agent, review_model, max_turns, batch_window_ms,
              poll_interval_ms, max_changes_per_run, auto_resolve_merge_conflicts, auto_create_releases,
              auto_update_docs, auto_prs, auto_issues, include_repository_links_in_github_comments, github_comment_app_name,
              post_github_progress_replies,

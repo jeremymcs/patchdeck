@@ -5447,6 +5447,176 @@ test("babysitPR runs agent for docs-only work when docs assessment says needed",
   }
 });
 
+test("babysitPR runs the selected second-model reviewer before finalizing agent work", async (t) => {
+  const storage = new MemStorage();
+  await storage.updateConfig({
+    secondModelReviewEnabled: true,
+    reviewAgent: "claude",
+    reviewModel: "sonnet",
+  });
+  const pr = await storage.addPR({
+    number: 107,
+    title: "Review primary remediation",
+    repo: "alex-morgan-o/lolodex",
+    branch: "feature/review-pass",
+    author: "octocat",
+    url: "https://github.com/alex-morgan-o/lolodex/pull/107",
+    status: "watching",
+    feedbackItems: [],
+    accepted: 0,
+    rejected: 0,
+    flagged: 0,
+    testsPassed: null,
+    lintPassed: null,
+    lastChecked: null,
+  });
+
+  const applyCalls: Array<{
+    agent: string;
+    prompt: string;
+    settings?: { claudeModel?: string | null };
+  }> = [];
+  const healthChecks: string[] = [];
+  const worktreeRoot = await mkdtemp(path.join(os.tmpdir(), "codefactory-home-"));
+  const previousCodefactoryHome = process.env.CODEFACTORY_HOME;
+  process.env.CODEFACTORY_HOME = worktreeRoot;
+  t.after(() => {
+    if (previousCodefactoryHome === undefined) {
+      delete process.env.CODEFACTORY_HOME;
+    } else {
+      process.env.CODEFACTORY_HOME = previousCodefactoryHome;
+    }
+  });
+
+  const babysitter = new PRBabysitter(
+      storage,
+      {
+        ...makeWatcherGitHubService(),
+        fetchPullSummary: async () => makePullSummary(pr, { headSha: "abc123" }),
+        listFailingStatuses: async () => [],
+        checkCISettled: async () => true,
+      },
+      {
+        checkAgentHealth: async (agent) => {
+          healthChecks.push(agent);
+          return { ok: true };
+        },
+        resolveAgent: async () => "codex",
+        ciPollIntervalMs: 0,
+        evaluateFixNecessityWithAgent: async () => ({
+          needsFix: true,
+          reason: "README needs an update",
+        }),
+        applyFixesWithAgent: async ({ agent, prompt, settings }) => {
+          applyCalls.push({ agent, prompt, settings });
+          if (applyCalls.length === 1) {
+            return {
+              code: 0,
+              stdout: "DOCS_SUMMARY_START changed\nUpdated README.\nDOCS_SUMMARY_END\n",
+              stderr: "",
+            };
+          }
+          return { code: 0, stdout: "Reviewed and corrected the diff.\n", stderr: "" };
+        },
+        runCommand: makeGitRunCommand({ localHeadSha: "def456", remoteHeadSha: "def456" }),
+      },
+    );
+
+  await babysitter.babysitPR(pr.id, "codex");
+
+  assert.equal(applyCalls.length, 2);
+  assert.equal(applyCalls[0]?.agent, "codex");
+  assert.equal(applyCalls[1]?.agent, "claude");
+  assert.equal(applyCalls[1]?.settings?.claudeModel, "sonnet");
+  assert.match(applyCalls[1]?.prompt ?? "", /Review the primary coding agent's uncommitted work/i);
+  assert.match(applyCalls[1]?.prompt ?? "", /Do not commit or push/i);
+  assert.deepEqual(healthChecks, ["codex", "claude"]);
+
+  const logs = await storage.getLogs(pr.id);
+  assert.ok(logs.some((log) => log.phase === "review.agent" && log.message.includes("completed successfully")));
+});
+
+test("babysitPR does not bypass a failed second-model review with code-owner fallback", async (t) => {
+  const storage = new MemStorage();
+  await storage.updateConfig({
+    secondModelReviewEnabled: true,
+    reviewAgent: "claude",
+    reviewModel: "sonnet",
+  });
+  const pr = await storage.addPR({
+    number: 108,
+    title: "Stop on review failure",
+    repo: "alex-morgan-o/lolodex",
+    branch: "feature/review-failure",
+    author: "octocat",
+    url: "https://github.com/alex-morgan-o/lolodex/pull/108",
+    status: "watching",
+    feedbackItems: [],
+    accepted: 0,
+    rejected: 0,
+    flagged: 0,
+    testsPassed: null,
+    lintPassed: null,
+    lastChecked: null,
+  });
+
+  let applyCalls = 0;
+  const worktreeRoot = await mkdtemp(path.join(os.tmpdir(), "codefactory-home-"));
+  const previousCodefactoryHome = process.env.CODEFACTORY_HOME;
+  process.env.CODEFACTORY_HOME = worktreeRoot;
+  t.after(() => {
+    if (previousCodefactoryHome === undefined) {
+      delete process.env.CODEFACTORY_HOME;
+    } else {
+      process.env.CODEFACTORY_HOME = previousCodefactoryHome;
+    }
+  });
+
+  const babysitter = new PRBabysitter(
+      storage,
+      {
+        ...makeWatcherGitHubService(),
+        fetchPullSummary: async () => makePullSummary(pr, { headSha: "abc123" }),
+        listFailingStatuses: async () => [],
+        checkCISettled: async () => true,
+      },
+      {
+        checkAgentHealth: async () => ({ ok: true }),
+        resolveAgent: async () => "codex",
+        ciPollIntervalMs: 0,
+        evaluateFixNecessityWithAgent: async () => ({
+          needsFix: true,
+          reason: "README needs an update",
+        }),
+        applyFixesWithAgent: async () => {
+          applyCalls += 1;
+          if (applyCalls === 1) {
+            return {
+              code: 0,
+              stdout: "DOCS_SUMMARY_START changed\nUpdated README.\nDOCS_SUMMARY_END\n",
+              stderr: "",
+            };
+          }
+          if (applyCalls === 2) {
+            return { code: 1, stdout: "", stderr: "review model unavailable" };
+          }
+          return { code: 0, stdout: "fallback pushed without review", stderr: "" };
+        },
+        runCommand: makeGitRunCommand({ localHeadSha: "def456", remoteHeadSha: "def456" }),
+      },
+    );
+
+  await assert.rejects(
+    babysitter.babysitPR(pr.id, "codex", { rethrowOnFailure: true, jobAttemptCount: 99 }),
+    /claude second-model review failed.*review model unavailable/i,
+  );
+
+  assert.equal(applyCalls, 2);
+  const runs = await storage.listAgentRuns({ prId: pr.id });
+  assert.equal(runs[0]?.status, "failed");
+  assert.notEqual(runs[0]?.phase, "code-owner-fallback.completed");
+});
+
 test("babysitPR allows docs no_change outcome after inspection", async () => {
   const storage = new MemStorage();
   const pr = await storage.addPR({
@@ -7777,9 +7947,14 @@ test("babysitPR records conflict repair failure when agent leaves conflict marke
   delete process.env.CODEFACTORY_HOME;
 });
 
-test("babysitPR commits agent-resolved conflicts even when the agent does not stage them", async () => {
+test("babysitPR reviews agent-resolved conflicts before committing them", async (t) => {
   const storage = new MemStorage();
-  await storage.updateConfig({ autoUpdateDocs: false });
+  await storage.updateConfig({
+    autoUpdateDocs: false,
+    secondModelReviewEnabled: true,
+    reviewAgent: "claude",
+    reviewModel: "sonnet",
+  });
   const pr = await storage.addPR({
     number: 106,
     title: "Verbose PR",
@@ -7798,7 +7973,15 @@ test("babysitPR commits agent-resolved conflicts even when the agent does not st
   });
 
   const worktreeRoot = await mkdtemp(path.join(os.tmpdir(), "codefactory-home-"));
+  const previousCodefactoryHome = process.env.CODEFACTORY_HOME;
   process.env.CODEFACTORY_HOME = worktreeRoot;
+  t.after(() => {
+    if (previousCodefactoryHome === undefined) {
+      delete process.env.CODEFACTORY_HOME;
+    } else {
+      process.env.CODEFACTORY_HOME = previousCodefactoryHome;
+    }
+  });
   const pullSummary = makePullSummary(pr, { mergeable: false });
   const gitRunner = makeGitRunCommand({
     localHeadSha: "merge123",
@@ -7807,7 +7990,9 @@ test("babysitPR commits agent-resolved conflicts even when the agent does not st
   // The agent resolves the conflict by editing the file but never stages it,
   // so the unmerged index entries persist until PatchDeck stages them.
   let staged = false;
+  let committed = false;
   let conflictAgentCalled = false;
+  const finalizationOrder: string[] = [];
 
   const babysitter = new PRBabysitter(
     storage,
@@ -7826,6 +8011,7 @@ test("babysitPR commits agent-resolved conflicts even when the agent does not st
       updateStatusReply: async () => {},
     },
     {
+      checkAgentHealth: async () => ({ ok: true }),
       resolveAgent: async () => "codex",
       ciPollIntervalMs: 0,
       evaluateFixNecessityWithAgent: async () => ({
@@ -7833,8 +8019,12 @@ test("babysitPR commits agent-resolved conflicts even when the agent does not st
         reason: "No fix needed",
       }),
       applyFixesWithAgent: async ({ prompt }) => {
-        conflictAgentCalled = true;
-        assert.match(prompt, /merge conflicts/i);
+        if (prompt.includes("merge conflicts")) {
+          conflictAgentCalled = true;
+          return { code: 0, stdout: "resolved\n", stderr: "" };
+        }
+        assert.match(prompt, /Review the primary coding agent's uncommitted work/i);
+        finalizationOrder.push("review");
         return { code: 0, stdout: "resolved\n", stderr: "" };
       },
       runCommand: async (command: string, args: string[], opts?: Record<string, unknown>) => {
@@ -7844,6 +8034,14 @@ test("babysitPR commits agent-resolved conflicts even when the agent does not st
         if (command === "git" && args[0] === "add") {
           staged = true;
           return { code: 0, stdout: "", stderr: "" };
+        }
+        if (command === "git" && args[0] === "status" && staged && !committed) {
+          return { code: 0, stdout: "M  src/conflict.ts\n", stderr: "" };
+        }
+        if (command === "git" && args[0] === "commit") {
+          committed = true;
+          finalizationOrder.push("commit");
+          return { code: 0, stdout: "committed\n", stderr: "" };
         }
         if (command === "git" && args[0] === "diff" && args[1] === "--name-only" && args[2] === "--diff-filter=U") {
           return { code: 0, stdout: staged ? "" : "src/conflict.ts\n", stderr: "" };
@@ -7861,11 +8059,10 @@ test("babysitPR commits agent-resolved conflicts even when the agent does not st
 
   assert.equal(conflictAgentCalled, true);
   assert.equal(staged, true, "PatchDeck should stage agent-resolved conflict files");
+  assert.deepEqual(finalizationOrder, ["review", "commit"]);
   assert.equal(updated?.status, "watching");
   assert.equal(runs[0]?.status, "completed");
-  assert.ok(logs.some((log) => log.phase === "conflict" && log.message.includes("Merge conflicts resolved and committed")));
-
-  delete process.env.CODEFACTORY_HOME;
+  assert.ok(logs.some((log) => log.phase === "review.agent" && log.message.includes("completed successfully")));
 });
 
 test("babysitPR skips conflict resolution when autoResolveMergeConflicts is disabled", async () => {

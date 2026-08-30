@@ -201,6 +201,7 @@ export type AgentRun = z.infer<typeof agentRunSchema>;
 export const agentWorkKindEnum = z.enum([
   "babysit_pr",
   "evaluate_feedback",
+  "review_work",
   "work_issue",
   "decompose_issue",
   "verify_issue",
@@ -779,6 +780,9 @@ export const configSchema = z.object({
   codexReasoningEffort: codexReasoningEffortSchema,
   claudeModel: z.string(),
   claudeEffort: claudeEffortSchema,
+  secondModelReviewEnabled: z.boolean(),
+  reviewAgent: codingAgentSchema,
+  reviewModel: z.string(),
   maxTurns: z.number(),
   batchWindowMs: z.number(),
   pollIntervalMs: z.number(),
@@ -828,6 +832,18 @@ export const watchedRepoSchema = z.object({
   agentInstructions: z.string().default(""),
 });
 export type WatchedRepo = z.infer<typeof watchedRepoSchema>;
+
+export const agentModelOptionSchema = z.object({
+  value: z.string(),
+  label: z.string(),
+});
+export type AgentModelOption = z.infer<typeof agentModelOptionSchema>;
+
+export const agentModelCatalogSchema = z.object({
+  codex: z.array(agentModelOptionSchema),
+  claude: z.array(agentModelOptionSchema),
+});
+export type AgentModelCatalog = z.infer<typeof agentModelCatalogSchema>;
 
 export const appUpdateStatusSchema = z.object({
   currentVersion: z.string(),

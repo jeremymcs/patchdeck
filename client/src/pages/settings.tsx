@@ -2,7 +2,8 @@ import { useEffect, useState, type ReactNode } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { getRepoHref } from "@/lib/repoHref";
-import type { Config, ReleaseRun, RuntimeState, WatchedRepo } from "@shared/schema";
+import { buildReviewModelOptions, findReviewModelSelection } from "@/lib/agentModelOptions";
+import type { AgentModelCatalog, AgentModelOption, Config, ReleaseRun, RuntimeState, WatchedRepo } from "@shared/schema";
 import { AppHeader } from "@/components/AppHeader";
 import { UpdateBanner } from "@/components/UpdateBanner";
 import { toast } from "@/hooks/use-toast";
@@ -50,21 +51,20 @@ const DEFAULT_SETTING_VALUES = {
   deploymentCheckPollSeconds: 60,
 };
 
-const CODEX_MODEL_OPTIONS = [
-  { value: "", label: "CLI default" },
-  { value: "gpt-5.5", label: "gpt-5.5" },
-  { value: "gpt-5.4", label: "gpt-5.4" },
-  { value: "gpt-5.4-mini", label: "gpt-5.4-mini" },
-  { value: "gpt-5.3-codex", label: "gpt-5.3-codex" },
-  { value: "gpt-5.3-codex-spark", label: "gpt-5.3-codex-spark" },
-  { value: "gpt-5.2", label: "gpt-5.2" },
-] as const;
+const EMPTY_AGENT_MODEL_CATALOG: AgentModelCatalog = {
+  codex: [{ value: "", label: "CLI default" }],
+  claude: [{ value: "", label: "CLI default" }],
+};
 
-const CLAUDE_MODEL_OPTIONS = [
-  { value: "", label: "CLI default" },
-  { value: "opus", label: "opus" },
-  { value: "sonnet", label: "sonnet" },
-] as const;
+function includeSelectedModel(
+  options: readonly AgentModelOption[],
+  selected: string | null | undefined,
+): AgentModelOption[] {
+  if (!selected || options.some((option) => option.value === selected)) {
+    return [...options];
+  }
+  return [...options, { value: selected, label: selected }];
+}
 
 const CODEX_REASONING_OPTIONS = [
   { value: "default", label: "CLI default" },
@@ -406,6 +406,23 @@ export default function Settings() {
   const { data: config } = useQuery<Config>({
     queryKey: ["/api/config"],
   });
+  const { data: agentModelCatalog } = useQuery<AgentModelCatalog>({
+    queryKey: ["/api/agent-models"],
+    staleTime: 60_000,
+  });
+  const modelCatalog = agentModelCatalog ?? EMPTY_AGENT_MODEL_CATALOG;
+  const codexModelOptions = includeSelectedModel(modelCatalog.codex, config?.codexModel);
+  const claudeModelOptions = includeSelectedModel(modelCatalog.claude, config?.claudeModel);
+  const primaryModel = config?.codingAgent === "codex"
+    ? config.codexModel
+    : config?.claudeModel ?? "";
+  const reviewModelOptions = buildReviewModelOptions(modelCatalog, {
+    agent: config?.codingAgent ?? "claude",
+    model: primaryModel,
+  });
+  const selectedReviewOption = reviewModelOptions.find((option) =>
+    option.agent === config?.reviewAgent && option.model === config.reviewModel
+  );
 
   const [newGithubToken, setNewGithubToken] = useState("");
   const [showTokenInput, setShowTokenInput] = useState(false);
@@ -494,6 +511,7 @@ export default function Settings() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/config"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/agent-models"] });
       queryClient.invalidateQueries({ queryKey: ["/api/onboarding/status"] });
       queryClient.invalidateQueries({ queryKey: ["/api/github-auth/status"] });
       toast({ description: "Settings saved." });
@@ -1044,7 +1062,7 @@ export default function Settings() {
                             className="border border-border bg-transparent px-2 py-1 text-body focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
                           >
                             <option value="">Global</option>
-                            {CODEX_MODEL_OPTIONS.filter((option) => option.value !== "").map((option) => (
+                            {includeSelectedModel(codexModelOptions, repo.codexModel).filter((option) => option.value !== "").map((option) => (
                               <option key={option.value} value={option.value}>{option.label}</option>
                             ))}
                           </select>
@@ -1090,7 +1108,7 @@ export default function Settings() {
                             className="border border-border bg-transparent px-2 py-1 text-body focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
                           >
                             <option value="">Global</option>
-                            {CLAUDE_MODEL_OPTIONS.filter((option) => option.value !== "").map((option) => (
+                            {includeSelectedModel(claudeModelOptions, repo.claudeModel).filter((option) => option.value !== "").map((option) => (
                               <option key={option.value} value={option.value}>{option.label}</option>
                             ))}
                           </select>
@@ -1187,7 +1205,7 @@ export default function Settings() {
                     disabled={updateConfigMutation.isPending}
                     className="border border-border bg-transparent px-2 py-1 text-body focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
                   >
-                    {CODEX_MODEL_OPTIONS.map((option) => (
+                    {codexModelOptions.map((option) => (
                       <option key={option.value} value={option.value}>{option.label}</option>
                     ))}
                   </select>
@@ -1219,7 +1237,7 @@ export default function Settings() {
                     disabled={updateConfigMutation.isPending}
                     className="border border-border bg-transparent px-2 py-1 text-body focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
                   >
-                    {CLAUDE_MODEL_OPTIONS.map((option) => (
+                    {claudeModelOptions.map((option) => (
                       <option key={option.value} value={option.value}>{option.label}</option>
                     ))}
                   </select>
@@ -1236,6 +1254,50 @@ export default function Settings() {
                     className="border border-border bg-transparent px-2 py-1 text-body focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
                   >
                     {CLAUDE_EFFORT_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="grid gap-3 border-t border-border pt-4 md:grid-cols-[minmax(0,1fr)_minmax(14rem,auto)] md:items-center">
+                <label className="flex items-start gap-3">
+                  <input
+                    type="checkbox"
+                    checked={config?.secondModelReviewEnabled ?? false}
+                    onChange={(e) => updateConfigMutation.mutate({ secondModelReviewEnabled: e.target.checked })}
+                    disabled={updateConfigMutation.isPending || !selectedReviewOption}
+                    className="mt-1 h-4 w-4 accent-foreground"
+                    data-testid="checkbox-second-model-review"
+                  />
+                  <span>
+                    <span className="block text-body">Second-model review</span>
+                    <span className="block text-label text-muted-foreground">
+                      Review and correct the primary agent&apos;s work before PatchDeck commits and pushes it.
+                    </span>
+                  </span>
+                </label>
+                <div className="grid gap-2">
+                  <label htmlFor="settings-review-model" className="text-label uppercase tracking-wider text-muted-foreground">
+                    Review model
+                  </label>
+                  <select
+                    id="settings-review-model"
+                    value={selectedReviewOption?.value ?? ""}
+                    onChange={(e) => {
+                      const selection = findReviewModelSelection(reviewModelOptions, e.target.value);
+                      if (selection) {
+                        updateConfigMutation.mutate({
+                          reviewAgent: selection.agent,
+                          reviewModel: selection.model,
+                        });
+                      }
+                    }}
+                    disabled={updateConfigMutation.isPending}
+                    className="border border-border bg-transparent px-2 py-1 text-body focus:border-primary focus:outline-none focus-visible:ring-1 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background disabled:opacity-50"
+                    data-testid="select-review-model"
+                  >
+                    <option value="" disabled>Choose a review model</option>
+                    {reviewModelOptions.map((option) => (
                       <option key={option.value} value={option.value}>{option.label}</option>
                     ))}
                   </select>

@@ -83,6 +83,9 @@ test("SqliteStorage reloads config and PR state from the same root", async () =>
     codexReasoningEffort: "high",
     claudeModel: "sonnet",
     claudeEffort: "xhigh",
+    secondModelReviewEnabled: true,
+    reviewAgent: "claude",
+    reviewModel: "sonnet",
     autoCreateReleases: false,
     autoUpdateDocs: false,
     autoPrs: false,
@@ -227,6 +230,9 @@ test("SqliteStorage reloads config and PR state from the same root", async () =>
   assert.equal(config.codexReasoningEffort, "high");
   assert.equal(config.claudeModel, "sonnet");
   assert.equal(config.claudeEffort, "xhigh");
+  assert.equal(config.secondModelReviewEnabled, true);
+  assert.equal(config.reviewAgent, "claude");
+  assert.equal(config.reviewModel, "sonnet");
   assert.equal(config.autoCreateReleases, false);
   assert.equal(config.autoUpdateDocs, false);
   assert.equal(config.autoPrs, false);

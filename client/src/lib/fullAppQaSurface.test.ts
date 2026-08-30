@@ -475,6 +475,7 @@ test("settings keeps the QA-tested configuration, token, and runtime controls wi
   const { sourceFile } = await parseProjectFile("client/src/pages/settings.tsx");
 
   assertHasQueryKey(sourceFile, "settings config query", "/api/config");
+  assertHasQueryKey(sourceFile, "detected agent models query", "/api/agent-models");
   assertHasQueryKey(sourceFile, "runtime query", "/api/runtime");
   assertHasQueryKey(sourceFile, "repo settings query", "/api/repos/settings");
   assertHasQueryKey(sourceFile, "GitHub auth status query", "/api/github-auth/status");
@@ -488,6 +489,16 @@ test("settings keeps the QA-tested configuration, token, and runtime controls wi
   assertHasApiRequest(sourceFile, "manual release mutation", "POST", "/api/repos/release");
 
   assertHasJsxAttribute(sourceFile, "id", "coding agent selector", "settings-coding-agent");
+  assertHasExpression(
+    sourceFile,
+    "review model selection maps to config fields",
+    /findReviewModelSelection\(reviewModelOptions,[\s\S]*?updateConfigMutation\.mutate\(\{[\s\S]*?reviewAgent: selection\.agent,[\s\S]*?reviewModel: selection\.model/,
+  );
+  assertHasExpression(
+    sourceFile,
+    "review toggle requires a selected model",
+    /disabled=\{updateConfigMutation\.isPending \|\| !selectedReviewOption\}/,
+  );
   for (const [label, testId] of [
     ["add PR input", "input-add-pr"],
     ["add PR submit", "button-add-pr"],
@@ -498,6 +509,8 @@ test("settings keeps the QA-tested configuration, token, and runtime controls wi
     ["remote access save", "button-save-remote-access"],
     ["repo sync action", "button-sync-repos"],
     ["fallback toggle", "checkbox-fallback-to-next-coding-agent"],
+    ["second-model review toggle", "checkbox-second-model-review"],
+    ["review model selector", "select-review-model"],
     ["auto fix conflicts toggle", "checkbox-auto-resolve-conflicts"],
     ["auto update docs toggle", "checkbox-auto-update-docs"],
     ["runtime drain button", "button-toggle-drain"],

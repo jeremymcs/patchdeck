@@ -172,6 +172,38 @@ test("GET/PATCH /api/config masks and persists ordered github tokens", async () 
   }
 });
 
+test("GET /api/agent-models returns the detected model catalog", async () => {
+  const harness = await createHarness(undefined, {
+    discoverAgentModelsFn: async () => ({
+      codex: [
+        { value: "", label: "CLI default" },
+        { value: "gpt-5.6-sol", label: "gpt-5.6-sol" },
+      ],
+      claude: [
+        { value: "", label: "CLI default" },
+        { value: "sonnet", label: "sonnet" },
+      ],
+    }),
+  });
+
+  try {
+    const response = await fetch(`${harness.baseUrl}/api/agent-models`);
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), {
+      codex: [
+        { value: "", label: "CLI default" },
+        { value: "gpt-5.6-sol", label: "gpt-5.6-sol" },
+      ],
+      claude: [
+        { value: "", label: "CLI default" },
+        { value: "sonnet", label: "sonnet" },
+      ],
+    });
+  } finally {
+    await harness.close();
+  }
+});
+
 test("PATCH /api/config preserves masked github tokens when reordering", async () => {
   const harness = await createHarness();
 

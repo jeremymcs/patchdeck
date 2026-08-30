@@ -3,7 +3,7 @@ import type { Server } from "http";
 import { Octokit } from "@octokit/rest";
 import { z } from "zod";
 import { claudeEffortSchema, codexReasoningEffortSchema, codingAgentSchema, configSchema, startReleaseSocialPostSchema } from "@shared/schema";
-import type { Config } from "@shared/schema";
+import type { AgentModelCatalog, Config } from "@shared/schema";
 import {
   createAppRuntime,
   type AppRuntime,
@@ -20,6 +20,7 @@ import {
   type LogRecord,
 } from "./logger";
 import { getRateLimitState } from "./rateLimitState";
+import { discoverAgentModels } from "./modelDiscovery";
 
 const VALID_LEVELS: LogLevel[] = ["trace", "debug", "info", "warn", "error", "fatal"];
 
@@ -131,6 +132,7 @@ export type RouteDependencies = AppRuntimeDependencies & {
   runtime?: AppRuntime;
   appUpdateChecker?: AppUpdateChecker;
   testGitHubTokensFn?: (config: Config, watchedRepos: string[]) => Promise<GitHubTokenTestResponse>;
+  discoverAgentModelsFn?: (config: Config) => Promise<AgentModelCatalog>;
 };
 
 type GitHubTokenTestStatus = "ok" | "throttled" | "error";
@@ -256,6 +258,7 @@ export async function registerRoutes(
   };
   const appUpdateChecker = dependencies.appUpdateChecker ?? createAppUpdateChecker();
   const testGitHubTokensFn = dependencies.testGitHubTokensFn ?? testGitHubTokens;
+  const discoverAgentModelsFn = dependencies.discoverAgentModelsFn ?? discoverAgentModels;
   await runtime.start();
 
   httpServer.on("close", () => {
@@ -822,6 +825,15 @@ export async function registerRoutes(
 
   app.get("/api/config", async (_req, res) => {
     res.json(maskConfig(await runtime.getConfig()));
+  });
+
+  app.get("/api/agent-models", async (_req, res) => {
+    try {
+      const config = await runtime.getConfig();
+      res.json(await discoverAgentModelsFn(config));
+    } catch (error: unknown) {
+      sendAppAwareError(res, error);
+    }
   });
 
   app.get("/api/github-auth/status", async (_req, res) => {
