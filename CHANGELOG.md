@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.0](https://github.com/jeremymcs/patchdeck/compare/v1.6.0...v1.7.0) (2026-08-30)
+
+
+### Features
+
+* **site:** add marketing landing page ([aa183a8](https://github.com/jeremymcs/patchdeck/commit/aa183a8eaa840e9ff84b37d11bec1001045abe73))
+
 ## [1.6.0](https://github.com/jeremymcs/patchdeck/compare/v1.5.0...v1.6.0) (2026-08-30)
 
 
