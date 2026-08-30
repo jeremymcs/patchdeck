@@ -27,6 +27,9 @@ describe("DEFAULT_CONFIG", () => {
       "codexReasoningEffort",
       "claudeModel",
       "claudeEffort",
+      "secondModelReviewEnabled",
+      "reviewAgent",
+      "reviewModel",
       "maxTurns",
       "batchWindowMs",
       "pollIntervalMs",
@@ -146,6 +149,12 @@ describe("DEFAULT_CONFIG", () => {
 
   it("does not fall back to another coding agent by default", () => {
     assert.equal(DEFAULT_CONFIG.fallbackToNextCodingAgent, false);
+  });
+
+  it("keeps second-model review opt-in", () => {
+    assert.equal(DEFAULT_CONFIG.secondModelReviewEnabled, false);
+    assert.equal(DEFAULT_CONFIG.reviewAgent, "codex");
+    assert.equal(DEFAULT_CONFIG.reviewModel, "");
   });
 
   it("uses CLI defaults for thinking unless configured", () => {

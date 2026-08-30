@@ -151,6 +151,13 @@ export class TerminalBabysitterError extends Error {
   }
 }
 
+class SecondModelReviewError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SecondModelReviewError";
+  }
+}
+
 type GitHubService = {
   addReactionToComment: typeof addReactionToComment;
   buildOctokit: typeof buildOctokit;
@@ -621,6 +628,37 @@ function buildAgentFixPrompt(params: {
     "   <A concise 1-2 sentence summary of the docs you updated, or why no docs changes were necessary after inspection>",
     "   DOCS_SUMMARY_END",
   ].join("\n");
+}
+
+function buildSecondModelReviewPrompt(params: {
+  pr: PR;
+  pullSummary: GitHubPullSummary;
+  agentInstructions: string;
+}): string {
+  const { pr, pullSummary, agentInstructions } = params;
+  return [
+    `Review the primary coding agent's uncommitted work for PR #${pr.number}: ${pr.title}`,
+    `PR URL: ${pr.url}`,
+    `Base branch: ${pullSummary.baseRef}`,
+    "",
+    "Inspect the current worktree diff and the surrounding code for correctness, regressions, security issues, and missing tests.",
+    "Fix any concrete issues you find directly in the worktree, then run the most relevant focused verification.",
+    "Keep the intended change intact and avoid unrelated refactors.",
+    "Do not commit or push; PatchDeck will finalize the work after this review.",
+    ...(agentInstructions.trim()
+      ? ["", "Repository-specific instructions:", agentInstructions.trim()]
+      : []),
+  ].join("\n");
+}
+
+function withReviewModel(
+  settings: AgentRuntimeSettings | undefined,
+  agent: CodingAgent,
+  model: string,
+): AgentRuntimeSettings {
+  return agent === "codex"
+    ? { ...settings, codexModel: model }
+    : { ...settings, claudeModel: model };
 }
 
 function buildCodeOwnerFallbackPrompt(params: {
@@ -4668,6 +4706,7 @@ export class PRBabysitter {
         remoteNameForLogs = remoteName;
 
         try {
+          let ranPrimaryAgentWork = false;
           await queueLog(pr.id, "info", `Worktree ready at ${worktreePath}`, {
             phase: "worktree",
             metadata: { remoteName, healed },
@@ -5041,6 +5080,7 @@ export class PRBabysitter {
                 phase: "conflict.agent",
                 metadata: { code: conflictResult.code },
               });
+              ranPrimaryAgentWork = true;
 
               // The agent resolves conflicts by editing worktree files but usually
               // does not stage them. Stage everything before the unmerged-index
@@ -5103,15 +5143,7 @@ export class PRBabysitter {
                 throw new Error(failureReason);
               }
 
-              await commitDirtyWorktree({
-                currentPrId: pr.id,
-                cwd: worktreePath,
-                commitArgs: ["commit", "--no-verify", "--no-edit"],
-                phase: "conflict",
-                context: "merge conflict resolution",
-              });
-
-              await queueLog(pr.id, "info", "Merge conflicts resolved and committed by PatchDeck", {
+              await queueLog(pr.id, "info", "Merge conflicts resolved and staged for finalization", {
                 phase: "conflict",
               });
             } else {
@@ -5218,6 +5250,82 @@ export class PRBabysitter {
             await updateRunRecord({
               phase: "run.agent-finished",
             });
+            ranPrimaryAgentWork = true;
+          }
+
+          if (ranPrimaryAgentWork && config.secondModelReviewEnabled) {
+            const reviewAgent = config.reviewAgent;
+            const primaryModel = resolveAgentModel(agent, agentSettings);
+            if (!config.reviewModel.trim()) {
+              throw new SecondModelReviewError("Second-model review requires an explicit review model");
+            }
+            if (reviewAgent === agent && config.reviewModel === primaryModel) {
+              throw new SecondModelReviewError(
+                `Second-model review must use a model other than the primary ${agent} model`,
+              );
+            }
+            const reviewSettings = withReviewModel(agentSettings, reviewAgent, config.reviewModel);
+            const reviewPrompt = buildSecondModelReviewPrompt({
+              pr,
+              pullSummary,
+              agentInstructions: repoAgentInstructions,
+            });
+            const reviewStdout = createChunkLogger(pr.id, "review.agent", "stdout", "info", AGENT_STREAM_LOG_LINE_LIMIT);
+            const reviewStderr = createChunkLogger(pr.id, "review.agent", "stderr", "info", AGENT_STREAM_LOG_LINE_LIMIT);
+            const githubToken = await this.github.resolveGitHubAuthToken(config);
+            const reviewEnv = githubToken
+              ? {
+                  ...process.env,
+                  GITHUB_TOKEN: githubToken,
+                  GH_TOKEN: githubToken,
+                }
+              : undefined;
+
+            await this.ensureAgentHealthy(reviewAgent, [pr.id]);
+            await queueLog(pr.id, "info", `Launching ${reviewAgent} for second-model review`, {
+              phase: "review.agent",
+              metadata: {
+                agent: reviewAgent,
+                model: config.reviewModel || null,
+                promptChars: reviewPrompt.length,
+              },
+            });
+            await updateRunRecord({ phase: "run.review-running" });
+
+            const reviewResult = await withAgentWork({
+              kind: "review_work",
+              repo: pr.repo,
+              targetId: pr.id,
+              agentRunId: runId,
+              model: resolveAgentModel(reviewAgent, reviewSettings),
+            }, () => this.runtime.applyFixesWithAgent({
+              agent: reviewAgent,
+              settings: reviewSettings,
+              cwd: worktreePath,
+              prompt: reviewPrompt,
+              env: reviewEnv,
+              onStdoutChunk: reviewStdout.onChunk,
+              onStderrChunk: reviewStderr.onChunk,
+            }));
+            await reviewStdout.flush();
+            await reviewStderr.flush();
+
+            if (reviewResult.code !== 0) {
+              const failureReason = formatConciseFailureReason(reviewResult.stderr || reviewResult.stdout);
+              throw new SecondModelReviewError(
+                `${reviewAgent} second-model review failed (${reviewResult.code}): ${failureReason}`,
+              );
+            }
+
+            await queueLog(pr.id, "info", `${reviewAgent} second-model review completed successfully`, {
+              phase: "review.agent",
+              metadata: {
+                agent: reviewAgent,
+                model: config.reviewModel || null,
+                code: reviewResult.code,
+              },
+            });
+            await updateRunRecord({ phase: "run.review-finished" });
           }
 
           await commitDirtyWorktree({
@@ -5808,7 +5916,8 @@ export class PRBabysitter {
           && !recoveryMode
           && !forcedFixPrompt
           && !isNonCritical
-          && !isAgentUnavailableError(error),
+          && !isAgentUnavailableError(error)
+          && !(error instanceof SecondModelReviewError)
         );
 
         if (shouldRunCodeOwnerFallback) {
